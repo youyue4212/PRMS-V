@@ -1,0 +1,71 @@
+=== 关于在配置界面直接修改ADC_CHANNELS的说明 ===
+
+问题：当前程序设置界面中没有ADC_CHANNELS的设置控件
+
+当前设置界面包含：
+1. Communication Settings (通信设置)
+2. Detector Settings (探测器设置) - HV, Threshold
+3. Control (控制) - Gain Stabilizer
+4. Device Control and Status (设备控制和状态)
+5. Raw packet logging (原始数据包记录)
+6. Data Auto-Save (数据自动保存)
+
+缺少：ADC_CHANNELS设置控件
+
+解决方案：
+1. 在Detector Settings组中添加ADC_CHANNELS设置控件
+2. 修改core/ui_base.py的add_widgets_to_setting_layout方法
+3. 添加QSpinBox控件让用户选择1024或4096
+4. 连接信号到配置更新方法
+
+修改示例：
+在Detector Settings组中添加以下代码：
+
+# 在det_group部分，在HV和Threshold设置之后添加：
+det_layout.addWidget(QLabel("ADC Channels:"), 2, 0)
+self.adc_channels_spin = QSpinBox()
+self.adc_channels_spin.setRange(1024, 4096)
+self.adc_channels_spin.setSingleStep(1024)
+self.adc_channels_spin.setValue(self.config.adc_channels)
+self.adc_channels_spin.valueChanged.connect(self.on_adc_channels_changed)
+det_layout.addWidget(self.adc_channels_spin, 2, 1)
+
+adc_set_btn = QPushButton("Set ADC Channels")
+adc_set_btn.clicked.connect(self.set_adc_channels)
+det_layout.addWidget(adc_set_btn, 2, 2)
+
+然后添加on_adc_channels_changed方法：
+
+def on_adc_channels_changed(self, value):
+    # 立即更新配置
+    self.config.update_settings(adc_channels=value)
+    self.config.save_settings()
+    self.log(f"ADC_CHANNELS配置已更新为{value}")
+
+def set_adc_channels(self):
+    # 按钮点击时设置ADC通道数
+    value = self.adc_channels_spin.value()
+    self.config.update_settings(adc_channels=value)
+    self.config.save_settings()
+    self.log(f"ADC_CHANNELS已设置为{value}")
+    QMessageBox.information(self, "设置成功", f"ADC通道数已设置为{value}，重启程序后生效")
+
+注意：
+1. 修改配置后需要重启程序才能生效
+2. 程序重启后会从QSettings读取新的ADC_CHANNELS值
+3. 图表和数组会根据新的通道数重新初始化
+
+当前状态：
+1. 可以使用我们创建的脚本修改配置（change_adc_config.py）
+2. 程序设置界面中没有ADC_CHANNELS控件
+3. 需要修改代码添加此功能
+
+替代方案：
+如果不修改代码，可以使用以下方法：
+1. 运行脚本：python change_adc_config.py 1024 或 python change_adc_config.py 4096
+2. 手动编辑注册表（Windows）或配置文件（Linux）
+3. 在Python交互环境中执行命令修改配置
+
+建议：
+如果经常需要修改ADC_CHANNELS，建议修改代码添加UI控件。
+如果偶尔修改，使用脚本更方便。

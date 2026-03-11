@@ -1,0 +1,7 @@
+# U盘插入自动导出数据规则
+# 将此文件保存为 /etc/udev/rules.d/99-usb-export.rules
+
+ACTION=="add", SUBSYSTEM=="block", KERNEL=="sd*[0-9]", ENV{ID_FS_TYPE}!="", TAG+="systemd", ENV{SYSTEMD_WANTS}="spectrometer-usb-export@%k.service"
+
+# 注意：KERNEL=="sd*[0-9]" 只匹配分区（如sda1, sdb1等），不匹配设备本身（如sda）
+# 确保脚本有执行权限：chmod +x /home/raysen/user/daq_tablet/export_to_usb.sh

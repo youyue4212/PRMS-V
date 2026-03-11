@@ -1,0 +1,47 @@
+=== 关于 config.py 中配置加载的解释 ===
+
+在 core/config.py 第12行：
+  self.adc_channels = self.settings.value("ADC_CHANNELS", 4096, int)
+
+这行代码的作用：
+1. 从QSettings中读取"ADC_CHANNELS"的值
+2. 如果QSettings中没有这个键，使用默认值4096
+3. 将读取的值赋给 self.adc_channels
+
+为什么不能直接修改这里的4096：
+1. 这是默认值，不是实际配置值
+2. 修改代码需要重新编译/部署程序
+3. 不会影响已经保存的配置（QSettings中的值）
+4. 如果QSettings中有值，会使用QSettings的值，忽略默认值
+
+正确的修改方法：
+1. 修改QSettings中的值（我们之前做的）
+2. 使用 update_settings 方法：
+   config.update_settings(adc_channels=1024)
+   config.save_settings()
+3. 使用我们创建的脚本：
+   python change_adc_config.py 1024
+
+当前配置状态：
+QSettings中的ADC_CHANNELS值: 1024
+
+程序启动时：
+1. 会从QSettings读取值: 1024
+2. 如果QSettings没有值，才会使用默认值4096
+3. 因为QSettings有值1024，所以使用1024
+
+=== 配置加载流程 ===
+1. 程序启动
+2. ConfigManager初始化
+3. load_settings()被调用
+4. 从QSettings读取ADC_CHANNELS值
+5. 如果QSettings有值 → 使用该值
+6. 如果QSettings无值 → 使用默认值4096
+7. 将值赋给self.adc_channels
+8. 程序其他部分使用self.adc_channels
+
+=== 总结 ===
+- 修改代码中的默认值4096 → 错误的方法
+- 修改QSettings中的值 → 正确的方法
+- 我们已经将QSettings中的值从1024改为4096，又改回1024
+- 程序重启后会使用QSettings中的值1024

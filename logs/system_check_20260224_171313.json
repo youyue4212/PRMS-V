@@ -1,0 +1,15 @@
+{
+  "timestamp": "2026-02-24T17:13:13.462863",
+  "checks": [
+    {
+      "name": "Serial Devices",
+      "status": "ERROR",
+      "message": "Error checking serial devices: name 'search_serial_devices' is not defined"
+    },
+    {
+      "name": "Disk Space",
+      "status": "OK",
+      "message": "89.6 GB free"
+    }
+  ]
+}

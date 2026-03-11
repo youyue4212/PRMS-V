@@ -1,0 +1,53 @@
+=== 方法2：手动Python命令详解 ===
+
+方法2指的是在Python交互环境或脚本中直接执行命令修改配置。
+
+执行位置：
+1. Python交互式环境（Python Shell）
+   - 打开命令提示符或终端
+   - 输入 python 进入交互模式
+   - 执行以下命令：
+
+     from PyQt5.QtCore import QSettings
+     s = QSettings("Raysen", "Spectrometer")
+     s.setValue("ADC_CHANNELS", 1024)  # 或4096
+     s.sync()
+     print("配置已修改")
+
+2. 创建临时Python脚本
+   - 创建一个新的.py文件，如 fix_config.py
+   - 写入上述代码
+   - 运行脚本：python fix_config.py
+
+3. 在现有Python环境中
+   - 如果已经有Python环境运行（如Jupyter Notebook）
+   - 直接执行上述代码即可
+
+实际修改位置：
+这些命令修改的是QSettings存储的配置，具体位置取决于操作系统：
+- Windows: 注册表 HKEY_CURRENT_USER\Software\Raysen\Spectrometer
+- Linux: ~/.config/Raysen/Spectrometer.conf
+- macOS: ~/Library/Preferences/com.Raysen.Spectrometer.plist
+
+验证修改：
+执行后可以使用以下命令验证：
+  from PyQt5.QtCore import QSettings
+  s = QSettings("Raysen", "Spectrometer")
+  print(s.value("ADC_CHANNELS", 4096, int))
+
+=== 实际示例 ===
+当前目录中已经创建了以下工具：
+1. change_adc_config.py - 配置修改脚本
+2. fix_config.py - 简单的配置查看脚本
+
+使用方法：
+# 查看当前配置
+python change_adc_config.py
+
+# 改为1024
+python change_adc_config.py 1024
+
+# 改为4096
+python change_adc_config.py 4096
+
+注意：修改配置后需要重启程序才能生效。

@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=Gamma-ray Spectrometer
+Comment=Radiation Spectrometer Data Acquisition Software
+Exec=/bin/bash -c "cd '$HOME/user/daq_tablet' && ./start_spectrometer_absolute.sh > '$HOME/spectrometer.log' 2>&1"
+Icon=$HOME/daq_tablet/core/icons/icon.png
+Terminal=true
+Type=Application
+Categories=Science;Education;Utility;
+Keywords=spectrometer;radiation;gamma;data acquisition;
+StartupNotify=true
+X-MultipleArgs=false
