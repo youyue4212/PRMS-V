@@ -1,4 +1,4 @@
-# 光谱仪程序使用文档（Ubuntu 20.04）
+# 使用文档（Ubuntu 20.04）
 
 ## 1. 适用范围
 - 适用于 Ubuntu 20.04 及其他带 systemd/udev 的 Linux。
@@ -77,7 +77,7 @@ sudo systemctl status spectrometer-usb-export@sda1.service --no-pager -l
 sudo journalctl -u spectrometer-usb-export@sda1.service -n 80 --no-pager
 ```
 
----
+
 
 ## 6. 常见问题
 ### 6.1 Windows 看不到导出文件
