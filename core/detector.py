@@ -40,8 +40,8 @@ class SpectrumPacket:
     temperature: int
     HV: int
     counter: int
-    product_id: int  # ²úÆ·ID
-    sen_coef: int    # ±¨¾¯ÁéÃô¶ÈÏµÊý(1-100)
+    product_id: int  # ï¿½ï¿½Æ·ID
+    sen_coef: int    # ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ïµï¿½ï¿½(1-100)
     adc_channels: int 
     ADC: list
 
@@ -56,58 +56,82 @@ class DevMessage:
 
 def search_serial_devices():
     """
-    Safely search for available serial devices
-    No longer sends data to unknown devices to prevent microcontroller deadlock
+    Search for available serial devices with two-stage strategy:
+    1. First try VID/PID detection for CH340 device (fast and precise)
+    2. If not found, fallback to generic platform-specific detection
+
+    Returns: list of available port device strings
     """
+    import serial.tools.list_ports
+
+    VID_CH340 = 0x1A86
+    PID_CH340 = 0x7523
+
+    available_ports = []
+
+    # Stage 1: Try VID/PID detection for CH340
+    for port_info in serial.tools.list_ports.comports():
+        if port_info.vid == VID_CH340 and port_info.pid == PID_CH340:
+            try:
+                s = serial.Serial(port_info.device, timeout=0.1)
+                s.close()
+                available_ports.append(port_info.device)
+            except (OSError, serial.SerialException):
+                pass
+
+    # If CH340 found, return immediately
+    if available_ports:
+        return available_ports
+
+    # Stage 2: Fallback to generic detection
     ports = []
     if sys.platform.startswith('linux'):
-        # Ìí¼ÓÊ÷Ý®ÅÉÌØ¶¨µÄ´®¿ÚÉè±¸
-        # ×¢Òâ£º/dev/serial ÊÇÒ»¸öÄ¿Â¼£¬²»ÊÇÉè±¸ÎÄ¼þ
-        # ÎÒÃÇÓ¦¸ÃËÑË÷ /dev/serial/by-id/* »ò /dev/serial/by-path/* ¶ø²»ÊÇ /dev/serial ±¾Éí
+        # ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ý®ï¿½ï¿½ï¿½Ø¶ï¿½ï¿½Ä´ï¿½ï¿½ï¿½ï¿½è±¸
+        # ×¢ï¿½â£º/dev/serial ï¿½ï¿½Ò»ï¿½ï¿½Ä¿Â¼ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½è±¸ï¿½Ä¼ï¿½
+        # ï¿½ï¿½ï¿½ï¿½Ó¦ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ /dev/serial/by-id/* ï¿½ï¿½ /dev/serial/by-path/* ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ /dev/serial ï¿½ï¿½ï¿½ï¿½
         ports = glob.glob('/dev/ttyUSB*') + glob.glob('/dev/rfcomm*') + \
                 glob.glob('/dev/ttyAMA*') + glob.glob('/dev/ttyS*') + \
                 glob.glob('/dev/serial/by-id/*') + glob.glob('/dev/serial/by-path/*')
-        
-        # Ìí¼Ó³£¼ûµÄÊ÷Ý®ÅÉ´®¿ÚÉè±¸
-        # Ê÷Ý®ÅÉ5¿ÉÄÜÓÐ²»Í¬µÄ´®¿ÚÉè±¸
+
+        # ï¿½ï¿½ï¿½Ó³ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ý®ï¿½É´ï¿½ï¿½ï¿½ï¿½è±¸
+        # ï¿½ï¿½Ý®ï¿½ï¿½5ï¿½ï¿½ï¿½ï¿½ï¿½Ð²ï¿½Í¬ï¿½Ä´ï¿½ï¿½ï¿½ï¿½è±¸
         ports += ['/dev/ttyAMA0', '/dev/ttyAMA1', '/dev/ttyAMA2', '/dev/ttyAMA3',
                   '/dev/ttyAMA4', '/dev/ttyAMA5', '/dev/ttyAMA6', '/dev/ttyAMA7',
                   '/dev/ttyAMA8', '/dev/ttyAMA9', '/dev/ttyAMA10']
-        
-        # È¥ÖØ
+
+        # È¥ï¿½ï¿½
         ports = list(set(ports))
     elif sys.platform.startswith('win'):
         ports = ['COM' + str(i + 1) for i in range(16)]
     elif sys.platform.startswith('darwin'):
         ports = glob.glob('/dev/tty.*')
 
-    available_ports = []
     for port in ports:
         try:
-            # Ìø¹ýÄ¿Â¼£¬Ö»´¦ÀíÎÄ¼þ
+            # ï¿½ï¿½ï¿½ï¿½Ä¿Â¼ï¿½ï¿½Ö»ï¿½ï¿½ï¿½ï¿½ï¿½Ä¼ï¿½
             import os
             if os.path.isdir(port):
                 continue
-                
+
             # Only test if port can be opened, don't send any data
             # Reduced timeout from 0.5 to 0.1 seconds for faster scanning
             s = serial.Serial(port, timeout=0.1)
             s.close()
             available_ports.append(port)
         except (OSError, serial.SerialException) as e:
-            # ¼ÇÂ¼µ÷ÊÔÐÅÏ¢µ«²»ÏÔÊ¾¸øÓÃ»§
+            # ï¿½ï¿½Â¼ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ï¢ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ê¾ï¿½ï¿½ï¿½Ã»ï¿½
             pass
-    
-    # Èç¹ûÃ»ÓÐÕÒµ½¿ÉÓÃ¶Ë¿Ú£¬·µ»ØÒ»¸öºÏÀíµÄÄ¬ÈÏÁÐ±í¹©ÓÃ»§Ñ¡Ôñ
+
+    # ï¿½ï¿½ï¿½Ã»ï¿½ï¿½ï¿½Òµï¿½ï¿½ï¿½ï¿½Ã¶Ë¿Ú£ï¿½ï¿½ï¿½ï¿½ï¿½Ò»ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ä¬ï¿½ï¿½ï¿½Ð±ï¿½ï¿½ï¿½ï¿½Ã»ï¿½Ñ¡ï¿½ï¿½
     if not available_ports:
-        # ·µ»Ø³£¼ûµÄ¿ÉÄÜ¶Ë¿Ú£¬µ«²»°üÀ¨Ä¿Â¼
+        # ï¿½ï¿½ï¿½Ø³ï¿½ï¿½ï¿½ï¿½Ä¿ï¿½ï¿½Ü¶Ë¿Ú£ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ä¿Â¼
         if sys.platform.startswith('linux'):
             available_ports = ['/dev/ttyUSB0', '/dev/ttyAMA0', '/dev/ttyS0']
         elif sys.platform.startswith('win'):
             available_ports = ['COM1', 'COM2', 'COM3', 'COM4']
         elif sys.platform.startswith('darwin'):
             available_ports = ['/dev/tty.usbserial', '/dev/tty.usbmodem']
-    
+
     return available_ports
 
 class SerialPacketWorker(QObject):
@@ -153,18 +177,18 @@ class SerialPacketWorker(QObject):
         return self.stats
     
     def connect_serial(self, port: str, baudrate: int):
-        max_retries = 1  # ½øÒ»²½¼õÉÙÖØÊÔ´ÎÊý´Ó2´Îµ½1´Î£¨µ±Ã»ÓÐUSBÉè±¸Ê±£¬ÖØÊÔÃ»ÓÐÒâÒå£©
-        retry_delay = 0.2  # Ãë£¬¼õÉÙÖØÊÔÑÓ³Ù´Ó0.5Ãëµ½0.2Ãë
+        max_retries = 1  # ï¿½ï¿½Ò»ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ô´ï¿½ï¿½ï¿½ï¿½ï¿½2ï¿½Îµï¿½1ï¿½Î£ï¿½ï¿½ï¿½Ã»ï¿½ï¿½USBï¿½è±¸Ê±ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ã»ï¿½ï¿½ï¿½ï¿½ï¿½å£©
+        retry_delay = 0.2  # ï¿½ë£¬ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ó³Ù´ï¿½0.5ï¿½ëµ½0.2ï¿½ï¿½
         
         for attempt in range(max_retries):
             try:
                 if self.ser and self.ser.is_open:
                     self.ser.close()
                 
-                # ¼õÉÙ³¬Ê±Ê±¼ä´Ó1.0Ãëµ½0.5Ãë£¬¼Ó¿ìÁ¬½Ó³¢ÊÔ
+                # ï¿½ï¿½ï¿½Ù³ï¿½Ê±Ê±ï¿½ï¿½ï¿½1.0ï¿½ëµ½0.5ï¿½ë£¬ï¿½Ó¿ï¿½ï¿½ï¿½ï¿½Ó³ï¿½ï¿½ï¿½
                 self.ser = serial.Serial(port, baudrate, timeout=0.5, write_timeout=0.5)
                 
-                # ¼õÉÙµÈ´ýÊ±¼ä´Ó0.1Ãëµ½0.05Ãë
+                # ï¿½ï¿½ï¿½ÙµÈ´ï¿½Ê±ï¿½ï¿½ï¿½0.1ï¿½ëµ½0.05ï¿½ï¿½
                 time.sleep(0.05)
                 
                 self.connection_status_changed.emit(True, f"Connected to {port} (attempt {attempt + 1}/{max_retries})")
@@ -290,15 +314,15 @@ class SerialPacketWorker(QObject):
         elif packet_id == DEV_MESSAGE_ID:
             return DEV_MESSAGE_SIZE
         elif packet_id == SPECTRUM_PACKET_ID:
-            # Ö»Ö§³ÖÐÂµÄÊý¾Ý°ü¸ñÊ½
-            header_format = '<HHIHhHIHBBH'  # ÐÂ¸ñÊ½£º°üº¬product_id, sen_coef, reserved
+            # Ö»Ö§ï¿½ï¿½ï¿½Âµï¿½ï¿½ï¿½ï¿½Ý°ï¿½ï¿½ï¿½Ê½
+            header_format = '<HHIHhHIHBBH'  # ï¿½Â¸ï¿½Ê½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½product_id, sen_coef, reserved
             header_size = struct.calcsize(header_format)
             
             if len(data) >= header_size:
                 try:
                     header = struct.unpack(header_format, data[:header_size])
-                    adc_channels = header[10]  # µÚ11¸ö×Ö¶ÎÊÇadc_channels
-                    spectrum_size = adc_channels * 4  # ¹Ì¶¨´óÐ¡µÄspectrumÊý×é£ºadc_channels * 4×Ö½Ú
+                    adc_channels = header[10]  # ï¿½ï¿½11ï¿½ï¿½ï¿½Ö¶ï¿½ï¿½ï¿½adc_channels
+                    spectrum_size = adc_channels * 4  # ï¿½Ì¶ï¿½ï¿½ï¿½Ð¡ï¿½ï¿½spectrumï¿½ï¿½ï¿½é£ºadc_channels * 4ï¿½Ö½ï¿½
                     return header_size + spectrum_size
                 except struct.error:
                     return 0
@@ -309,15 +333,15 @@ class SerialPacketWorker(QObject):
 
 
     def parse_spectrum_packet(self, data: bytes) -> Optional[SpectrumPacket]:
-        # Ö»Ö§³ÖÐÂµÄÊý¾Ý°ü¸ñÊ½
-        # ¸ñÊ½: <HHIHhHIHBBH + ¹Ì¶¨´óÐ¡µÄspectrumÊý×é
+        # Ö»Ö§ï¿½ï¿½ï¿½Âµï¿½ï¿½ï¿½ï¿½Ý°ï¿½ï¿½ï¿½Ê½
+        # ï¿½ï¿½Ê½: <HHIHhHIHBBH + ï¿½Ì¶ï¿½ï¿½ï¿½Ð¡ï¿½ï¿½spectrumï¿½ï¿½ï¿½ï¿½
         # id, seq, timestamp, device_status, temperature, HV, counter, product_id, sen_coef, reserved, adc_channels
         
-        header_format = '<HHIHhHIHBBH'  # ÐÂ¸ñÊ½£º°üº¬product_id, sen_coef, reserved
+        header_format = '<HHIHhHIHBBH'  # ï¿½Â¸ï¿½Ê½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½product_id, sen_coef, reserved
         header_size = struct.calcsize(header_format)
         
         if len(data) < header_size:
-            return None  # Êý¾Ý²»¹»header²¿·Ö
+            return None  # ï¿½ï¿½ï¿½Ý²ï¿½ï¿½ï¿½headerï¿½ï¿½ï¿½ï¿½
         
         try:
             header = struct.unpack(header_format, data[:header_size])
@@ -326,16 +350,16 @@ class SerialPacketWorker(QObject):
             byte_length = adc_channels * 4
             
             if len(data) < header_size + byte_length:
-                return None  # Êý¾Ý²»¹»spectrum²¿·Ö
+                return None  # ï¿½ï¿½ï¿½Ý²ï¿½ï¿½ï¿½spectrumï¿½ï¿½ï¿½ï¿½
 
-            # ½âÎöspectrumÊý¾Ý
+            # ï¿½ï¿½ï¿½ï¿½spectrumï¿½ï¿½ï¿½ï¿½
             adc_data = [0] * self.config.adc_channels
             if adc_channels > 0:
-                # spectrumÊý×é°üº¬½»ÌæµÄµÀÖ·ºÍ¼ÆÊýÖµ
+                # spectrumï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Äµï¿½Ö·ï¿½Í¼ï¿½ï¿½ï¿½Öµ
                 spectrum_format = '<' + 'H' * adc_channels * 2
                 spectrum_values = struct.unpack(spectrum_format, data[header_size:header_size + byte_length])
                 
-                # ½«spectrumÊý¾ÝÌî³äµ½adc_dataÖÐ
+                # ï¿½ï¿½spectrumï¿½ï¿½ï¿½ï¿½ï¿½ï¿½äµ½adc_dataï¿½ï¿½
                 for i in range(adc_channels):
                     index = spectrum_values[2*i]
                     value = spectrum_values[2*i+1]
@@ -347,16 +371,16 @@ class SerialPacketWorker(QObject):
                 seq=header[1],
                 timestamp=header[2],
                 device_status=header[3],
-                temperature=header[4],  # ÓÐ·ûºÅÖµ
+                temperature=header[4],  # ï¿½Ð·ï¿½ï¿½ï¿½Öµ
                 HV=header[5],
                 counter=header[6],
-                product_id=header[7],   # ²úÆ·IDºÅ
-                sen_coef=header[8],     # ±¨¾¯ÁéÃô¶ÈÏµÊý
+                product_id=header[7],   # ï¿½ï¿½Æ·IDï¿½ï¿½
+                sen_coef=header[8],     # ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ïµï¿½ï¿½
                 adc_channels=adc_channels,
                 ADC=list(adc_data)
             )
         except struct.error:
-            return None  # ½âÎöÊ§°Ü
+            return None  # ï¿½ï¿½ï¿½ï¿½Ê§ï¿½ï¿½
 
     def parse_packets(self):
         self.mutex.lock()
@@ -435,76 +459,76 @@ class SerialPacketWorker(QObject):
             # Use a faster search with reduced timeout
             available_ports = search_serial_devices()
             if available_ports:
-                # Æ½Ì¨ÌØ¶¨µÄ¶Ë¿ÚÓÅÏÈ¼¶Âß¼­
+                # Æ½Ì¨ï¿½Ø¶ï¿½ï¿½Ä¶Ë¿ï¿½ï¿½ï¿½ï¿½È¼ï¿½ï¿½ß¼ï¿½
                 def port_priority(port):
                     try:
                         if sys.platform.startswith('win'):
-                            # Windows: ÌáÈ¡COMÊý×Ö
+                            # Windows: ï¿½ï¿½È¡COMï¿½ï¿½ï¿½ï¿½
                             com_num = int(port[3:])
-                            # COM1ºÍCOM2Í¨³£ÊÇÐéÄâ¶Ë¿Ú£¬ÓÅÏÈ¼¶½ÏµÍ
+                            # COM1ï¿½ï¿½COM2Í¨ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ë¿Ú£ï¿½ï¿½ï¿½ï¿½È¼ï¿½ï¿½Ïµï¿½
                             if com_num <= 2:
-                                return 100 + com_num  # ½ÏµÍÓÅÏÈ¼¶
+                                return 100 + com_num  # ï¿½Ïµï¿½ï¿½ï¿½ï¿½È¼ï¿½
                             else:
-                                return com_num  # ½Ï¸ßCOMÊý×ÖÓÐ½Ï¸ßÓÅÏÈ¼¶
+                                return com_num  # ï¿½Ï¸ï¿½COMï¿½ï¿½ï¿½ï¿½ï¿½Ð½Ï¸ï¿½ï¿½ï¿½ï¿½È¼ï¿½
                         else:
-                            # Linux/Mac: ¸ù¾Ý¶Ë¿ÚÀàÐÍÅÅÐò
+                            # Linux/Mac: ï¿½ï¿½ï¿½Ý¶Ë¿ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
                             if 'ttyUSB' in port:
-                                # USB´®¿ÚÓÅÏÈ¼¶×î¸ß
+                                # USBï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½È¼ï¿½ï¿½ï¿½ï¿½
                                 try:
-                                    # ÌáÈ¡USBÊý×Ö£¬ÈçttyUSB0 -> 0
+                                    # ï¿½ï¿½È¡USBï¿½ï¿½ï¿½Ö£ï¿½ï¿½ï¿½ttyUSB0 -> 0
                                     usb_num = int(port[8:])
-                                    return usb_num  # ½ÏµÍÊý×ÖÓÐ½Ï¸ßÓÅÏÈ¼¶
+                                    return usb_num  # ï¿½Ïµï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ð½Ï¸ï¿½ï¿½ï¿½ï¿½È¼ï¿½
                                 except:
                                     return 1
                             elif 'ttyACM' in port:
-                                # ACMÉè±¸£¨ÈçArduino£©ÓÅÏÈ¼¶´ÎÖ®
+                                # ACMï¿½è±¸ï¿½ï¿½ï¿½ï¿½Arduinoï¿½ï¿½ï¿½ï¿½ï¿½È¼ï¿½ï¿½ï¿½Ö®
                                 try:
                                     acm_num = int(port[8:])
                                     return 100 + acm_num
                                 except:
                                     return 101
                             elif 'ttyAMA' in port:
-                                # Ê÷Ý®ÅÉGPIO´®¿Ú
+                                # ï¿½ï¿½Ý®ï¿½ï¿½GPIOï¿½ï¿½ï¿½ï¿½
                                 return 200
                             elif 'ttyS' in port:
-                                # ÏµÍ³´®¿Ú
+                                # ÏµÍ³ï¿½ï¿½ï¿½ï¿½
                                 try:
                                     s_num = int(port[5:])
                                     return 300 + s_num
                                 except:
                                     return 301
                             elif 'rfcomm' in port:
-                                # À¶ÑÀ´®¿Ú
+                                # ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
                                 try:
                                     rfcomm_num = int(port[7:])
                                     return 400 + rfcomm_num
                                 except:
                                     return 401
                             else:
-                                return 999  # Î´Öª¶Ë¿ÚÓÅÏÈ¼¶×îµÍ
+                                return 999  # Î´Öªï¿½Ë¿ï¿½ï¿½ï¿½ï¿½È¼ï¿½ï¿½ï¿½ï¿½
                     except:
-                        return 999  # Î´Öª¶Ë¿ÚÓÅÏÈ¼¶×îµÍ
+                        return 999  # Î´Öªï¿½Ë¿ï¿½ï¿½ï¿½ï¿½È¼ï¿½ï¿½ï¿½ï¿½
                 
-                # °´ÓÅÏÈ¼¶ÅÅÐò¶Ë¿Ú
+                # ï¿½ï¿½ï¿½ï¿½ï¿½È¼ï¿½ï¿½ï¿½ï¿½ï¿½Ë¿ï¿½
                 sorted_ports = sorted(available_ports, key=port_priority)
                 
-                # Ö»³¢ÊÔÇ°6¸ö¶Ë¿Ú£¨×î¿ÉÄÜÓÐUSBÉè±¸µÄ£©
-                # ÕâÏÔÖø¼õÉÙÁËÃ»ÓÐÉè±¸Á¬½ÓÊ±µÄÁ¬½ÓÊ±¼ä
+                # Ö»ï¿½ï¿½ï¿½ï¿½Ç°6ï¿½ï¿½ï¿½Ë¿Ú£ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½USBï¿½è±¸ï¿½Ä£ï¿½
+                # ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ã»ï¿½ï¿½ï¿½è±¸ï¿½ï¿½ï¿½ï¿½Ê±ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ê±ï¿½ï¿½
                 ports_to_try = sorted_ports[:6]
                 
                 self.has_log.emit(f"Trying ports (limited to 6 most likely): {ports_to_try}", 'DEBUG')
                 
-                # ³¢ÊÔÃ¿¸ö¿ÉÓÃ¶Ë¿Ú£¨Ìø¹ýÒÑ¾­³¢ÊÔ¹ýµÄÅäÖÃÉè±¸£©
+                # ï¿½ï¿½ï¿½ï¿½Ã¿ï¿½ï¿½ï¿½ï¿½ï¿½Ã¶Ë¿Ú£ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ñ¾ï¿½ï¿½ï¿½ï¿½Ô¹ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½è±¸ï¿½ï¿½
                 for port in ports_to_try:
                     if port == self.config.device:
-                        continue  # ÒÑ¾­³¢ÊÔ¹ýÕâ¸ö
+                        continue  # ï¿½Ñ¾ï¿½ï¿½ï¿½ï¿½Ô¹ï¿½ï¿½ï¿½ï¿½
                     try:
                         if self.connect_serial(port, self.config.baudrate):
-                            # ÓÃÐÂ¶Ë¿Ú¸üÐÂÅäÖÃ
+                            # ï¿½ï¿½ï¿½Â¶Ë¿Ú¸ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
                             self.config.update_settings(device=port)
                             self.config.save_settings()
                             self.has_log.emit(f"Auto-switched to new USB port: {port}", 'INFO')
-                            # ·¢³öÐÅºÅÍ¨ÖªUI¸üÐÂ´®¿ÚÏÂÀ­¿ò
+                            # ï¿½ï¿½ï¿½ï¿½ï¿½Åºï¿½Í¨ÖªUIï¿½ï¿½ï¿½Â´ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
                             self.has_log.emit(f"USB_PORT_CHANGED:{port}", 'SIGNAL')
                             return True
                     except Exception as e:
@@ -518,7 +542,7 @@ class SerialPacketWorker(QObject):
             return False
         
         max_retries = 2
-        retry_delay = 0.1  # Ãë
+        retry_delay = 0.1  # ï¿½ï¿½
         
         for attempt in range(max_retries):
             try:
@@ -649,7 +673,7 @@ class SerialPacketWorker(QObject):
         description = f"Read alarm status {flag}"
         return self.send_command(data, description)
     def set_high_voltage(self, voltage: float):
-        #voltage_raw = int(voltage * 100)//Õâ¸öÊÇÖ®Ç°µÄ°æ±¾£¬ÒòÎªÏÖÔÚµÄµçÑ¹µ¥Î»ÊÇ0.1V
+        #voltage_raw = int(voltage * 100)//ï¿½ï¿½ï¿½ï¿½ï¿½Ö®Ç°ï¿½Ä°æ±¾ï¿½ï¿½ï¿½ï¿½Îªï¿½ï¿½ï¿½ÚµÄµï¿½Ñ¹ï¿½ï¿½Î»ï¿½ï¿½0.1V
         voltage_raw = int(voltage )   
         high_byte = (voltage_raw >> 8) & 0xFF
         low_byte = voltage_raw & 0xFF

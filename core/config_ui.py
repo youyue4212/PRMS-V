@@ -8,19 +8,37 @@ from PyQt5.QtCore import QTimer, Qt
 from PyQt5.QtGui import QFont
 
 def search_serial_devices():
-    available_ports_info = serial.tools.list_ports.comports()
-    detected_port = None
-    for port_info in available_ports_info:
-        # Check if it's a CH340 device
-        if port_info.vid == 0x1a86 and port_info.pid == 0x7523:  # CH340 VID:PID
+    """
+    Search for serial devices with two-stage strategy:
+    1. First try to find CH340 device by VID/PID (fast and precise)
+    2. If not found, fallback to generic serial port detection
+
+    Returns: port device string if found, None otherwise
+    """
+    VID_CH340 = 0x1A86
+    PID_CH340 = 0x7523
+
+    # Stage 1: Try VID/PID detection for CH340
+    for port_info in serial.tools.list_ports.comports():
+        if port_info.vid == VID_CH340 and port_info.pid == PID_CH340:
             try:
-                detected_port=port_info
                 s = serial.Serial(port_info.device, timeout=1)
                 s.close()
+                # Return port info object for compatibility with existing code
+                return port_info
             except (OSError, serial.SerialException):
                 pass
-    #print('detected_port:',detected_port)
-    return detected_port
+
+    # Stage 2: Fallback to generic detection (try first available port)
+    for port_info in serial.tools.list_ports.comports():
+        try:
+            s = serial.Serial(port_info.device, timeout=1)
+            s.close()
+            return port_info
+        except (OSError, serial.SerialException):
+            pass
+
+    return None
 
 class ESP32ConfigGUI(QMainWindow):
     def __init__(self):
