@@ -40,8 +40,8 @@ class SpectrumPacket:
     temperature: int
     HV: int
     counter: int
-    product_id: int  # ��ƷID
-    sen_coef: int    # ����������ϵ��(1-100)
+    product_id: int  # 产品ID
+    sen_coef: int    # 灵敏度系数(1-100)
     adc_channels: int 
     ADC: list
 
@@ -86,20 +86,20 @@ def search_serial_devices():
     # Stage 2: Fallback to generic detection
     ports = []
     if sys.platform.startswith('linux'):
-        # ������ݮ���ض��Ĵ����豸
-        # ע�⣺/dev/serial ��һ��Ŀ¼�������豸�ļ�
-        # ����Ӧ������ /dev/serial/by-id/* �� /dev/serial/by-path/* ������ /dev/serial ����
+        # 搜索串口树莓派专用串口设备
+        # 注意：/dev/serial 是一个记录可用串口设备的目录
+        # 应该对应 /dev/serial/by-id/* 和 /dev/serial/by-path/* 下的 /dev/serial 目录
         ports = glob.glob('/dev/ttyUSB*') + glob.glob('/dev/rfcomm*') + \
                 glob.glob('/dev/ttyAMA*') + glob.glob('/dev/ttyS*') + \
                 glob.glob('/dev/serial/by-id/*') + glob.glob('/dev/serial/by-path/*')
 
-        # ���ӳ�������ݮ�ɴ����豸
-        # ��ݮ��5�����в�ͬ�Ĵ����豸
+        # 兼容模式：树莓派串口设备
+        # 树莓派5上有不同的串口设备
         ports += ['/dev/ttyAMA0', '/dev/ttyAMA1', '/dev/ttyAMA2', '/dev/ttyAMA3',
                   '/dev/ttyAMA4', '/dev/ttyAMA5', '/dev/ttyAMA6', '/dev/ttyAMA7',
                   '/dev/ttyAMA8', '/dev/ttyAMA9', '/dev/ttyAMA10']
 
-        # ȥ��
+        # 去重
         ports = list(set(ports))
     elif sys.platform.startswith('win'):
         ports = ['COM' + str(i + 1) for i in range(16)]
@@ -108,7 +108,7 @@ def search_serial_devices():
 
     for port in ports:
         try:
-            # ����Ŀ¼��ֻ�����ļ�
+            # 检查目录，只处理文件
             import os
             if os.path.isdir(port):
                 continue
@@ -119,12 +119,12 @@ def search_serial_devices():
             s.close()
             available_ports.append(port)
         except (OSError, serial.SerialException) as e:
-            # ��¼������Ϣ������ʾ���û�
+            # 记录错误信息，忽略显示失败的端口
             pass
 
-    # ���û���ҵ����ö˿ڣ�����һ��������Ĭ���б����û�ѡ��
+    # 如果没有找到可用端口，返回一个包含常见端口的默认列表供用户选择
     if not available_ports:
-        # ���س����Ŀ��ܶ˿ڣ���������Ŀ¼
+        # 返回可能的常见端口，基于平台目录
         if sys.platform.startswith('linux'):
             available_ports = ['/dev/ttyUSB0', '/dev/ttyAMA0', '/dev/ttyS0']
         elif sys.platform.startswith('win'):
@@ -177,18 +177,18 @@ class SerialPacketWorker(QObject):
         return self.stats
     
     def connect_serial(self, port: str, baudrate: int):
-        max_retries = 1  # ��һ���������Դ�����2�ε�1�Σ���û��USB�豸ʱ������û�����壩
-        retry_delay = 0.2  # �룬���������ӳٴ�0.5�뵽0.2��
+        max_retries = 1  # 尝试一次（原来是2次的1次），当没有USB设备时快速返回（不等待）
+        retry_delay = 0.2  # 秒，快速重试延迟从0.5降到0.2
         
         for attempt in range(max_retries):
             try:
                 if self.ser and self.ser.is_open:
                     self.ser.close()
                 
-                # ���ٳ�ʱʱ���1.0�뵽0.5�룬�ӿ����ӳ���
+                # 减少超时时间从1.0到0.5，加快连接恢复
                 self.ser = serial.Serial(port, baudrate, timeout=0.5, write_timeout=0.5)
                 
-                # ���ٵȴ�ʱ���0.1�뵽0.05��
+                # 减少等待时间从0.1降到0.05秒
                 time.sleep(0.05)
                 
                 self.connection_status_changed.emit(True, f"Connected to {port} (attempt {attempt + 1}/{max_retries})")
@@ -314,15 +314,15 @@ class SerialPacketWorker(QObject):
         elif packet_id == DEV_MESSAGE_ID:
             return DEV_MESSAGE_SIZE
         elif packet_id == SPECTRUM_PACKET_ID:
-            # ֻ֧���µ����ݰ���ʽ
-            header_format = '<HHIHhHIHBBH'  # �¸�ʽ������product_id, sen_coef, reserved
+            # 只支持最新的数据包格式
+            header_format = '<HHIHhHIHBBH'  # 新格式：包含product_id, sen_coef, reserved
             header_size = struct.calcsize(header_format)
             
             if len(data) >= header_size:
                 try:
                     header = struct.unpack(header_format, data[:header_size])
-                    adc_channels = header[10]  # ��11���ֶ���adc_channels
-                    spectrum_size = adc_channels * 4  # �̶���С��spectrum���飺adc_channels * 4�ֽ�
+                    adc_channels = header[10]  # 第11个字段是adc_channels
+                    spectrum_size = adc_channels * 4  # 固定大小：spectrum数组：adc_channels * 4字节
                     return header_size + spectrum_size
                 except struct.error:
                     return 0
@@ -333,15 +333,15 @@ class SerialPacketWorker(QObject):
 
 
     def parse_spectrum_packet(self, data: bytes) -> Optional[SpectrumPacket]:
-        # ֻ֧���µ����ݰ���ʽ
-        # ��ʽ: <HHIHhHIHBBH + �̶���С��spectrum����
+        # 只支持最新的数据包格式
+        # 格式: <HHIHhHIHBBH + 固定大小的spectrum数组
         # id, seq, timestamp, device_status, temperature, HV, counter, product_id, sen_coef, reserved, adc_channels
         
-        header_format = '<HHIHhHIHBBH'  # �¸�ʽ������product_id, sen_coef, reserved
+        header_format = '<HHIHhHIHBBH'  # 新格式：包含product_id, sen_coef, reserved
         header_size = struct.calcsize(header_format)
         
         if len(data) < header_size:
-            return None  # ���ݲ���header����
+            return None  # 数据不够header长度
         
         try:
             header = struct.unpack(header_format, data[:header_size])
@@ -350,16 +350,16 @@ class SerialPacketWorker(QObject):
             byte_length = adc_channels * 4
             
             if len(data) < header_size + byte_length:
-                return None  # ���ݲ���spectrum����
+                return None  # 数据不够spectrum长度
 
-            # ����spectrum����
+            # 解析spectrum数据
             adc_data = [0] * self.config.adc_channels
             if adc_channels > 0:
-                # spectrum�����������ĵ�ַ�ͼ���ֵ
+                # spectrum数据是连续的地址和积分值
                 spectrum_format = '<' + 'H' * adc_channels * 2
                 spectrum_values = struct.unpack(spectrum_format, data[header_size:header_size + byte_length])
                 
-                # ��spectrum������䵽adc_data��
+                # 将spectrum数据分配到adc_data中
                 for i in range(adc_channels):
                     index = spectrum_values[2*i]
                     value = spectrum_values[2*i+1]
@@ -371,16 +371,16 @@ class SerialPacketWorker(QObject):
                 seq=header[1],
                 timestamp=header[2],
                 device_status=header[3],
-                temperature=header[4],  # �з���ֵ
+                temperature=header[4],  # 有符号值
                 HV=header[5],
                 counter=header[6],
-                product_id=header[7],   # ��ƷID��
-                sen_coef=header[8],     # ����������ϵ��
+                product_id=header[7],   # 产品ID
+                sen_coef=header[8],     # 灵敏度系数
                 adc_channels=adc_channels,
                 ADC=list(adc_data)
             )
         except struct.error:
-            return None  # ����ʧ��
+            return None  # 解析失败
 
     def parse_packets(self):
         self.mutex.lock()
@@ -459,76 +459,76 @@ class SerialPacketWorker(QObject):
             # Use a faster search with reduced timeout
             available_ports = search_serial_devices()
             if available_ports:
-                # ƽ̨�ض��Ķ˿����ȼ��߼�
+                # 平台特定的端口优先级逻辑
                 def port_priority(port):
                     try:
                         if sys.platform.startswith('win'):
-                            # Windows: ��ȡCOM����
+                            # Windows: 获取COM号
                             com_num = int(port[3:])
-                            # COM1��COM2ͨ��������˿ڣ����ȼ��ϵ�
+                            # COM1和COM2通常是真实端口，优先级最高
                             if com_num <= 2:
-                                return 100 + com_num  # �ϵ����ȼ�
+                                return 100 + com_num  # 低端口优先级高
                             else:
-                                return com_num  # �ϸ�COM�����нϸ����ȼ�
+                                return com_num  # 更高COM号有较低优先级
                         else:
-                            # Linux/Mac: ���ݶ˿���������
+                            # Linux/Mac: 串口设备端口号
                             if 'ttyUSB' in port:
-                                # USB�������ȼ����
+                                # USB设备优先级最高
                                 try:
-                                    # ��ȡUSB���֣���ttyUSB0 -> 0
+                                    # 获取USB号（从ttyUSB0 -> 0）
                                     usb_num = int(port[8:])
-                                    return usb_num  # �ϵ������нϸ����ȼ�
+                                    return usb_num  # 低端口号有较高优先级
                                 except:
                                     return 1
                             elif 'ttyACM' in port:
-                                # ACM�豸����Arduino�����ȼ���֮
+                                # ACM设备（Arduino等）优先级其次
                                 try:
                                     acm_num = int(port[8:])
                                     return 100 + acm_num
                                 except:
                                     return 101
                             elif 'ttyAMA' in port:
-                                # ��ݮ��GPIO����
+                                # 树莓派GPIO串口
                                 return 200
                             elif 'ttyS' in port:
-                                # ϵͳ����
+                                # 系统串口
                                 try:
                                     s_num = int(port[5:])
                                     return 300 + s_num
                                 except:
                                     return 301
                             elif 'rfcomm' in port:
-                                # ��������
+                                # 蓝牙串口
                                 try:
                                     rfcomm_num = int(port[7:])
                                     return 400 + rfcomm_num
                                 except:
                                     return 401
                             else:
-                                return 999  # δ֪�˿����ȼ����
+                                return 999  # 未知端口优先级最高
                     except:
-                        return 999  # δ֪�˿����ȼ����
+                        return 999  # 未知端口优先级最高
                 
-                # �����ȼ�����˿�
+                # 根据优先级排序端口
                 sorted_ports = sorted(available_ports, key=port_priority)
                 
-                # ֻ����ǰ6���˿ڣ��������USB�豸�ģ�
-                # ������������û���豸����ʱ������ʱ��
+                # 只保留前6个端口（通常是真实的USB设备的）
+                # 允许快速扫描而没有设备时减少超时时间
                 ports_to_try = sorted_ports[:6]
                 
                 self.has_log.emit(f"Trying ports (limited to 6 most likely): {ports_to_try}", 'DEBUG')
                 
-                # ����ÿ�����ö˿ڣ������Ѿ����Թ��������豸��
+                # 尝试每个可用端口，如果已经通过兼容性测试的设备
                 for port in ports_to_try:
                     if port == self.config.device:
-                        continue  # �Ѿ����Թ����
+                        continue  # 已经测试过
                     try:
                         if self.connect_serial(port, self.config.baudrate):
-                            # ���¶˿ڸ�������
+                            # 更新端口设置
                             self.config.update_settings(device=port)
                             self.config.save_settings()
                             self.has_log.emit(f"Auto-switched to new USB port: {port}", 'INFO')
-                            # �����ź�֪ͨUI���´���������
+                            # 发送信号通知UI重新创建连接
                             self.has_log.emit(f"USB_PORT_CHANGED:{port}", 'SIGNAL')
                             return True
                     except Exception as e:
@@ -542,7 +542,7 @@ class SerialPacketWorker(QObject):
             return False
         
         max_retries = 2
-        retry_delay = 0.1  # ��
+        retry_delay = 0.1  # 秒
         
         for attempt in range(max_retries):
             try:
