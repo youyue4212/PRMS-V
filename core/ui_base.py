@@ -956,7 +956,7 @@ class UIBase():
         
         self.hv_spin = QDoubleSpinBox()
         self.hv_spin.setDecimals(2)
-        self.hv_spin.setRange(0, 1250)  # 根据参考代码修改范围
+        self.hv_spin.setRange(0, 1500)  # 根据参考代码修改范围
         self.hv_spin.setValue(self.config.hv)
         self.hv_spin.editingFinished.connect(self.persist_hv_setting)
         

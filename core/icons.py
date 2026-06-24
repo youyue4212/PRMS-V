@@ -81,6 +81,60 @@ def get_alarm_flashing_svg():
     </svg>
     """
 
+def get_overview_svg():
+    """SVG for overview icon (bar chart)"""
+    return """
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect x="4" y="14" width="4" height="7" rx="1" fill="currentColor"/>
+        <rect x="10" y="9" width="4" height="12" rx="1" fill="currentColor"/>
+        <rect x="16" y="4" width="4" height="17" rx="1" fill="currentColor"/>
+    </svg>
+    """
+
+def get_spectrum_svg():
+    """SVG for spectrum icon (line chart)"""
+    return """
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M3 17l4-4 4 4 6-8 4 4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+        <circle cx="3" cy="17" r="1.5" fill="currentColor"/>
+        <circle cx="7" cy="13" r="1.5" fill="currentColor"/>
+        <circle cx="11" cy="17" r="1.5" fill="currentColor"/>
+        <circle cx="17" cy="9" r="1.5" fill="currentColor"/>
+        <circle cx="21" cy="13" r="1.5" fill="currentColor"/>
+    </svg>
+    """
+
+def get_clients_svg():
+    """SVG for clients icon (users)"""
+    return """
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="9" cy="7" r="3.5" fill="currentColor"/>
+        <path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/>
+        <circle cx="17" cy="7" r="2.5" fill="currentColor" opacity="0.6"/>
+        <path d="M15 19c0-2.2 1.8-4 4-4s4 1.8 4 4" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none" opacity="0.6"/>
+    </svg>
+    """
+
+def get_alarm_log_svg():
+    """SVG for alarm log icon (bell)"""
+    return """
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M12 3c-1.7 0-3 1.3-3 3v5c0 1.1-.4 2.1-1.2 2.8l-1.8 1.7c-.3.3-.5.7-.5 1.1 0 .8.7 1.4 1.5 1.4h11c.8 0 1.5-.6 1.5-1.4 0-.4-.2-.8-.5-1.1l-1.8-1.7c-.8-.7-1.2-1.7-1.2-2.8V6c0-1.7-1.3-3-3-3z" fill="currentColor"/>
+        <path d="M10 19c0 1.1.9 2 2 2s2-.9 2-2" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/>
+        <circle cx="18" cy="6" r="3" fill="#ff4444"/>
+        <text x="18" y="8" text-anchor="middle" font-size="6" fill="white" font-weight="bold">!</text>
+    </svg>
+    """
+
+def get_settings_svg():
+    """SVG for settings icon (gear)"""
+    return """
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M12 8c-2.2 0-4 1.8-4 4s1.8 4 4 4 4-1.8 4-4-1.8-4-4-4z" fill="currentColor"/>
+        <path d="M19.4 13c.1-.3.1-.7.1-1s0-.7-.1-1l2.1-1.6c.2-.2.3-.5.2-.7l-2-3.5c-.1-.3-.4-.4-.7-.3l-2.5 1c-.5-.4-1.1-.7-1.7-1l-.4-2.6c0-.3-.3-.5-.6-.5h-4c-.3 0-.6.2-.6.5l-.4 2.6c-.6.2-1.2.6-1.7 1l-2.5-1c-.3-.1-.6 0-.7.3l-2 3.5c-.1.2 0 .5.2.7l2.1 1.6c-.1.3-.1.7-.1 1s0 .7.1 1l-2.1 1.6c-.2.2-.3.5-.2.7l2 3.5c.1.3.4.4.7.3l2.5-1c.5.4 1.1.7 1.7 1l.4 2.6c0 .3.3.5.6.5h4c.3 0 .6-.2.6-.5l.4-2.6c.6-.2 1.2-.6 1.7-1l2.5 1c.3.1.6 0 .7-.3l2-3.5c.1-.2 0-.5-.2-.7L19.4 13z" stroke="currentColor" stroke-width="1.5" fill="none"/>
+    </svg>
+    """
+
 def get_icon_svg(tag, w=14,h=14):
     svg = None
     if tag =='disconnected':
@@ -93,4 +147,14 @@ def get_icon_svg(tag, w=14,h=14):
         svg=get_alarm_inactive_svg().encode()
     elif tag == 'alarm_flashing':
         svg=get_alarm_flashing_svg().encode()
+    elif tag == 'overview':
+        svg=get_overview_svg().encode()
+    elif tag == 'spectrum':
+        svg=get_spectrum_svg().encode()
+    elif tag == 'clients':
+        svg=get_clients_svg().encode()
+    elif tag == 'alarm_log':
+        svg=get_alarm_log_svg().encode()
+    elif tag == 'settings':
+        svg=get_settings_svg().encode()
     return svg

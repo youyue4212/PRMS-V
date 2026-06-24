@@ -1,4 +1,4 @@
-import time
+﻿import time
 from datetime import datetime
 
 from PyQt5.QtCore import Qt, QTimer
@@ -398,8 +398,9 @@ class BottomNavBar(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFixedHeight(70)
+        # 只对 BottomNavBar 本身设置样式，不影响子组件
         self.setStyleSheet("""
-            QWidget {
+            BottomNavBar {
                 background-color: #1f1f1f;
                 border-top: 1px solid #333333;
             }
@@ -410,105 +411,224 @@ class BottomNavBar(QWidget):
         layout.setSpacing(0)
         
         self.buttons = []
+        self.button_widgets = []
+
+        # 定义每个按钮的主题色
+        button_colors = {
+            "overview": "#4a9eff",      # 蓝色
+            "spectrum": "#4caf50",      # 绿色
+            "clients": "#ff9800",       # 橙色
+            "alarm_log": "#f44336",     # 红色
+            "settings": "#9c27b0"       # 紫色
+        }
         
         # Overview button
-        self.overview_btn = self.create_nav_button("Overview", "\U0001f4ca", True)
-        self.buttons.append(self.overview_btn)
+        overview_widget = self.create_nav_button("Overview", "overview", button_colors["overview"], True)
+        self.button_widgets.append(overview_widget)
+        self.buttons.append(overview_widget.findChild(QPushButton))
         
         # Spectrum button (第二个页面)
-        self.spectrum_btn = self.create_nav_button("Spectrum", "\U0001f4c8", False)
-        self.buttons.append(self.spectrum_btn)
+        spectrum_widget = self.create_nav_button("Spectrum", "spectrum", button_colors["spectrum"], False)
+        self.button_widgets.append(spectrum_widget)
+        self.buttons.append(spectrum_widget.findChild(QPushButton))
         
         # Clients button (第三个页面)
-        self.clients_btn = self.create_nav_button("Clients", "\U0001f465", False)
-        self.buttons.append(self.clients_btn)
+        clients_widget = self.create_nav_button("Clients", "clients", button_colors["clients"], False)
+        self.button_widgets.append(clients_widget)
+        self.buttons.append(clients_widget.findChild(QPushButton))
         
         # Alarm log button (第四个页面)
-        self.alarm_log_btn = self.create_nav_button("Alarm Log", "\U0001f6a8", False)
-        self.buttons.append(self.alarm_log_btn)
+        alarm_log_widget = self.create_nav_button("Alarm Log", "alarm_log", button_colors["alarm_log"], False)
+        self.button_widgets.append(alarm_log_widget)
+        self.buttons.append(alarm_log_widget.findChild(QPushButton))
         
         # Settings button
-        self.settings_btn = self.create_nav_button("Settings", "\u2699\ufe0f", False)
-        self.buttons.append(self.settings_btn)
+        settings_widget = self.create_nav_button("Settings", "settings", button_colors["settings"], False)
+        self.button_widgets.append(settings_widget)
+        self.buttons.append(settings_widget.findChild(QPushButton))
         
-        layout.addWidget(self.overview_btn)
-        layout.addWidget(self.spectrum_btn)
-        layout.addWidget(self.clients_btn)
-        layout.addWidget(self.alarm_log_btn)
-        layout.addWidget(self.settings_btn)
+        layout.addWidget(overview_widget)
+        layout.addWidget(spectrum_widget)
+        layout.addWidget(clients_widget)
+        layout.addWidget(alarm_log_widget)
+        layout.addWidget(settings_widget)
         
         self.setLayout(layout)
+
+        # 保持向后兼容性 - 添加按钮属性引用
+        self.overview_btn = self.buttons[0]
+        self.spectrum_btn = self.buttons[1]
+        self.clients_btn = self.buttons[2]
+        self.alarm_log_btn = self.buttons[3]
+        self.settings_btn = self.buttons[4]
     
-    def create_nav_button(self, text, icon, active=False):
-        """Create a navigation button"""
-        btn = QPushButton(f"{icon}\n{text}")
+    def create_nav_button(self, text, icon_tag, color, active=False):
+        """Create a navigation button with SVG icon"""
+        # Create a container widget for the button
+        container = QWidget()
+        container.setObjectName("nav_button_container")  # 设置对象名称以便精确样式定位
+        container.setFixedHeight(70)
+        
+        # Create layout for icon and text
+        layout = QVBoxLayout()
+        layout.setContentsMargins(0, 8, 0, 8)
+        layout.setSpacing(4)
+        
+        # Create SVG icon
+        icon_widget = QSvgWidget()
+        icon_widget.setFixedSize(24, 24)
+        icon_widget.load(get_icon_svg(icon_tag))
+        
+        # Center the icon
+        icon_layout = QHBoxLayout()
+        icon_layout.addStretch()
+        icon_layout.addWidget(icon_widget)
+        icon_layout.addStretch()
+        
+        # Create text label
+        text_label = QLabel(text)
+        text_label.setAlignment(Qt.AlignCenter)
+        text_font = QFont(FONTS["tip"][0], 11)
+        text_label.setFont(text_font)
+        
+        layout.addLayout(icon_layout)
+        layout.addWidget(text_label)
+        
+        # Create invisible button for click handling
+        btn = QPushButton()
         btn.setFixedHeight(70)
         
-        # 设置字体，确保支持emoji
-        font = btn.font()
-        font.setPointSize(14)  # 增加字体大小
-        btn.setFont(font)
+        # Add everything to container
+        container_layout = QVBoxLayout()
+        container_layout.setContentsMargins(0, 0, 0, 0)
+        container_layout.setSpacing(0)
+        container_layout.addLayout(layout)
+        container.setLayout(container_layout)
+        
+        # Position button on top of the content
+        btn.setParent(container)
+        btn.setGeometry(0, 0, container.width(), 70)
+        btn.raise_()
+        
+        # Store references for later updates
+        container.icon_widget = icon_widget
+        container.text_label = text_label
+        container.icon_tag = icon_tag
+        container.theme_color = color
         
         if active:
-            btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #1f1f1f;
-                    color: #4a9eff;
-                    border: none;
-                    font-size: 14px;
-                    font-weight: bold;
-                    border-top: 3px solid #4a9eff;
-                }
-                QPushButton:pressed {
-                    background-color: #2a2a2a;
-                }
-            """)
+            self._apply_active_style(container, icon_tag, color)
         else:
-            btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #1f1f1f;
-                    color: #888888;
-                    border: none;
-                    font-size: 14px;
-                    border-top: 3px solid transparent;
-                }
-                QPushButton:pressed {
-                    background-color: #2a2a2a;
-                }
-            """)
+            self._apply_inactive_style(container, icon_tag)
         
-        return btn
+        return container
+    
+    def _apply_active_style(self, container, icon_tag, color):
+        """Apply active style to button with custom color"""
+        # 将 hex 颜色转换为 rgba
+        hex_color = color.lstrip('#')
+        r = int(hex_color[0:2], 16)
+        g = int(hex_color[2:4], 16)
+        b = int(hex_color[4:6], 16)
+        
+        container.setStyleSheet(f"""
+            #nav_button_container {{
+                background-color: rgba({r}, {g}, {b}, 0.1);
+                border: none;
+                border-top: 3px solid {color};
+            }}
+        """)
+        # 添加发光效果的文字样式
+        container.text_label.setStyleSheet(f"""
+            QLabel {{
+                color: {color};
+                font-weight: bold;
+                background-color: transparent;
+            }}
+        """)
+        # 为图标添加发光效果 - 在 SVG 中添加发光滤镜
+        svg_template = '''
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+                <filter id="glow">
+                    <feGaussianBlur stdDeviation="2" result="coloredBlur"/>
+                    <feMerge>
+                        <feMergeNode in="coloredBlur"/>
+                        <feMergeNode in="SourceGraphic"/>
+                    </feMerge>
+                </filter>
+            </defs>
+            <g filter="url(#glow)">
+                {content}
+            </g>
+        </svg>
+        '''
+
+        # 获取原始 SVG 并提取内容
+        original_svg = get_icon_svg(icon_tag).decode()
+        # 提取 <svg> 标签内的内容
+        import re
+        content_match = re.search(r'<svg[^>]*>(.*)</svg>', original_svg, re.DOTALL)
+        if content_match:
+            content = content_match.group(1)
+            # 替换 currentColor 为发光颜色
+            content = content.replace('currentColor', color)
+            # 生成带发光效果的 SVG
+            glowing_svg = svg_template.format(content=content)
+            container.icon_widget.load(glowing_svg.encode())
+        else:
+            # 如果提取失败，使用原来的方法
+            svg_data = original_svg.replace('currentColor', color)
+            container.icon_widget.load(svg_data.encode())
+
+        btn = container.findChild(QPushButton)
+        btn.setStyleSheet("""
+            QPushButton {
+                background-color: transparent;
+                border: none;
+            }
+            QPushButton:pressed {
+                background-color: #2a2a2a;
+            }
+        """)
+
+    
+    def _apply_inactive_style(self, container, icon_tag):
+        """Apply inactive style to button"""
+        container.setStyleSheet("""
+            #nav_button_container {
+                background-color: #1f1f1f;
+                border: none;
+                border-top: 3px solid transparent;
+            }
+        """)
+        container.text_label.setStyleSheet("""
+            QLabel {
+                color: #888888;
+            }
+        """)
+        # Update icon with inactive color
+        svg_data = get_icon_svg(icon_tag).decode().replace('currentColor', '#888888')
+        container.icon_widget.load(svg_data.encode())
+
+        btn = container.findChild(QPushButton)
+        btn.setStyleSheet("""
+            QPushButton {
+                background-color: transparent;
+                border: none;
+            }
+            QPushButton:pressed {
+                background-color: #2a2a2a;
+            }
+        """)
     
     def set_active_button(self, index):
         """Set the active button"""
-        for i, btn in enumerate(self.buttons):
+        for i, widget in enumerate(self.button_widgets):
             if i == index:
-                btn.setStyleSheet("""
-                    QPushButton {
-                        background-color: #1f1f1f;
-                        color: #4a9eff;
-                        border: none;
-                        font-size: 14px;
-                        font-weight: bold;
-                        border-top: 3px solid #4a9eff;
-                    }
-                    QPushButton:pressed {
-                        background-color: #2a2a2a;
-                    }
-                """)
+                self._apply_active_style(widget, widget.icon_tag, widget.theme_color)
             else:
-                btn.setStyleSheet("""
-                    QPushButton {
-                        background-color: #1f1f1f;
-                        color: #888888;
-                        border: none;
-                        font-size: 14px;
-                        border-top: 3px solid transparent;
-                    }
-                    QPushButton:pressed {
-                        background-color: #2a2a2a;
-                    }
-                """)
+                self._apply_inactive_style(widget, widget.icon_tag)
 
 
 class AcquisitionButton(QPushButton):
@@ -536,3 +656,15 @@ class AcquisitionButton(QPushButton):
                 color: #aaaaaa;
             }
         """)
+
+
+
+
+
+
+
+
+
+
+
+
