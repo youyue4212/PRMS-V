@@ -533,6 +533,7 @@ class UIBase():
         # Multi-client time series data storage
         self.client_time_series = {}  # {client_id: [(timestamp, counter, temperature, HV, spec_sum), ...]}
         self.client_spectrum_data = {}  # {client_id: spectrum_array} - Store spectrum data for each client
+        self.client_latest_packets = {}  # {client_id: latest SpectrumPacket} - used for immediate display switching
         self.primary_client_id = None  # The client whose data is displayed in the chart
         
         self.spectrum_data = np.zeros(self.config.adc_channels)  # Current displayed spectrum data
@@ -821,6 +822,9 @@ class UIBase():
             self.worker.has_log.connect(self.on_has_log)
             #self.worker.buffer_status_changed.connect(self.on_buffer_status_changed)
             self.worker.command_sent.connect(self.on_command_sent)
+            if isinstance(self.worker, TcpPacketWorker):
+                self.worker.client_connected.connect(self.on_tcp_client_connected)
+                self.worker.client_disconnected.connect(self.on_tcp_client_disconnected)
         else:
             self.log("Warning: Worker not initialized in setup_ui", 'WARNING')
         
@@ -1305,6 +1309,7 @@ class UIBase():
             self.client_data = {}
             self.client_time_series = {}
             self.client_spectrum_data = {}
+            self.client_latest_packets = {}
             self.primary_client_id = None
             self.total_count_rate = 0
             
@@ -1681,6 +1686,7 @@ class UIBase():
         # Store data in client-specific time series
         # For serial mode (client_id is None), use a special client ID
         storage_client_id = client_id if client_id is not None else "serial_client"
+        self.client_latest_packets[storage_client_id] = packet
         
         if storage_client_id not in self.client_time_series:
             self.client_time_series[storage_client_id] = []
@@ -1829,6 +1835,57 @@ class UIBase():
     
     def on_command_sent(self, message: str):
         self.log_output.append(f"<span style='color: blue;'>{message}</span>")
+
+    def on_tcp_client_connected(self, client_id: str):
+        self.log(f"TCP client connected: {client_id}", 'INFO')
+        if self.primary_client_id is None:
+            self.primary_client_id = client_id
+            self.apply_primary_client_snapshot()
+        self.update_client_selection_combo()
+
+    def on_tcp_client_disconnected(self, client_id: str):
+        self.log(f"TCP client disconnected: {client_id}", 'INFO')
+        self.remove_client_display_data(client_id)
+
+        if self.primary_client_id == client_id:
+            available_clients = self.get_available_clients()
+            self.primary_client_id = available_clients[0] if available_clients else None
+            self.apply_primary_client_snapshot()
+
+        self.update_client_selection_combo()
+
+    def remove_client_display_data(self, client_id: str):
+        self.client_time_series.pop(client_id, None)
+        self.client_spectrum_data.pop(client_id, None)
+        self.client_latest_packets.pop(client_id, None)
+        self.client_data.pop(client_id, None)
+
+        if not self.client_time_series and not self.client_spectrum_data:
+            self.spectrum_data = np.zeros(self.config.adc_channels)
+            self.curve_cps.setData([], [])
+            if len(self.channels) != len(self.spectrum_data) + 1:
+                self.channels = np.arange(len(self.spectrum_data) + 1)
+            self.curve_spectrum.setData(self.channels, self.spectrum_data)
+            self.current_stat = {'hv': 0, 'rates': 0, 'temp': 0}
+            self.clear_current_device_status_display()
+            if self.data_updated_callback is not None:
+                self.data_updated_callback(self.current_stat, 0, self.client_data)
+
+    def clear_current_device_status_display(self):
+        for attr, value in [
+            ('counter_label', '0'),
+            ('product_id_label', '--'),
+            ('sensitivity_label', '--'),
+            ('relay_status_label', 'Relay Status: --'),
+            ('alarm_status_label', 'INACTIVE'),
+        ]:
+            if hasattr(self, attr):
+                getattr(self, attr).setText(value)
+
+        if hasattr(self, 'alarm_status_label'):
+            self.alarm_status_label.setStyleSheet("background-color: #ccffcc; color: #000000;")
+        if self.alarm_status_callback is not None:
+            self.alarm_status_callback(False)
     
     def _read_spinbox_value(self, spin, default_value=0):
         """Read value from spinbox lineEdit to ensure virtual keyboard input is applied."""
@@ -1961,6 +2018,13 @@ class UIBase():
                 self.worker.disconnect_serial()
             elif isinstance(self.worker, TcpPacketWorker):
                 self.worker.disconnect_tcp()
+
+            self.reset_plots()
+            self.client_data = {}
+            self.current_stat = {'hv': 0, 'rates': 0, 'temp': 0}
+            self.total_count_rate = 0
+            if self.data_updated_callback is not None:
+                self.data_updated_callback(self.current_stat, 0, {})
             
             # Reinitialize worker
             self.initialize_worker()
@@ -2061,6 +2125,7 @@ class UIBase():
         self.spectrum_data = np.zeros(self.config.adc_channels)
         self.client_time_series = {}
         self.client_spectrum_data = {}
+        self.client_latest_packets = {}
         self.primary_client_id = None
         # Reset spectrogram buffer with current config adc_channels
         self.spectro_buffer_data = np.zeros((MAX_SPECTRUM_STORED, self.config.adc_channels))
@@ -2184,7 +2249,7 @@ class UIBase():
             else:
                 self.log("Failed to send read alarm status command", "ERROR")
     
-    def update_device_status_from_packet(self, packet: SpectrumPacket, client_id: str = None):
+    def update_device_status_from_packet(self, packet: SpectrumPacket, client_id: str = None, log_alarm: bool = True):
         """
         从数据包更新设备状态显示
         这个方法可以从on_spectrum_packet_received中调用
@@ -2241,7 +2306,8 @@ class UIBase():
                 self.alarm_status_callback(remote_sig_alarm)
             
             # 记录报警事件到报警日志
-            self.log_alarm_event(packet, client_id, remote_sig_alarm)
+            if log_alarm:
+                self.log_alarm_event(packet, client_id, remote_sig_alarm)
             
             # 更新计数器显示
             self.counter_label.setText(f"{packet.counter}")
@@ -2284,13 +2350,56 @@ class UIBase():
         self.total_count_rate = total
         return total
     
+    def apply_primary_client_snapshot(self):
+        """Immediately refresh all visible data for the selected client."""
+        client_id = self.primary_client_id
+        if not client_id:
+            self.current_stat = {'hv': 0, 'rates': 0, 'temp': 0}
+            self.clear_current_device_status_display()
+            if self.data_updated_callback is not None:
+                self.data_updated_callback(self.current_stat, 0, self.client_data)
+            return
+
+        if client_id in self.client_spectrum_data:
+            if self.spectrum_data.shape != self.client_spectrum_data[client_id].shape:
+                self.spectrum_data = np.zeros_like(self.client_spectrum_data[client_id])
+            self.spectrum_data = self.client_spectrum_data[client_id].copy()
+        else:
+            self.spectrum_data = np.zeros(self.config.adc_channels)
+
+        latest_packet = self.client_latest_packets.get(client_id)
+        if latest_packet is not None:
+            self.current_stat = {
+                'hv': latest_packet.HV,
+                'rates': latest_packet.counter,
+                'temp': latest_packet.temperature / 100.0
+            }
+            self.update_device_status_from_packet(latest_packet, client_id, log_alarm=False)
+        elif client_id in self.client_data:
+            data = self.client_data[client_id]
+            self.current_stat = {
+                'hv': data.get('hv', 0),
+                'rates': data.get('rates', 0),
+                'temp': data.get('temp', 0)
+            }
+        else:
+            self.current_stat = {'hv': 0, 'rates': 0, 'temp': 0}
+            self.clear_current_device_status_display()
+
+        if self.data_updated_callback is not None:
+            self.data_updated_callback(self.current_stat, 0, self.client_data)
+
+        if len(self.channels) != len(self.spectrum_data) + 1:
+            self.channels = np.arange(len(self.spectrum_data) + 1)
+        self.curve_spectrum.setData(self.channels, self.spectrum_data)
+
     def set_primary_client(self, client_id: str):
         """
         设置主要客户端，该客户端的数据将显示在计数率曲线和能谱曲线中
         Args:
             client_id: 要设置为主要客户端的客户端ID
         """
-        if client_id in self.client_time_series:
+        if client_id in self.get_available_clients() or client_id in self.client_time_series:
             old_primary = self.primary_client_id
             self.primary_client_id = client_id
             
@@ -2314,6 +2423,7 @@ class UIBase():
             self.update_client_selection_combo()
             
             # 立即更新显示
+            self.apply_primary_client_snapshot()
             self.update_data()
         else:
             self.log(f"Client {client_id} not found", 'WARNING')
@@ -2324,6 +2434,14 @@ class UIBase():
         Returns:
             list: 客户端ID列表
         """
+        if self.config.tcp_enabled and isinstance(self.worker, TcpPacketWorker):
+            connected_clients = self.worker.get_client_list()
+            historical_clients = [
+                client_id for client_id in self.client_time_series.keys()
+                if client_id in connected_clients
+            ]
+            return list(dict.fromkeys(connected_clients + historical_clients))
+
         return list(self.client_time_series.keys())
     
     def update_client_selection_combo(self):

@@ -175,7 +175,7 @@ class TcpPacketWorker(QObject):
                     
                     self.connection_status_changed.emit(True, f"Connected to {host}:{port} (attempt {attempt + 1}/{max_retries})")
                     self.has_log.emit(f"Connected to {host}:{port} (attempt {attempt + 1}/{max_retries})", 'INFO')
-                    self.client_connected.emit(f"Connected to {host}:{port}")
+                    self.client_connected.emit(client_id)
                     return True
                 else:
                     # Server mode: listen for connections
@@ -225,7 +225,7 @@ class TcpPacketWorker(QObject):
         for client_id, sock in list(self.client_sockets.items()):
             try:
                 sock.close()
-                self.client_disconnected.emit(f"Client {client_id} disconnected")
+                self.client_disconnected.emit(client_id)
             except:
                 pass
         self.client_sockets.clear()
@@ -302,7 +302,7 @@ class TcpPacketWorker(QObject):
                     self.stats['clients_connected'] += 1
                     
                     self.has_log.emit(f"Accepted connection from {client_address} as {client_id}", 'INFO')
-                    self.client_connected.emit(f"Client {client_id} connected from {client_address}")
+                    self.client_connected.emit(client_id)
                     self.connection_status_changed.emit(True, f"{len(self.client_sockets)} client(s) connected")
                     
                 except socket.error as e:
@@ -330,27 +330,25 @@ class TcpPacketWorker(QObject):
                             self.raw_logger.write(data)
 
                         self.mutex.lock()
-                        
-                        # Add to main buffer (backward compatibility)
-                        if len(self.buffer) + len(data) > self.max_buffer_size:
-                            # Buffer overflow, clear buffer and log error
-                            self.buffer.clear()
-                            self.stats['buffer_overflows'] += 1
-                            self.error_occurred.emit(f"Buffer overflow - cleared buffer (max size: {self.max_buffer_size} bytes)")
-                        
-                        self.buffer.extend(data)
                         self.stats['bytes_received'] += len(data)
-                        
-                        # Also add to client-specific buffer
+
                         if client_id in self.client_buffers:
                             client_buffer = self.client_buffers[client_id]
                             if len(client_buffer) + len(data) > self.max_buffer_size:
                                 client_buffer.clear()
+                                self.stats['buffer_overflows'] += 1
+                                self.error_occurred.emit(
+                                    f"Buffer overflow for {client_id} - cleared buffer (max size: {self.max_buffer_size} bytes)"
+                                )
                             client_buffer.extend(data)
-                        
+
+                        if client_id in self.client_infos:
+                            self.client_infos[client_id].bytes_received += len(data)
+                            self.client_infos[client_id].last_active = time.time()
+
                         self.mutex.unlock()
                         
-                        # Parse packets from main buffer with client_id
+                        # Parse packets from this client's own buffer.
                         self.parse_packets_with_client_id(client_id)
                     else:
                         # No data received (empty bytes) - connection closed
@@ -386,8 +384,10 @@ class TcpPacketWorker(QObject):
             
         self.stats['clients_disconnected'] += 1
         self.has_log.emit(f"Client {client_id} disconnected", 'INFO')
-        self.client_disconnected.emit(f"Client {client_id} disconnected")
-        self.connection_status_changed.emit(True, f"{len(self.client_sockets)} client(s) connected")
+        self.client_disconnected.emit(client_id)
+        connected = len(self.client_sockets) > 0
+        message = f"{len(self.client_sockets)} client(s) connected" if connected else "Listening, no clients connected"
+        self.connection_status_changed.emit(connected, message)
     
     def get_client_info(self, client_id: str) -> Optional[ClientInfo]:
         """Get client information by client ID"""
@@ -567,6 +567,20 @@ class TcpPacketWorker(QObject):
                 continue
         return None
 
+    def find_packet_start_in_buffer(self, buffer: bytearray) -> Optional[tuple]:
+        """Find a packet start inside a specific client's buffer."""
+        if len(buffer) < 2:
+            return None
+
+        for i in range(len(buffer) - 1):
+            try:
+                packet_id = struct.unpack('<H', buffer[i:i+2])[0]
+                if packet_id in [CMD_FEEDBACK_ID, SPECTRUM_PACKET_ID, DEV_MESSAGE_ID]:
+                    return (i, packet_id)
+            except struct.error:
+                continue
+        return None
+
     def get_expected_packet_size(self, packet_id: int, data: bytes = b'') -> int:
         if packet_id == CMD_FEEDBACK_ID:
             return CMD_FEEDBACK_SIZE
@@ -697,33 +711,37 @@ class TcpPacketWorker(QObject):
     
     def parse_packets_with_client_id(self, client_id: str):
         """
-        Parse packets from the main buffer and emit them with client_id
+        Parse packets from the specified client's buffer and emit them with client_id
         This is used when we know which client the data came from
         """
         self.mutex.lock()
         try:
+            if client_id not in self.client_buffers:
+                return
+
+            client_buffer = self.client_buffers[client_id]
             while True:
-                packet_info = self.find_packet_start()
+                packet_info = self.find_packet_start_in_buffer(client_buffer)
                 
                 if packet_info is None:
-                    if len(self.buffer) > 1:
-                        self.buffer = self.buffer[-1:]
+                    if len(client_buffer) > 1:
+                        del client_buffer[:-1]
                     break
                 
                 start_pos, packet_id = packet_info
                 if start_pos > 0:
-                    self.buffer = self.buffer[start_pos:]
+                    del client_buffer[:start_pos]
                 
-                expected_size = self.get_expected_packet_size(packet_id, self.buffer)
+                expected_size = self.get_expected_packet_size(packet_id, client_buffer)
 
                 if expected_size == 0:
-                    self.buffer = self.buffer[1:]
+                    del client_buffer[:1]
                     continue
                 
-                if len(self.buffer) < expected_size:
+                if len(client_buffer) < expected_size:
                     break
                 
-                packet_data = bytes(self.buffer[:expected_size])
+                packet_data = bytes(client_buffer[:expected_size])
                 
                 parsed_packet = None
                 if packet_id == CMD_FEEDBACK_ID:
@@ -734,7 +752,7 @@ class TcpPacketWorker(QObject):
                     parsed_packet = self.parse_dev_message(packet_data)
                 
                 if parsed_packet:
-                    self.buffer = self.buffer[expected_size:]
+                    del client_buffer[:expected_size]
                     if isinstance(parsed_packet, CmdFeedback):
                         self.stats['cmd_packets'] += 1
                         self.cmd_feedback_received.emit(parsed_packet)
@@ -750,7 +768,7 @@ class TcpPacketWorker(QObject):
                         self.stats['dev_messages'] += 1
                         self.dev_message_received.emit(parsed_packet)
                 else:
-                    self.buffer = self.buffer[1:]
+                    del client_buffer[:1]
                     self.stats['errors'] += 1
         finally:
             self.mutex.unlock()
