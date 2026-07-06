@@ -167,12 +167,11 @@ class SoftwareKeyboard(QDialog):
             self.enter_btn.clicked.connect(self.on_enter)
             self.keyboard_layout.addWidget(self.enter_btn, 2, 4, 2, 1, alignment=Qt.AlignCenter)
 
+            # create_number_button 内部已连接 on_number_click，勿重复连接（否则一按出两个符号）
             self.decimal_btn = self.create_number_button(".", size=(72, 54), font_size=18)
-            self.decimal_btn.clicked.connect(lambda: self.on_number_click("."))
             self.keyboard_layout.addWidget(self.decimal_btn, 3, 1, alignment=Qt.AlignCenter)
 
             self.minus_btn = self.create_number_button("-", size=(72, 54), font_size=18)
-            self.minus_btn.clicked.connect(lambda: self.on_number_click("-"))
             self.keyboard_layout.addWidget(self.minus_btn, 3, 3, alignment=Qt.AlignCenter)
 
         else:
@@ -190,9 +189,9 @@ class SoftwareKeyboard(QDialog):
                     self.keyboard_layout.addWidget(btn, r, c, alignment=Qt.AlignCenter)
 
             # Space, Backspace, Clear, Enter
+            # create_number_button 内部已连接 on_number_click(" ")，勿重复连接
             self.space_btn = self.create_number_button(" ", size=(56, 52), font_size=16)
             self.space_btn.setText("Space")
-            self.space_btn.clicked.connect(lambda: self.on_number_click(" "))
             self.keyboard_layout.addWidget(self.space_btn, 3, 2, 1, 4, alignment=Qt.AlignCenter)
 
             self.backspace_btn = self.create_special_button("BS", "backspace", size=(56, 52), font_size=16)

@@ -1,10 +1,12 @@
 import sys
 import platform
+import tempfile
+import os
 from core.main_window import MainWindow
 from core.login_dialog import LoginDialog
 from core.user_manager import UserRole
 from PyQt5.QtWidgets import QApplication, QMessageBox
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QLockFile
 from core import themes
 
 def is_raspberry_pi():
@@ -37,6 +39,17 @@ def is_raspberry_pi():
     return False
 
 def main():
+    # 单实例保护：防止自启动配置（GNOME autostart + systemd 服务等）重复拉起多个实例。
+    # QLockFile 会记录 PID/主机名，程序崩溃后残留的锁会被自动判定为过期而回收。
+    lock_path = os.path.join(tempfile.gettempdir(), "daq_tablet.lock")
+    single_instance_lock = QLockFile(lock_path)
+    single_instance_lock.setStaleLockTime(30000)  # 30s 后视为过期锁
+    if not single_instance_lock.tryLock(100):
+        print("检测到程序已在运行，退出本次启动。")
+        sys.exit(0)
+    # 保持锁对象存活直到进程结束
+    main._instance_lock = single_instance_lock
+
     # 检测是否运行在树莓派上
     is_rpi = is_raspberry_pi()
     
@@ -49,7 +62,6 @@ def main():
     if keyboard_debug:
         print("=== 虚拟键盘调试模式 ===")
         print("环境变量检查:")
-        import os
         print(f"  QT_IM_MODULE: {os.environ.get('QT_IM_MODULE', '未设置')}")
         print(f"  GTK_IM_MODULE: {os.environ.get('GTK_IM_MODULE', '未设置')}")
         print(f"  QT_QPA_PLATFORM: {os.environ.get('QT_QPA_PLATFORM', '未设置')}")
