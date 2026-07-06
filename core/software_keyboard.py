@@ -292,7 +292,6 @@ class SoftwareKeyboard(QDialog):
         else:
             self.display_text += text
         self.update_display()
-        self.key_pressed.emit(text)
         
         # 如果有关联的输入框，直接更新输入框
         if self.target_input:
@@ -306,13 +305,17 @@ class SoftwareKeyboard(QDialog):
                 else:
                     current_text = self._get_target_text()
                     self._set_target_text(current_text + text)
+            # 直接更新后返回，避免信号触发重复操作
+            return
+        
+        # 没有关联输入框时才发出信号
+        self.key_pressed.emit(text)
     
     def on_backspace(self):
         """退格键事件"""
         if self.display_text:
             self.display_text = self.display_text[:-1]
             self.update_display()
-            self.backspace_pressed.emit()
             
             # 如果有关联的输入框，直接更新输入框
             if self.target_input:
@@ -322,6 +325,11 @@ class SoftwareKeyboard(QDialog):
                     current_text = self._get_target_text()
                     if current_text:
                         self._set_target_text(current_text[:-1])
+                # 直接更新后返回，避免信号触发重复操作
+                return
+            
+            # 没有关联输入框时才发出信号
+            self.backspace_pressed.emit()
     
     def on_clear(self):
         """清除键事件"""
