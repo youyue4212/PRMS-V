@@ -236,6 +236,16 @@ class AlarmLogger:
     
     def get_active_alarms(self) -> Dict[str, bool]:
         return self.active_alarms.copy()
+
+    def reset_client_state(self, client_id: str):
+        """清理指定客户端的报警状态（断线/复位时调用），不生成事件。
+
+        用于避免某客户端的“报警结束”边沿丢失后，active_alarms 卡在 True，
+        导致该客户端后续报警的“报警开始”边沿被静默忽略、无法记录。
+        """
+        self.active_alarms.pop(client_id, None)
+        self.alarm_start_times.pop(client_id, None)
+        self.alarm_start_count_rates.pop(client_id, None)
     
     def clear_events(self):
         self.alarm_events.clear()

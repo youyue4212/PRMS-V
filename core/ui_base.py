@@ -526,6 +526,15 @@ class UIBase():
                 self.read_timer.timeout.connect(self.worker.read_tcp_loop)
         self.read_timer.setInterval(10)
 
+        # 绘图节流：数据仍每包累积，但绘图固定 ~10Hz 刷新，
+        # 避免"每包全量重绘 3 张图 + 重建控件"导致的卡顿。
+        self._plot_dirty = False
+        self._last_client_ids = None
+        self._spectrogram_ranges_set = False
+        self.plot_timer = QTimer()
+        self.plot_timer.timeout.connect(self._on_plot_timer)
+        self.plot_timer.start(100)  # 10 Hz
+
         self.packet_counts = {'cmd': 0, 'spectrum': 0, 'errors': 0,'dev_msg':0}
         self.relay_states = [False, False]
         self.is_acquiring = False
@@ -805,9 +814,11 @@ class UIBase():
             levels=levels
         )
         
-        # Update axis ranges
-        self.plot_spectrogram.setXRange(0, MAX_SPECTRUM_STORED)
-        self.plot_spectrogram.setYRange(0, self.config.adc_channels)
+        # Update axis ranges —— 固定不变，只需设置一次，避免每次刷新都重算视图
+        if not self._spectrogram_ranges_set:
+            self.plot_spectrogram.setXRange(0, MAX_SPECTRUM_STORED)
+            self.plot_spectrogram.setYRange(0, self.config.adc_channels)
+            self._spectrogram_ranges_set = True
 
       
         
@@ -1181,8 +1192,12 @@ class UIBase():
             self.gain_stabilizer_label.setText("[OFF]")
             self.gain_stabilizer_label.setStyleSheet('background-color:#ffcccc; color:#000000;')
         
-        # Update client selection combo box
-        self.update_client_selection_combo()
+        # Update client selection combo box —— 仅当客户端集合变化时才重建，
+        # 避免每个数据包都 clear()+重建下拉框造成卡顿/闪烁
+        current_ids = tuple(self.get_available_clients())
+        if current_ids != self._last_client_ids:
+            self._last_client_ids = current_ids
+            self.update_client_selection_combo()
     
     def update_auto_save_counter_label(self):
         """更新自动保存计数器标签"""
@@ -1407,8 +1422,15 @@ class UIBase():
                     client_info = self.client_data.get(client_id_to_save, {})
                 else:
                     # Serial mode: save all available data
-                    # Use the displayed spectrum data
-                    spectrum_data_to_save = self.spectrum_data
+                    # 保存原始累加能谱（不做显示层的 hampel 滤波），与 TCP 模式保持一致。
+                    # 直接取原始累加数组 client_spectrum_data，避免依赖显示副本的刷新时机。
+                    raw_client_id = self.primary_client_id
+                    if raw_client_id and raw_client_id in self.client_spectrum_data:
+                        spectrum_data_to_save = self.client_spectrum_data[raw_client_id]
+                    elif self.client_spectrum_data:
+                        spectrum_data_to_save = next(iter(self.client_spectrum_data.values()))
+                    else:
+                        spectrum_data_to_save = self.spectrum_data
                     
                     # Combine all time series data (in serial mode, there should be only one "client")
                     time_series_data = []
@@ -1709,12 +1731,7 @@ class UIBase():
         # Limit the size of time series data for each client
         if len(self.client_time_series[storage_client_id]) > 1000:  # Keep last 1000 data points
             self.client_time_series[storage_client_id] = self.client_time_series[storage_client_id][-1000:]
-        
-        adc_channels = packet.adc_channels
-        
-        # Log adc_channels for debugging
-        self.log(f"Packet adc_channels: {adc_channels}, Config adc_channels: {self.config.adc_channels}", 'DEBUG')
-        
+
         # Update displayed spectrum data from primary client
         if storage_client_id == self.primary_client_id:
             # Ensure displayed spectrum data has correct shape
@@ -1741,17 +1758,31 @@ class UIBase():
         self.spectro_buffer_time.append(packet.timestamp/1000.)
 
         self.spectro_buffer_data=self.spectro_buffer_data[-MAX_SPECTRUM_STORED:]
+        # 同步裁剪时间缓冲，避免长时间采集时该列表只增不减
+        self.spectro_buffer_time = self.spectro_buffer_time[-MAX_SPECTRUM_STORED:]
 
         # 更新设备状态显示（只更新当前主要客户端的参数）
         self.update_device_status_from_packet(packet, client_id)
-        
+
+        # 报警记录：对每个客户端独立做边沿检测并记录，不受“仅主客户端”限制，
+        # 确保多 IP 设备的报警都能进记录表（边沿检测在 alarm_logger 内按 client_id 维护）。
+        remote_sig_alarm = (packet.device_status & 0b10000) != 0
+        self.log_alarm_event(packet, client_id, remote_sig_alarm)
+
         # Update client data
         # For serial mode (client_id is None), use "serial_client" as client ID
         # For TCP mode, use the provided client_id
         actual_client_id = client_id if client_id is not None else "serial_client"
         self.update_client_data(actual_client_id, packet)
-        
-        self.update_data()
+
+        # 只置脏标志；实际重绘由 plot_timer（~10Hz）统一执行，避免每包全量重绘
+        self._plot_dirty = True
+
+    def _on_plot_timer(self):
+        """绘图节流定时器：有新数据时才刷新图表，固定 ~10Hz。"""
+        if self._plot_dirty:
+            self._plot_dirty = False
+            self.update_data()
 
 
 
@@ -1855,6 +1886,10 @@ class UIBase():
         self.update_client_selection_combo()
 
     def remove_client_display_data(self, client_id: str):
+        # 断线前先结算该客户端的报警状态：若仍在报警中，补记一条“报警结束”，
+        # 并清理记录器内部状态，避免“报警结束”边沿丢失导致下次报警被漏记。
+        self.finalize_client_alarm_on_disconnect(client_id)
+
         self.client_time_series.pop(client_id, None)
         self.client_spectrum_data.pop(client_id, None)
         self.client_latest_packets.pop(client_id, None)
@@ -2304,11 +2339,10 @@ class UIBase():
             # 调用报警状态回调，更新主窗口的报警指示灯
             if self.alarm_status_callback is not None:
                 self.alarm_status_callback(remote_sig_alarm)
-            
-            # 记录报警事件到报警日志
-            if log_alarm:
-                self.log_alarm_event(packet, client_id, remote_sig_alarm)
-            
+
+            # 注意：报警事件的记录已移至 on_spectrum_packet_received，对每个客户端独立
+            # 进行边沿检测与记录，不再受“仅主客户端”限制，确保多 IP 设备的报警都能进记录表。
+
             # 更新计数器显示
             self.counter_label.setText(f"{packet.counter}")
     
@@ -2541,7 +2575,33 @@ class UIBase():
             
         except Exception as e:
             self.log(f"记录报警事件失败: {e}", 'ERROR')
-    
+
+    def finalize_client_alarm_on_disconnect(self, client_id: str):
+        """客户端断开时结算其报警状态。
+
+        若该客户端仍处于报警中（“报警结束”边沿尚未到达就断线），补记一条
+        “报警结束”并清理记录器内部状态；否则直接清理，避免 active_alarms 卡在
+        True 使得下次同一 client_id 的报警无法被记录。
+        """
+        try:
+            alarm_logger = get_alarm_logger()
+            logger_client_id = client_id if client_id is not None else "serial_device"
+
+            # 未处于报警中则无需补记，直接清理内部状态即可
+            if not alarm_logger.get_active_alarms().get(logger_client_id, False):
+                alarm_logger.reset_client_state(logger_client_id)
+                return
+
+            # 仍在报警中：用最后一包数据补记“报警结束”
+            packet = self.client_latest_packets.get(client_id)
+            if packet is not None:
+                self.log_alarm_event(packet, client_id, False)
+            else:
+                # 无最近数据包可用时，直接清理状态，至少保证后续报警能被记录
+                alarm_logger.reset_client_state(logger_client_id)
+        except Exception as e:
+            self.log(f"断线结算报警状态失败: {e}", 'ERROR')
+
     def on_client_selection_changed(self, text):
         """
         客户端选择改变时的处理

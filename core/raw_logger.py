@@ -41,7 +41,6 @@ class RawLogger:
             self.write_count = 0
 
     def write(self, data: bytes):
-        print(self.is_enabled, data)
         if self.is_enabled:
             self._rotate_file_if_needed()
             self.current_file.write(data)
