@@ -1175,11 +1175,13 @@ class UIBase():
 
 
     def log(self, message, dtype='INFO'):
-        if dtype=='ERROR':
+        if dtype == 'ERROR':
             log_inst.error(message)
-        if dtype=='WARN':
+        elif dtype in ('WARN', 'WARNING'):
             log_inst.warning(message)
-        else: 
+        elif dtype == 'DEBUG':
+            log_inst.debug(message)
+        else:
             log_inst.info(message)
 
     def update_control_labels(self):
@@ -2556,9 +2558,6 @@ class UIBase():
             # 确定客户端ID（如果是串口模式，使用默认ID）
             if client_id is None:
                 client_id = "serial_device"
-            
-            # 获取客户端数据
-            client_data = self.client_data.get(client_id, {})
             
             # 记录报警事件
             alarm_logger.log_alarm_event(

@@ -283,8 +283,21 @@ class SoftwareKeyboard(QDialog):
         # 简单实现：在实际应用中可能需要更复杂的颜色调整
         return color
     
+    def _notify_activity(self):
+        """把键盘上的操作计入“用户活动”，重置管理员无操作超时。
+
+        键盘是独立窗口，其事件不经过主窗口的事件过滤器，若不主动通知，
+        使用键盘期间管理员会被判为发呆，约3分钟后触发超时。
+        """
+        try:
+            from core.timeout_manager import get_timeout_manager
+            get_timeout_manager().update_operate_time()
+        except Exception:
+            pass
+
     def on_number_click(self, text):
         """数字按钮点击事件"""
+        self._notify_activity()
         replace_now = self.replace_on_first_input and isinstance(self.target_input, (QSpinBox, QDoubleSpinBox))
         if replace_now:
             self.display_text = text
@@ -312,6 +325,7 @@ class SoftwareKeyboard(QDialog):
     
     def on_backspace(self):
         """退格键事件"""
+        self._notify_activity()
         if self.display_text:
             self.display_text = self.display_text[:-1]
             self.update_display()
@@ -332,6 +346,7 @@ class SoftwareKeyboard(QDialog):
     
     def on_clear(self):
         """清除键事件"""
+        self._notify_activity()
         self.display_text = ""
         self.update_display()
         self.replace_on_first_input = True
@@ -342,6 +357,7 @@ class SoftwareKeyboard(QDialog):
     
     def on_enter(self):
         """回车键事件"""
+        self._notify_activity()
         self.enter_pressed.emit()
         
         # 如果有关联的输入框，模拟回车事件
@@ -455,6 +471,7 @@ class SoftwareKeyboard(QDialog):
             pass
 
     def mousePressEvent(self, event):
+        self._notify_activity()
         if event.button() == Qt.LeftButton:
             self.dragging = True
             self.drag_offset = event.globalPos() - self.frameGeometry().topLeft()
@@ -507,12 +524,17 @@ class SoftwareKeyboardManager:
     
     def show_keyboard_for_input(self, input_widget, parent=None):
         """为输入框显示软件键盘"""
-        # 关闭现有的键盘
+        # 关闭并销毁现有的键盘，避免长期运行时对话框对象越积越多导致内存泄漏
         if self.keyboard_window:
-            self.keyboard_window.close()
-        
+            try:
+                self.keyboard_window.close()  # 设了 WA_DeleteOnClose，close 会自动销毁
+            except Exception:
+                pass
+            self.keyboard_window = None
+
         # 创建新的键盘
         self.keyboard_window = SoftwareKeyboard(parent)
+        self.keyboard_window.setAttribute(Qt.WA_DeleteOnClose, True)
         self.current_input = input_widget
         
         # 连接信号

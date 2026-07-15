@@ -507,8 +507,9 @@ class BottomNavBar(QWidget):
         
         # Position button on top of the content
         btn.setParent(container)
-        btn.setGeometry(0, 0, container.width(), 70)
+        btn.setGeometry(0, 0, max(container.width(), 1), 70)
         btn.raise_()
+        container._hit_btn = btn
         
         # Store references for later updates
         container.icon_widget = icon_widget
@@ -522,6 +523,21 @@ class BottomNavBar(QWidget):
             self._apply_inactive_style(container, icon_tag)
         
         return container
+
+    def resizeEvent(self, event):
+        """窗口尺寸变化后同步透明点击层宽度（从最小化恢复全屏时尤其需要）。"""
+        super().resizeEvent(event)
+        self.refresh_hit_areas()
+
+    def refresh_hit_areas(self):
+        """按当前宽度重设底部导航按钮点击区域。"""
+        self.setFixedHeight(70)
+        for container in self.button_widgets:
+            container.setFixedHeight(70)
+            btn = getattr(container, '_hit_btn', None)
+            if btn is not None:
+                btn.setGeometry(0, 0, max(container.width(), 1), 70)
+                btn.raise_()
     
     def _apply_active_style(self, container, icon_tag, color):
         """Apply active style to button with custom color"""

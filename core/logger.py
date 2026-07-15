@@ -34,6 +34,8 @@ class Logger:
             stream_level = logging.WARNING
         elif log_level_env == "ERROR":
             stream_level = logging.ERROR
+        # 记录级别供文件 handler 复用，避免文件被逐包 DEBUG 撑爆（可用 LOG_LEVEL=DEBUG 打开）
+        self.output_level = stream_level
         
         self.log_filename =''
         # Create stream handler for terminal output
@@ -65,7 +67,7 @@ class Logger:
         # Create file handler if it hasn't been added already
         if not any(isinstance(h, logging.FileHandler) for h in self.logger.handlers):
             file_handler = logging.FileHandler(self.log_filename)
-            file_handler.setLevel(logging.DEBUG)
+            file_handler.setLevel(getattr(self, 'output_level', logging.INFO))
             file_handler.setFormatter(self.formatter)
             self.logger.addHandler(file_handler)
     def get_log_filename(self):

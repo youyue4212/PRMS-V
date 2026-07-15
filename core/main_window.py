@@ -14,7 +14,7 @@ import pandas as pd
 import pyqtgraph as pg
 
 from PyQt5.QtCore import (
-    Qt, QTimer, QPointF, QThread, QMutex, pyqtSignal, QObject
+    Qt, QTimer, QPointF, QThread, QMutex, pyqtSignal, QObject, QEvent
 )
 from PyQt5.QtGui import (
     QPainter, QColor, QPen, QLinearGradient, QPainterPath, QFont, QIcon
@@ -52,8 +52,13 @@ from core.user_manager import get_user_manager, UserRole, Permission
 # 导入超时管理器模块
 from core.timeout_manager import get_timeout_manager
 
+# 二次启动时通过本地套接字唤起已运行实例（hide/最小化后点图标用）
+INSTANCE_ACTIVATE_SERVER = "daq_tablet_activate"
+
 
 class MainWindow(QMainWindow, UIBase):
+    # 左上角隐藏入口热区（相对主窗口坐标，像素）。树莓派触摸宜略大。
+    _SECRET_CORNER_SIZE = 80
     """Main application window"""
     def __init__(self, current_user=None):
         super().__init__()
@@ -179,7 +184,7 @@ class MainWindow(QMainWindow, UIBase):
         """)
         self.user_management_btn.clicked.connect(self.show_user_management)
         button_layout.addWidget(self.user_management_btn)
-        
+
         # Add logout button
         self.logout_btn = QPushButton("Logout")
         self.logout_btn.setFixedHeight(button_height)
@@ -231,6 +236,20 @@ class MainWindow(QMainWindow, UIBase):
         
         # 绑定全局操作事件（所有点击/输入均更新操作时间，重置计时器）
         self.installEventFilter(self)
+
+        # 隐藏入口：不依赖透明覆盖层（Ubuntu 上全透明常被点穿，触摸落在状态栏）。
+        # 改为按主窗口左上角坐标长按检测；应用级过滤器保证子控件上的触摸也能收到。
+        self._restore_fullscreen_on_show = False
+        self._secret_hold_timer = QTimer(self)
+        self._secret_hold_timer.setSingleShot(True)
+        self._secret_hold_timer.setInterval(1500)
+        self._secret_hold_timer.timeout.connect(lambda: self.return_to_desktop(silent=True))
+        app = QApplication.instance()
+        if app is not None:
+            app.installEventFilter(self)
+
+        # 二次启动唤起：点桌面图标时，把已隐藏/最小化的窗口拉回并全屏
+        self._setup_instance_activation_server()
         
         # Setup timer for periodic checking
         self.device_mon_timer = QTimer()
@@ -1057,13 +1076,61 @@ class MainWindow(QMainWindow, UIBase):
         super().closeEvent(event)
     
     def eventFilter(self, obj, event):
-        """事件过滤器，用于捕获所有用户操作"""
+        """事件过滤器：超时计时 + 左上角隐藏入口长按（兼容树莓派触摸）。"""
         # 捕获鼠标点击和键盘输入事件
-        if event.type() in [event.MouseButtonPress, event.KeyPress]:
+        if event.type() in [QEvent.MouseButtonPress, QEvent.KeyPress]:
             self.update_operate_time()
-        
+
+        self._handle_secret_corner_event(obj, event)
+
         return super().eventFilter(obj, event)
-    
+
+    def _widget_belongs_to_self(self, obj):
+        """判断事件源是否属于本主窗口（含子控件）。"""
+        w = obj if isinstance(obj, QWidget) else None
+        while w is not None:
+            if w is self:
+                return True
+            w = w.parentWidget()
+        return False
+
+    def _map_event_pos_to_self(self, event):
+        """把鼠标/触摸事件坐标映射到主窗口客户区。失败返回 None。"""
+        et = event.type()
+        if et in (QEvent.MouseButtonPress, QEvent.MouseButtonRelease, QEvent.MouseMove):
+            return self.mapFromGlobal(event.globalPos())
+        if et in (QEvent.TouchBegin, QEvent.TouchUpdate, QEvent.TouchEnd, QEvent.TouchCancel):
+            points = event.touchPoints()
+            if not points:
+                return None
+            return self.mapFromGlobal(points[0].screenPos().toPoint())
+        return None
+
+    def _in_secret_corner(self, pos):
+        if pos is None:
+            return False
+        s = self._SECRET_CORNER_SIZE
+        return 0 <= pos.x() < s and 0 <= pos.y() < s
+
+    def _handle_secret_corner_event(self, obj, event):
+        """左上角长按约 1.5s → 回桌面。不依赖透明控件，避免 Ubuntu 点穿。"""
+        if not self._widget_belongs_to_self(obj):
+            return
+        et = event.type()
+        if et in (QEvent.MouseButtonPress, QEvent.TouchBegin):
+            pos = self._map_event_pos_to_self(event)
+            if self._in_secret_corner(pos):
+                if not self._secret_hold_timer.isActive():
+                    self._secret_hold_timer.start()
+            else:
+                self._secret_hold_timer.stop()
+        elif et == QEvent.TouchUpdate:
+            pos = self._map_event_pos_to_self(event)
+            if not self._in_secret_corner(pos):
+                self._secret_hold_timer.stop()
+        elif et in (QEvent.MouseButtonRelease, QEvent.TouchEnd, QEvent.TouchCancel):
+            self._secret_hold_timer.stop()
+
     def update_operate_time(self):
         """更新操作时间（重置超时计时器）"""
         if self.current_user and self.current_user['role'] == UserRole.ADMIN:
@@ -1078,10 +1145,18 @@ class MainWindow(QMainWindow, UIBase):
             
             # Switch current user to normal mode (local only)
             self.current_user['role'] = UserRole.VIEWER
-            
+
+            # 先关掉可能打开的软件键盘：它是置顶非模态窗口，若不关，
+            # 下面的模态提示框会被它挡住导致界面卡死、点不到“确定”。
+            try:
+                from core.software_keyboard import get_keyboard_manager
+                get_keyboard_manager().hide_keyboard()
+            except Exception:
+                pass
+
             # DO NOT update the user in user manager - keep it as ADMIN
             # This ensures that when user logs out and logs back in, they're still admin
-            
+
             # Update UI for normal user
             self.update_ui_for_user_role()
             
@@ -1173,8 +1248,120 @@ class MainWindow(QMainWindow, UIBase):
             elif remaining_seconds == 10:
                 self.log("Admin mode will auto logout in 10 seconds", 'WARNING')
     
+    def return_to_desktop(self, silent=False):
+        """回到 Ubuntu 桌面（仅管理员）：最小化并保留 Dock 图标。
+
+        不用 hide()：隐藏后 Dock 上可能找不到，再点图标又会被单实例直接退出。
+        从 Dock 点回后自动全屏，无需再按 F11。
+        限管理员使用，避免普通操作员误触退出监测界面。
+
+        silent=True 时（隐藏入口：长按角/快捷键触发），非管理员静默忽略，不弹提示，
+        以免暴露该隐藏功能的存在。
+        """
+        if not (self.current_user and self.current_user['role'] == UserRole.ADMIN):
+            if not silent:
+                QMessageBox.information(
+                    self, "需要管理员权限",
+                    "切换到 Ubuntu 桌面需要管理员权限，请先以管理员登录。"
+                )
+            return
+        self._restore_fullscreen_on_show = True
+        # 先把“正常尺寸”设成当前屏幕几何，避免 showNormal 缩回启动时的 1024x600，
+        # 导致再全屏时布局/底栏按小窗比例算乱。
+        screen = QApplication.primaryScreen()
+        if screen is not None:
+            self.setGeometry(screen.geometry())
+        if self.isFullScreen():
+            self.showNormal()
+            if screen is not None:
+                self.setGeometry(screen.geometry())
+            QTimer.singleShot(80, self._apply_minimize_to_desktop)
+        else:
+            self._apply_minimize_to_desktop()
+        self.log("已回到桌面（后台继续运行；Dock 点回自动全屏）", 'INFO')
+
+    def _apply_minimize_to_desktop(self):
+        self.showMinimized()
+
+    def restore_from_desktop(self):
+        """从最小化/隐藏状态唤回，并按屏幕尺寸干净全屏。"""
+        self._restore_fullscreen_on_show = False
+        self.show()
+        self.setWindowState(self.windowState() & ~Qt.WindowMinimized)
+        self._enter_fullscreen_clean()
+
+    def _enter_fullscreen_clean(self):
+        """按当前屏幕几何进入全屏，并刷新底部导航尺寸。"""
+        screen = QApplication.primaryScreen()
+        if screen is not None:
+            self.setGeometry(screen.geometry())
+        self.showFullScreen()
+        self.raise_()
+        self.activateWindow()
+        QTimer.singleShot(0, self._refresh_layout_after_fullscreen)
+        QTimer.singleShot(100, self._refresh_layout_after_fullscreen)
+
+    def _refresh_layout_after_fullscreen(self):
+        """全屏生效后强制刷新底栏等布局，避免残留小窗尺寸。"""
+        if hasattr(self, 'bottom_nav') and self.bottom_nav is not None:
+            self.bottom_nav.setFixedHeight(70)
+            self.bottom_nav.refresh_hit_areas()
+            self.bottom_nav.updateGeometry()
+        cw = self.centralWidget()
+        if cw is not None:
+            cw.updateGeometry()
+            lay = cw.layout()
+            if lay is not None:
+                lay.activate()
+
+    def _setup_instance_activation_server(self):
+        """监听二次启动请求，把已运行窗口唤回前台。"""
+        try:
+            from PyQt5.QtNetwork import QLocalServer
+            QLocalServer.removeServer(INSTANCE_ACTIVATE_SERVER)
+            self._activate_server = QLocalServer(self)
+            if self._activate_server.listen(INSTANCE_ACTIVATE_SERVER):
+                self._activate_server.newConnection.connect(self._on_second_instance_activate)
+            else:
+                self.log(
+                    f"二次启动唤起服务监听失败: {self._activate_server.errorString()}",
+                    'WARNING'
+                )
+        except Exception as e:
+            self.log(f"二次启动唤起服务初始化失败: {e}", 'WARNING')
+
+    def _on_second_instance_activate(self):
+        while self._activate_server.hasPendingConnections():
+            sock = self._activate_server.nextPendingConnection()
+            if sock is not None:
+                sock.close()
+        self.restore_from_desktop()
+        self.log("已由二次启动唤回窗口", 'INFO')
+
+    def showEvent(self, event):
+        """窗口显示时：必要时自动全屏。"""
+        super().showEvent(event)
+        if getattr(self, '_restore_fullscreen_on_show', False) and not self.isMinimized():
+            self._restore_fullscreen_on_show = False
+            QTimer.singleShot(0, self._enter_fullscreen_clean)
+
+    def changeEvent(self, event):
+        """从 Dock 恢复（取消最小化）时自动全屏。"""
+        super().changeEvent(event)
+        if event.type() == QEvent.WindowStateChange:
+            if getattr(self, '_restore_fullscreen_on_show', False):
+                if self.isVisible() and not (self.windowState() & Qt.WindowMinimized):
+                    self._restore_fullscreen_on_show = False
+                    QTimer.singleShot(50, self._enter_fullscreen_clean)
+
     def keyPressEvent(self, event):
         """按键事件处理 - 添加ESC键退出全屏和F11键切换全屏功能"""
+        # 隐藏快捷键 Ctrl+Alt+D：回到 Ubuntu 桌面（仅管理员，静默）
+        if event.key() == Qt.Key_D and \
+           (event.modifiers() & Qt.ControlModifier) and (event.modifiers() & Qt.AltModifier):
+            self.return_to_desktop(silent=True)
+            return
+
         # ESC键退出全屏
         if event.key() == Qt.Key_Escape:
             if self.isFullScreen():
