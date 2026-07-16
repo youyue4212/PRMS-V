@@ -96,7 +96,7 @@ class OverviewPage(QWidget):
         self.alarm_title_label.setStyleSheet("""
             QLabel {
                 color: #cccccc;
-                font-size: 11px;
+                font-size: 13px;
                 font-weight: bold;
                 letter-spacing: 0.5px;
                 text-transform: uppercase;
@@ -118,7 +118,7 @@ class OverviewPage(QWidget):
         self.alarm_status_label.setStyleSheet("""
             QLabel {
                 color: #4caf50;
-                font-size: 13px;
+                font-size: 15px;
                 font-weight: bold;
                 margin-top: 4px;
                 padding: 3px 8px;
@@ -135,7 +135,7 @@ class OverviewPage(QWidget):
         self.alarm_desc_label.setStyleSheet("""
             QLabel {
                 color: #aaaaaa;
-                font-size: 10px;
+                font-size: 12px;
                 font-weight: normal;
                 margin-top: 2px;
                 font-style: italic;
@@ -158,11 +158,111 @@ class OverviewPage(QWidget):
         
         alarm_layout.addStretch()
         self.alarm_card.setLayout(alarm_layout)
+
+        # Occupancy indicator card - optimized for compact
+        self.occupancy_card = QFrame()
+        self.occupancy_card.setStyleSheet("""
+            QFrame {
+                background-color: #2a2a2a;
+                border-radius: 10px;
+                border: none;
+                background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
+                    stop: 0 #2a2a2a, stop: 1 #1f1f1f);
+            }
+            QFrame:hover {
+                border: 1px solid #444444;
+                background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
+                    stop: 0 #2f2f2f, stop: 1 #242424);
+            }
+        """)
         
-        # Add three cards to layout with equal width
+        occupancy_layout = QVBoxLayout()
+        occupancy_layout.setContentsMargins(10, 10, 10, 8)
+        occupancy_layout.setSpacing(4)
+        
+        # Occupancy title with icon
+        occ_title_layout = QHBoxLayout()
+        occ_title_layout.setContentsMargins(0, 0, 0, 0)
+        occ_title_layout.setSpacing(6)
+        
+        # Title icon
+        self.occupancy_title_icon = QSvgWidget()
+        self.occupancy_title_icon.setFixedSize(16, 16)
+        self.occupancy_title_icon.load(get_icon_svg('occupancy_inactive'))
+        occ_title_layout.addWidget(self.occupancy_title_icon)
+        
+        self.occupancy_title_label = QLabel("CHANNEL STATUS")
+        self.occupancy_title_label.setStyleSheet("""
+            QLabel {
+                color: #cccccc;
+                font-size: 13px;
+                font-weight: bold;
+                letter-spacing: 0.5px;
+                text-transform: uppercase;
+            }
+        """)
+        occ_title_layout.addWidget(self.occupancy_title_label)
+        occ_title_layout.addStretch()
+        
+        occupancy_layout.addLayout(occ_title_layout)
+        
+        # Main occupancy indicator
+        self.occupancy_indicator = QSvgWidget()
+        self.occupancy_indicator.setFixedSize(50, 50)
+        self.occupancy_indicator.load(get_icon_svg('occupancy_inactive'))
+        occupancy_layout.addWidget(self.occupancy_indicator, 0, Qt.AlignCenter)
+        
+        # Occupancy status label
+        self.occupancy_status_label = QLabel("CHANNEL VACANT")
+        self.occupancy_status_label.setStyleSheet("""
+            QLabel {
+                color: #4caf50;
+                font-size: 15px;
+                font-weight: bold;
+                margin-top: 4px;
+                padding: 3px 8px;
+                background-color: rgba(76, 175, 80, 0.1);
+                border-radius: 8px;
+                border: 1px solid rgba(76, 175, 80, 0.3);
+            }
+        """)
+        self.occupancy_status_label.setAlignment(Qt.AlignCenter)
+        occupancy_layout.addWidget(self.occupancy_status_label, 0, Qt.AlignCenter)
+        
+        # Occupancy description
+        self.occupancy_desc_label = QLabel("No traffic detected")
+        self.occupancy_desc_label.setStyleSheet("""
+            QLabel {
+                color: #aaaaaa;
+                font-size: 12px;
+                font-weight: normal;
+                margin-top: 2px;
+                font-style: italic;
+            }
+        """)
+        self.occupancy_desc_label.setAlignment(Qt.AlignCenter)
+        occupancy_layout.addWidget(self.occupancy_desc_label, 0, Qt.AlignCenter)
+        
+        # Occupancy indicator bar
+        self.occupancy_indicator_bar = QFrame()
+        self.occupancy_indicator_bar.setFixedHeight(2)
+        self.occupancy_indicator_bar.setStyleSheet("""
+            QFrame {
+                background-color: #4caf50;
+                border-radius: 1px;
+                margin-top: 3px;
+            }
+        """)
+        occupancy_layout.addWidget(self.occupancy_indicator_bar)
+        
+        occupancy_layout.addStretch()
+        self.occupancy_card.setLayout(occupancy_layout)
+        
+        # Add four cards to layout with equal width
         cards_layout.addWidget(self.radiation_card, 1)
         cards_layout.addWidget(self.status_card, 1)
         cards_layout.addWidget(self.alarm_card, 1)
+        cards_layout.addWidget(self.occupancy_card, 1)
         
         layout.addLayout(cards_layout)
         
@@ -420,7 +520,7 @@ class ClientsPage(QWidget):
     def create_client_widget(self, client_id: str, data: dict) -> QFrame:
         """Create a widget for displaying client information"""
         widget = QFrame()
-        widget.setFixedHeight(120)
+        widget.setFixedHeight(150)
         widget.setStyleSheet("""
             QFrame {
                 background-color: #2a2a2a;
@@ -435,7 +535,7 @@ class ClientsPage(QWidget):
         
         # Client ID and status
         left_layout = QVBoxLayout()
-        left_layout.setSpacing(5)
+        left_layout.setSpacing(3)
         
         client_id_label = QLabel(f"Client: {client_id}")
         client_id_label.setStyleSheet("""
@@ -471,10 +571,35 @@ class ClientsPage(QWidget):
                 color: {'#ff4444' if alarm_status else '#4caf50'};
                 font-size: 14px;
                 font-weight: bold;
-                margin-top: 5px;
+                margin-top: 2px;
             }}
         """)
         left_layout.addWidget(alarm_label)
+
+        # Occupancy status
+        occupancy_status = data.get('occupancy', False)
+        occupancy_label = QLabel("Occupied" if occupancy_status else "Free")
+        occupancy_label.setStyleSheet(f"""
+            QLabel {{
+                color: {'#ffb74d' if occupancy_status else '#4caf50'};
+                font-size: 14px;
+                font-weight: bold;
+                margin-top: 2px;
+            }}
+        """)
+        left_layout.addWidget(occupancy_label)
+
+        # Faults status
+        faults_label = QLabel("No Faults")
+        faults_label.setStyleSheet("""
+            QLabel {
+                color: #4caf50;
+                font-size: 12px;
+                font-weight: bold;
+                margin-top: 2px;
+            }
+        """)
+        left_layout.addWidget(faults_label)
         
         left_layout.addStretch()
         layout.addLayout(left_layout)
@@ -600,7 +725,9 @@ class ClientsPage(QWidget):
             'product_id': product_value,
             'sensitivity': sensitivity_value,
             'status': status_label,
-            'alarm': alarm_label
+            'alarm': alarm_label,
+            'occupancy': occupancy_label,
+            'faults': faults_label
         }
         
         return widget
@@ -642,3 +769,41 @@ class ClientsPage(QWidget):
                 margin-top: 5px;
             }}
         """)
+
+        # Update occupancy status
+        occupancy_status = data.get('occupancy', False)
+        labels['occupancy'].setText("Occupied" if occupancy_status else "Free")
+        labels['occupancy'].setStyleSheet(f"""
+            QLabel {{
+                color: {'#ffb74d' if occupancy_status else '#4caf50'};
+                font-size: 12px;
+                font-weight: bold;
+                margin-top: 5px;
+            }}
+        """)
+
+        # Update faults status
+        client_id = data.get('client_id')
+        if hasattr(self.parent, 'diagnostics_manager') and client_id:
+            active_faults = self.parent.diagnostics_manager.active_faults.get(client_id, {})
+            if active_faults:
+                faults_str = ", ".join(active_faults.keys())
+                labels['faults'].setText(f"Faults: {faults_str}")
+                labels['faults'].setStyleSheet("""
+                    QLabel {
+                        color: #ff9800;
+                        font-size: 12px;
+                        font-weight: bold;
+                        margin-top: 5px;
+                    }
+                """)
+            else:
+                labels['faults'].setText("No Faults")
+                labels['faults'].setStyleSheet("""
+                    QLabel {
+                        color: #4caf50;
+                        font-size: 12px;
+                        font-weight: bold;
+                        margin-top: 5px;
+                    }
+                """)

@@ -25,6 +25,7 @@ from core.tcp_detector import TcpPacketWorker, ClientInfo
 from core.raw_logger import RawLogger
 from core import logger 
 from core.alarm_logger import get_alarm_logger  # 导入报警记录器
+from core.diagnostics import DiagnosticsManager  # 导入诊断管理器
 
 log_inst=logger.get_logger()
 
@@ -487,6 +488,7 @@ class UIBase():
         QApplication.instance().installEventFilter(self.focus_filter)
 
         self.config = ConfigManager()
+        self.diagnostics_manager = DiagnosticsManager(self.config)
         self.baudrate=self.config.baudrate
         self.current_signal_source = 'internal'
         self.raw_logger = None
@@ -1083,10 +1085,15 @@ class UIBase():
         device_layout.addWidget(self.alarm_status_label, 4, 1, 1, 3)
         device_layout.addWidget(self.alarm_read_btn, 4, 4)
         
+        # Occupancy Status (通道占用状态) - device_status bit5 (0=Free, 1=Occupied)
+        self.occupancy_status_label = QLabel("--")
+        device_layout.addWidget(QLabel("Occupancy:"), 5, 0)
+        device_layout.addWidget(self.occupancy_status_label, 5, 1, 1, 4)
+
         # Counter Display
         self.counter_label = QLabel("--")
-        device_layout.addWidget(QLabel("Counter:"), 5, 0)
-        device_layout.addWidget(self.counter_label, 5, 1, 1, 4)
+        device_layout.addWidget(QLabel("Counter:"), 6, 0)
+        device_layout.addWidget(self.counter_label, 6, 1, 1, 4)
         
         settings_layout.addWidget(device_group)
 
@@ -1285,6 +1292,7 @@ class UIBase():
             QTimer.singleShot(100, lambda: self._delayed_start_reading())
             
             self.is_acquiring = True
+            self.diagnostics_manager.start_acquisition()
             self.set_status_label('Starting acquisition...', True)
             
             # 重置数据状态，准备接收新数据（但不清除客户端选择）
@@ -1317,6 +1325,7 @@ class UIBase():
             self.worker.stop_reading()
             self.read_timer.stop()
             self.is_acquiring = False
+            self.diagnostics_manager.stop_acquisition()
             
             # 停止时清零数据，但保持连接
             self.reset_plots()
@@ -1777,6 +1786,9 @@ class UIBase():
         actual_client_id = client_id if client_id is not None else "serial_client"
         self.update_client_data(actual_client_id, packet)
 
+        # 运行设备诊断自检
+        self.diagnostics_manager.process_packet(actual_client_id, packet)
+
         # 只置脏标志；实际重绘由 plot_timer（~10Hz）统一执行，避免每包全量重绘
         self._plot_dirty = True
 
@@ -1915,6 +1927,7 @@ class UIBase():
             ('sensitivity_label', '--'),
             ('relay_status_label', 'Relay Status: --'),
             ('alarm_status_label', 'INACTIVE'),
+            ('occupancy_status_label', '--'),
         ]:
             if hasattr(self, attr):
                 getattr(self, attr).setText(value)
@@ -2342,6 +2355,16 @@ class UIBase():
             if self.alarm_status_callback is not None:
                 self.alarm_status_callback(remote_sig_alarm)
 
+            # 更新占用状态（device_status bit5: 0=Free, 1=Occupied）
+            if hasattr(self, 'occupancy_status_label'):
+                is_occupied = (packet.device_status & 0b100000) != 0
+                self.occupancy_status_label.setText("Occupied" if is_occupied else "Free")
+                # Occupied -> amber, Free -> green
+                if is_occupied:
+                    self.occupancy_status_label.setStyleSheet("background-color: #ffe0b2; color: #000000;")
+                else:
+                    self.occupancy_status_label.setStyleSheet("background-color: #ccffcc; color: #000000;")
+
             # 注意：报警事件的记录已移至 on_spectrum_packet_received，对每个客户端独立
             # 进行边沿检测与记录，不再受“仅主客户端”限制，确保多 IP 设备的报警都能进记录表。
 
@@ -2362,6 +2385,7 @@ class UIBase():
             'temp': packet.temperature / 100.0,  # 温度（°C）
             'last_update': current_time,
             'alarm': (packet.device_status & 0b10000) != 0,  # 报警状态
+            'occupancy': (packet.device_status & 0b100000) != 0,  # 占用状态 bit5
             'client_id': client_id,
             'product_id': packet.product_id,
             'sensitivity': packet.sen_coef

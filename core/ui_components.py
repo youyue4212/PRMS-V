@@ -248,7 +248,7 @@ class DataCard(QFrame):
         self.title_label.setStyleSheet("""
             QLabel {
                 color: #cccccc;
-                font-size: 11px;
+                font-size: 13px;
                 font-weight: bold;
                 letter-spacing: 0.5px;
                 text-transform: uppercase;
@@ -260,15 +260,15 @@ class DataCard(QFrame):
         # Main value - 根据larger_font参数调整字体大小
         self.value_label = QLabel(value)
         if larger_font:
-            # 更大字体：28px
-            value_font = QFont(FONTS["data_value"][0], FONTS["data_value"][1] + 10)  # 更大的字体
-            font_size = "28px"
-            min_height = "45px"
+            # 更大字体：34px
+            value_font = QFont(FONTS["data_value"][0], FONTS["data_value"][1] + 14)  # 更大的字体
+            font_size = "34px"
+            min_height = "48px"
         else:
-            # 正常字体：24px
-            value_font = QFont(FONTS["data_value"][0], FONTS["data_value"][1] + 6)  # 较大的字体
-            font_size = "24px"
-            min_height = "40px"
+            # 正常字体：28px
+            value_font = QFont(FONTS["data_value"][0], FONTS["data_value"][1] + 10)  # 较大的字体
+            font_size = "28px"
+            min_height = "42px"
         
         if len(FONTS["data_value"]) > 2 and "bold" in FONTS["data_value"][2]:
             value_font.setBold(True)
@@ -292,7 +292,7 @@ class DataCard(QFrame):
         self.second_title_label.setStyleSheet("""
             QLabel {
                 color: #aaaaaa;
-                font-size: 11px;
+                font-size: 13px;
                 font-weight: normal;
                 margin-top: 2px;
             }
@@ -309,7 +309,7 @@ class DataCard(QFrame):
             QLabel {{
                 color: {value_color};
                 font-weight: bold;
-                font-size: 16px;
+                font-size: 18px;
                 margin-top: 4px;
             }}
         """)
@@ -323,7 +323,7 @@ class DataCard(QFrame):
         self.subtitle_label.setStyleSheet("""
             QLabel {
                 color: #aaaaaa;
-                font-size: 10px;
+                font-size: 12px;
                 font-weight: normal;
                 margin-top: 2px;
                 font-style: italic;

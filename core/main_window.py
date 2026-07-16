@@ -44,6 +44,7 @@ from core.icons import get_icon_svg  # Assuming your SVG functions are in a sepa
 
 # 导入新模块
 from core.ui_components import StatusBar, DataCard, BottomNavBar, AcquisitionButton
+from core.diagnostics import FaultCode
 from core.pages import OverviewPage, SpectrumPage, SettingsPage, ClientsPage
 
 # 导入用户管理模块
@@ -229,6 +230,7 @@ class MainWindow(QMainWindow, UIBase):
         # 在UIBase中设置回调函数
         self.data_updated_callback = self.data_updated
         self.alarm_status_callback = self.update_alarm_status
+        self.prev_fault_keys = set()
 
         # 连接超时管理器信号
         self.timeout_manager.timeout_occurred.connect(self.on_admin_timeout)
@@ -320,6 +322,19 @@ class MainWindow(QMainWindow, UIBase):
             if self.alarm_status_callback is None:
                 self.log("WARNING: alarm_status_callback is None, resetting...", 'WARNING')
                 self.alarm_status_callback = self.update_alarm_status
+
+        # 运行周期性诊断检查
+        connected_clients = []
+        if self.config.tcp_enabled and hasattr(self.worker, 'client_infos'):
+            connected_clients = list(self.worker.client_infos.keys())
+        else:
+            if self.worker and self.worker.is_running:
+                connected_clients = ["serial_client"]
+
+        self.diagnostics_manager.run_periodic_checks(connected_clients)
+        
+        # 更新系统状态（综合报警与故障码）
+        self.update_system_status()
         
     
     def switch_page(self, index):
@@ -417,21 +432,48 @@ class MainWindow(QMainWindow, UIBase):
     
     def update_alarm_status(self, is_alarm_active: bool):
         """Update alarm indicator on overview page - Restored to previous display form"""
+        self.update_system_status(is_alarm_active)
+
+    def update_system_status(self, is_alarm_active: Optional[bool] = None):
+        """Update system status indicator on overview page, combining radiation alarms and device faults."""
         current_time = datetime.now().strftime("%H:%M:%S")
         
+        # If is_alarm_active is not provided, try to get it from the primary client's latest packet
+        if is_alarm_active is None:
+            is_alarm_active = False
+            if self.primary_client_id and self.primary_client_id in self.client_latest_packets:
+                latest_packet = self.client_latest_packets[self.primary_client_id]
+                is_alarm_active = (latest_packet.device_status & 0b10000) != 0
+
+        # Get all active faults from diagnostics manager
+        active_faults = self.diagnostics_manager.get_all_active_faults()
+        current_fault_keys = set((client_id, code) for client_id, code, _, _, _ in active_faults)
+        
+        # Log newly added faults
+        for client_id, code in current_fault_keys - self.prev_fault_keys:
+            name, desc, severity = FaultCode.get_info(code)
+            self.log(f"[FAULT DETECTED] Client: {client_id} | Code: {code} | {name}: {desc}", severity)
+            
+        # Log cleared faults
+        for client_id, code in self.prev_fault_keys - current_fault_keys:
+            name, _, _ = FaultCode.get_info(code)
+            self.log(f"[FAULT CLEARED] Client: {client_id} | Code: {code} | {name} has been resolved", "INFO")
+            
+        self.prev_fault_keys = current_fault_keys
+
         if is_alarm_active:
-            # Start flashing alarm
+            # 1. Radiation alarm active (Highest priority: Flashing Red)
             self.start_alarm_flashing()
             
             # Update title icon
             self.overview_page.alarm_title_icon.load(get_icon_svg('alarm_active'))
             
-            # Update status label with restored styling
+            # Update status label with red active styling
             self.overview_page.alarm_status_label.setText("ALARM ACTIVE")
             self.overview_page.alarm_status_label.setStyleSheet("""
                 QLabel {
                     color: #ff4444;
-                    font-size: 14px;
+                    font-size: 16px;
                     font-weight: bold;
                     margin-top: 8px;
                     padding: 4px 12px;
@@ -446,7 +488,7 @@ class MainWindow(QMainWindow, UIBase):
             self.overview_page.alarm_desc_label.setStyleSheet("""
                 QLabel {
                     color: #ff8888;
-                    font-size: 10px;
+                    font-size: 12px;
                     font-weight: normal;
                     margin-top: 2px;
                     font-style: italic;
@@ -477,22 +519,81 @@ class MainWindow(QMainWindow, UIBase):
                         stop: 0 #2f2f2f, stop: 1 #242424);
                 }
             """)
-        else:
-            # Stop flashing and show normal inactive state
+        elif active_faults:
+            # 2. System has active faults (Medium priority: Orange)
             self.stop_alarm_flashing()
             
-            # Update title icon
+            # Update title icon and main indicator to inactive
             self.overview_page.alarm_title_icon.load(get_icon_svg('alarm_inactive'))
-            
-            # Load inactive icon
             self.overview_page.alarm_indicator.load(get_icon_svg('alarm_inactive'))
             
-            # Update status label with restored styling
+            # Format fault codes for display, e.g., "E101, E201"
+            fault_codes_str = ", ".join([code for _, code, _, _, _ in active_faults])
+            
+            # Update status label with orange styling
+            self.overview_page.alarm_status_label.setText("SYSTEM FAULT")
+            self.overview_page.alarm_status_label.setStyleSheet("""
+                QLabel {
+                    color: #ff9800;
+                    font-size: 16px;
+                    font-weight: bold;
+                    margin-top: 8px;
+                    padding: 4px 12px;
+                    background-color: rgba(255, 152, 0, 0.15);
+                    border-radius: 10px;
+                    border: 1px solid rgba(255, 152, 0, 0.4);
+                }
+            """)
+            
+            # Show the active fault codes in description
+            self.overview_page.alarm_desc_label.setText(f"Active Faults: {fault_codes_str}")
+            self.overview_page.alarm_desc_label.setStyleSheet("""
+                QLabel {
+                    color: #ffb74d;
+                    font-size: 12px;
+                    font-weight: bold;
+                    margin-top: 2px;
+                }
+            """)
+            
+            # Update status indicator bar to orange
+            self.overview_page.status_indicator_bar.setStyleSheet("""
+                QFrame {
+                    background-color: #ff9800;
+                    border-radius: 1px;
+                    margin-top: 5px;
+                }
+            """)
+            
+            # Update card border color (subtle orange border)
+            self.overview_page.alarm_card.setStyleSheet("""
+                QFrame {
+                    background-color: #2a2a2a;
+                    border-radius: 12px;
+                    border: 2px solid #ff9800;
+                    background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
+                        stop: 0 #2a2a2a, stop: 1 #1f1f1f);
+                }
+                QFrame:hover {
+                    border: 2px solid #ffb74d;
+                    background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
+                        stop: 0 #2f2f2f, stop: 1 #242424);
+                }
+            """)
+        else:
+            # 3. System completely normal (Green)
+            self.stop_alarm_flashing()
+            
+            # Update title icon and main indicator to inactive
+            self.overview_page.alarm_title_icon.load(get_icon_svg('alarm_inactive'))
+            self.overview_page.alarm_indicator.load(get_icon_svg('alarm_inactive'))
+            
+            # Update status label with green styling
             self.overview_page.alarm_status_label.setText("SYSTEM NORMAL")
             self.overview_page.alarm_status_label.setStyleSheet("""
                 QLabel {
                     color: #4caf50;
-                    font-size: 14px;
+                    font-size: 16px;
                     font-weight: bold;
                     margin-top: 8px;
                     padding: 4px 12px;
@@ -507,7 +608,7 @@ class MainWindow(QMainWindow, UIBase):
             self.overview_page.alarm_desc_label.setStyleSheet("""
                 QLabel {
                     color: #aaaaaa;
-                    font-size: 10px;
+                    font-size: 12px;
                     font-weight: normal;
                     margin-top: 2px;
                     font-style: italic;
@@ -525,6 +626,117 @@ class MainWindow(QMainWindow, UIBase):
             
             # Reset card border color (no border like other cards)
             self.overview_page.alarm_card.setStyleSheet("""
+                QFrame {
+                    background-color: #2a2a2a;
+                    border-radius: 12px;
+                    border: none;
+                    background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
+                        stop: 0 #2a2a2a, stop: 1 #1f1f1f);
+                }
+                QFrame:hover {
+                    border: 2px solid #444444;
+                    background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
+                        stop: 0 #2f2f2f, stop: 1 #242424);
+                }
+            """)
+
+        # 4. Update Occupancy Status on Overview Page
+        is_occupied = False
+        if self.primary_client_id and self.primary_client_id in self.client_latest_packets:
+            latest_packet = self.client_latest_packets[self.primary_client_id]
+            is_occupied = (latest_packet.device_status & 0b100000) != 0
+        
+        if is_occupied:
+            # Flashing Blue for occupied (person passing)
+            self.start_occupancy_flashing()
+            self.overview_page.occupancy_title_icon.load(get_icon_svg('occupancy_active'))
+            
+            self.overview_page.occupancy_status_label.setText("PERSON PASSING")
+            self.overview_page.occupancy_status_label.setStyleSheet("""
+                QLabel {
+                    color: #2196F3;
+                    font-size: 15px;
+                    font-weight: bold;
+                    margin-top: 4px;
+                    padding: 3px 8px;
+                    background-color: rgba(33, 150, 243, 0.15);
+                    border-radius: 8px;
+                    border: 1px solid rgba(33, 150, 243, 0.4);
+                }
+            """)
+            
+            self.overview_page.occupancy_desc_label.setText("Traffic detected in channel")
+            self.overview_page.occupancy_desc_label.setStyleSheet("""
+                QLabel {
+                    color: #90caf9;
+                    font-size: 12px;
+                    font-weight: bold;
+                    margin-top: 2px;
+                }
+            """)
+            
+            self.overview_page.occupancy_indicator_bar.setStyleSheet("""
+                QFrame {
+                    background-color: #2196F3;
+                    border-radius: 1px;
+                    margin-top: 3px;
+                }
+            """)
+            
+            self.overview_page.occupancy_card.setStyleSheet("""
+                QFrame {
+                    background-color: #2a2a2a;
+                    border-radius: 12px;
+                    border: 2px solid #2196F3;
+                    background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
+                        stop: 0 #2a2a2a, stop: 1 #1f1f1f);
+                }
+                QFrame:hover {
+                    border: 2px solid #64b5f6;
+                    background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
+                        stop: 0 #2f2f2f, stop: 1 #242424);
+                }
+            """)
+        else:
+            # Static Grey/Green for vacant (idle)
+            self.stop_occupancy_flashing()
+            self.overview_page.occupancy_title_icon.load(get_icon_svg('occupancy_inactive'))
+            self.overview_page.occupancy_indicator.load(get_icon_svg('occupancy_inactive'))
+            
+            self.overview_page.occupancy_status_label.setText("CHANNEL VACANT")
+            self.overview_page.occupancy_status_label.setStyleSheet("""
+                QLabel {
+                    color: #4caf50;
+                    font-size: 15px;
+                    font-weight: bold;
+                    margin-top: 4px;
+                    padding: 3px 8px;
+                    background-color: rgba(76, 175, 80, 0.1);
+                    border-radius: 8px;
+                    border: 1px solid rgba(76, 175, 80, 0.3);
+                }
+            """)
+            
+            self.overview_page.occupancy_desc_label.setText("No traffic detected")
+            self.overview_page.occupancy_desc_label.setStyleSheet("""
+                QLabel {
+                    color: #aaaaaa;
+                    font-size: 12px;
+                    font-weight: normal;
+                    margin-top: 2px;
+                    font-style: italic;
+                }
+            """)
+            
+            self.overview_page.occupancy_indicator_bar.setStyleSheet("""
+                QFrame {
+                    background-color: #4caf50;
+                    border-radius: 1px;
+                    margin-top: 3px;
+                }
+            """)
+            
+            self.overview_page.occupancy_card.setStyleSheet("""
                 QFrame {
                     background-color: #2a2a2a;
                     border-radius: 12px;
@@ -564,6 +776,32 @@ class MainWindow(QMainWindow, UIBase):
             self.overview_page.alarm_indicator.load(get_icon_svg('alarm_active'))
         
         self.alarm_flash_state = not self.alarm_flash_state
+
+    def start_occupancy_flashing(self):
+        """Start flashing the occupancy indicator"""
+        if not hasattr(self, 'occ_flash_timer'):
+            self.occ_flash_timer = QTimer()
+            self.occ_flash_timer.timeout.connect(self.toggle_occupancy_icon)
+            self.occ_flash_state = True
+        
+        if not self.occ_flash_timer.isActive():
+            self.occ_flash_timer.start(500)  # Flash every 500ms
+            self.occ_flash_state = True
+            self.overview_page.occupancy_indicator.load(get_icon_svg('occupancy_active'))
+
+    def stop_occupancy_flashing(self):
+        """Stop flashing the occupancy indicator"""
+        if hasattr(self, 'occ_flash_timer') and self.occ_flash_timer.isActive():
+            self.occ_flash_timer.stop()
+
+    def toggle_occupancy_icon(self):
+        """Toggle between occupancy_active and occupancy_flashing icons"""
+        if self.occ_flash_state:
+            self.overview_page.occupancy_indicator.load(get_icon_svg('occupancy_flashing'))
+        else:
+            self.overview_page.occupancy_indicator.load(get_icon_svg('occupancy_active'))
+        
+        self.occ_flash_state = not self.occ_flash_state
     
     def update_ui_for_user_role(self):
         """根据用户角色更新UI"""

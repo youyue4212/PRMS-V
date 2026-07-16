@@ -135,6 +135,46 @@ def get_settings_svg():
     </svg>
     """
 
+def get_occupancy_active_svg():
+    """SVG for active occupancy (walking person in green/blue)"""
+    return """
+    <svg width="80" height="80" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="12" cy="12" r="11" fill="#2196F3" fill-opacity="0.2"/>
+        <circle cx="12" cy="12" r="9" fill="#2196F3" fill-opacity="0.4"/>
+        <!-- Head -->
+        <circle cx="13" cy="4.5" r="1.5" fill="#2196F3"/>
+        <!-- Body & Limbs -->
+        <path d="M13 6.5c-.6 0-1.2.3-1.5.8l-2.2 3c-.3.4-.3.9-.1 1.3l1.8 3.4V20c0 .6.4 1 1 1s1-.4 1-1v-4.5l-1.4-2.7 1.4-1.9 1.5 2.2c.2.3.6.5 1 .5h1.5c.6 0 1-.4 1-1s-.4-1-1-1h-1l-1.8-2.6V8c0-.8-.7-1.5-1.5-1.5z" fill="#2196F3"/>
+    </svg>
+    """
+
+def get_occupancy_inactive_svg():
+    """SVG for inactive occupancy (standing person in grey)"""
+    return """
+    <svg width="80" height="80" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="12" cy="12" r="11" fill="#555555" fill-opacity="0.2"/>
+        <!-- Head -->
+        <circle cx="12" cy="5" r="2" fill="#aaaaaa"/>
+        <!-- Body & Limbs -->
+        <path d="M12 8c-1.1 0-2 .9-2 2v4c0 .6.4 1 1 1h2c.6 0 1-.4 1-1v-4c0-1.1-.9-2-2-2zM10.5 16v4c0 .6.4 1 1 1s1-.4 1-1v-4h-2z" fill="#aaaaaa"/>
+    </svg>
+    """
+
+def get_occupancy_flashing_svg():
+    """SVG for flashing occupancy (walking person with motion lines)"""
+    return """
+    <svg width="80" height="80" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="12" cy="12" r="11" fill="#2196F3" fill-opacity="0.3"/>
+        <circle cx="12" cy="12" r="10" fill="#2196F3" fill-opacity="0.6"/>
+        <!-- Head -->
+        <circle cx="13" cy="4.5" r="1.5" fill="#2196F3"/>
+        <!-- Body & Limbs -->
+        <path d="M13 6.5c-.6 0-1.2.3-1.5.8l-2.2 3c-.3.4-.3.9-.1 1.3l1.8 3.4V20c0 .6.4 1 1 1s1-.4 1-1v-4.5l-1.4-2.7 1.4-1.9 1.5 2.2c.2.3.6.5 1 .5h1.5c.6 0 1-.4 1-1s-.4-1-1-1h-1l-1.8-2.6V8c0-.8-.7-1.5-1.5-1.5z" fill="#2196F3"/>
+        <!-- Motion lines -->
+        <path d="M4 8h2M3 12h3M4 16h2" stroke="#2196F3" stroke-width="1.5" stroke-linecap="round"/>
+    </svg>
+    """
+
 def get_icon_svg(tag, w=14,h=14):
     svg = None
     if tag =='disconnected':
@@ -147,6 +187,12 @@ def get_icon_svg(tag, w=14,h=14):
         svg=get_alarm_inactive_svg().encode()
     elif tag == 'alarm_flashing':
         svg=get_alarm_flashing_svg().encode()
+    elif tag == 'occupancy_active':
+        svg=get_occupancy_active_svg().encode()
+    elif tag == 'occupancy_inactive':
+        svg=get_occupancy_inactive_svg().encode()
+    elif tag == 'occupancy_flashing':
+        svg=get_occupancy_flashing_svg().encode()
     elif tag == 'overview':
         svg=get_overview_svg().encode()
     elif tag == 'spectrum':
