@@ -137,7 +137,8 @@ class MainWindow(QMainWindow, UIBase):
         button_layout.addWidget(self.acquisition_btn)
         
         # Add save data button
-        self.save_data_btn = QPushButton("Save Data")
+        from core.translation import _t
+        self.save_data_btn = QPushButton(_t("btn_save"))
         self.save_data_btn.setFixedHeight(button_height)
         self.save_data_btn.setStyleSheet(f"""
             QPushButton {{
@@ -162,7 +163,7 @@ class MainWindow(QMainWindow, UIBase):
         button_layout.addWidget(self.save_data_btn)
         
         # Add user management button (visible only to admin)
-        self.user_management_btn = QPushButton("User Mgmt")
+        self.user_management_btn = QPushButton(_t("btn_user_mgmt"))
         self.user_management_btn.setFixedHeight(button_height)
         self.user_management_btn.setStyleSheet(f"""
             QPushButton {{
@@ -187,7 +188,7 @@ class MainWindow(QMainWindow, UIBase):
         button_layout.addWidget(self.user_management_btn)
 
         # Add logout button
-        self.logout_btn = QPushButton("Logout")
+        self.logout_btn = QPushButton(_t("btn_logout"))
         self.logout_btn.setFixedHeight(button_height)
         self.logout_btn.setStyleSheet(f"""
             QPushButton {{
@@ -235,6 +236,9 @@ class MainWindow(QMainWindow, UIBase):
         # 连接超时管理器信号
         self.timeout_manager.timeout_occurred.connect(self.on_admin_timeout)
         self.timeout_manager.timer_updated.connect(self.on_timeout_timer_updated)
+        
+        # 连接语言切换信号
+        self.status_bar.language_changed.connect(self.on_language_changed)
         
         # 绑定全局操作事件（所有点击/输入均更新操作时间，重置计时器）
         self.installEventFilter(self)
@@ -346,8 +350,9 @@ class MainWindow(QMainWindow, UIBase):
     
     def clear_data(self):
         """Clear all data (spectrum, time series, etc.)"""
+        from core.translation import _t
         # 检查权限
-        if not self.check_permission_before_action("Clear data", Permission.CLEAR_DATA):
+        if not self.check_permission_before_action("action_clear_data", Permission.CLEAR_DATA):
             return
         
         # 更新操作时间（重置超时计时器）
@@ -355,12 +360,11 @@ class MainWindow(QMainWindow, UIBase):
         
         if self.is_acquiring:
             # 如果正在采集，询问用户是否要先停止采集
-            reply = QMessageBox.question(self, "Acquisition Running", 
-                                        "Data acquisition is currently running. Would you like to:\n\n"
-                                        "1. Stop acquisition and clear data\n"
-                                        "2. Cancel clearing data\n\n"
-                                        "Click 'Yes' to stop and clear, 'No' to cancel.",
-                                        QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            reply = QMessageBox.question(
+                self,
+                _t("msg_acq_running_title"),
+                _t("msg_acq_running_text"),
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
             
             if reply == QMessageBox.Yes:
                 # 停止采集（不会断开TCP连接，只是停止数据处理）
@@ -375,9 +379,11 @@ class MainWindow(QMainWindow, UIBase):
                 return
         
         # 确认清除数据
-        reply = QMessageBox.question(self, "Clear Data", 
-                                    "Are you sure you want to clear all data? This will reset spectrum, time series, and client data.",
-                                    QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        reply = QMessageBox.question(
+            self,
+            _t("msg_clear_data_title"),
+            _t("msg_clear_data_text"),
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
         
         if reply == QMessageBox.Yes:
             # 重置所有数据
@@ -406,7 +412,7 @@ class MainWindow(QMainWindow, UIBase):
         # 如果是自动保存，跳过权限检查（自动保存对所有用户级别都生效）
         if not auto_save:
             # 手动保存需要检查权限
-            if not self.check_permission_before_action("Save data", Permission.SAVE_DATA):
+            if not self.check_permission_before_action("action_save_data", Permission.SAVE_DATA):
                 return
             
             # 更新操作时间（重置超时计时器）
@@ -447,16 +453,16 @@ class MainWindow(QMainWindow, UIBase):
 
         # Get all active faults from diagnostics manager
         active_faults = self.diagnostics_manager.get_all_active_faults()
-        current_fault_keys = set((client_id, code) for client_id, code, _, _, _ in active_faults)
+        current_fault_keys = set((client_id, code) for client_id, code, _, _, _, _ in active_faults)
         
         # Log newly added faults
         for client_id, code in current_fault_keys - self.prev_fault_keys:
-            name, desc, severity = FaultCode.get_info(code)
+            name, desc, severity, _ = FaultCode.get_info(code)
             self.log(f"[FAULT DETECTED] Client: {client_id} | Code: {code} | {name}: {desc}", severity)
             
         # Log cleared faults
         for client_id, code in self.prev_fault_keys - current_fault_keys:
-            name, _, _ = FaultCode.get_info(code)
+            name, _, _, _ = FaultCode.get_info(code)
             self.log(f"[FAULT CLEARED] Client: {client_id} | Code: {code} | {name} has been resolved", "INFO")
             
         self.prev_fault_keys = current_fault_keys
@@ -469,11 +475,12 @@ class MainWindow(QMainWindow, UIBase):
             self.overview_page.alarm_title_icon.load(get_icon_svg('alarm_active'))
             
             # Update status label with red active styling
-            self.overview_page.alarm_status_label.setText("ALARM ACTIVE")
+            from core.translation import _t
+            self.overview_page.alarm_status_label.setText(_t("status_alarm"))
             self.overview_page.alarm_status_label.setStyleSheet("""
                 QLabel {
                     color: #ff4444;
-                    font-size: 16px;
+                    font-size: 18px;
                     font-weight: bold;
                     margin-top: 8px;
                     padding: 4px 12px;
@@ -484,14 +491,13 @@ class MainWindow(QMainWindow, UIBase):
             """)
             
             # Update description with timestamp
-            self.overview_page.alarm_desc_label.setText(f"Alarm detected at {current_time}")
+            self.overview_page.alarm_desc_label.setText(_t("desc_alarm_at", time=current_time))
             self.overview_page.alarm_desc_label.setStyleSheet("""
                 QLabel {
                     color: #ff8888;
-                    font-size: 12px;
-                    font-weight: normal;
+                    font-size: 14px;
+                    font-weight: bold;
                     margin-top: 2px;
-                    font-style: italic;
                 }
             """)
             
@@ -527,15 +533,22 @@ class MainWindow(QMainWindow, UIBase):
             self.overview_page.alarm_title_icon.load(get_icon_svg('alarm_inactive'))
             self.overview_page.alarm_indicator.load(get_icon_svg('alarm_inactive'))
             
-            # Format fault codes for display, e.g., "E101, E201"
-            fault_codes_str = ", ".join([code for _, code, _, _, _ in active_faults])
+            # Format fault messages for display (join unique operator messages)
+            from core.translation import _t
+            unique_op_msgs = []
+            for _, code, _, _, _, _ in active_faults:
+                translated_msg = _t(f"fault_op_{code}")
+                if translated_msg not in unique_op_msgs:
+                    unique_op_msgs.append(translated_msg)
+            
+            fault_msg_str = "\n".join(unique_op_msgs)
             
             # Update status label with orange styling
-            self.overview_page.alarm_status_label.setText("SYSTEM FAULT")
+            self.overview_page.alarm_status_label.setText(_t("status_fault"))
             self.overview_page.alarm_status_label.setStyleSheet("""
                 QLabel {
                     color: #ff9800;
-                    font-size: 16px;
+                    font-size: 18px;
                     font-weight: bold;
                     margin-top: 8px;
                     padding: 4px 12px;
@@ -545,12 +558,12 @@ class MainWindow(QMainWindow, UIBase):
                 }
             """)
             
-            # Show the active fault codes in description
-            self.overview_page.alarm_desc_label.setText(f"Active Faults: {fault_codes_str}")
+            # Show the active fault messages in description (plain Chinese)
+            self.overview_page.alarm_desc_label.setText(fault_msg_str)
             self.overview_page.alarm_desc_label.setStyleSheet("""
                 QLabel {
                     color: #ffb74d;
-                    font-size: 12px;
+                    font-size: 14px;
                     font-weight: bold;
                     margin-top: 2px;
                 }
@@ -589,11 +602,12 @@ class MainWindow(QMainWindow, UIBase):
             self.overview_page.alarm_indicator.load(get_icon_svg('alarm_inactive'))
             
             # Update status label with green styling
-            self.overview_page.alarm_status_label.setText("SYSTEM NORMAL")
+            from core.translation import _t
+            self.overview_page.alarm_status_label.setText(_t("status_normal"))
             self.overview_page.alarm_status_label.setStyleSheet("""
                 QLabel {
                     color: #4caf50;
-                    font-size: 16px;
+                    font-size: 18px;
                     font-weight: bold;
                     margin-top: 8px;
                     padding: 4px 12px;
@@ -604,14 +618,13 @@ class MainWindow(QMainWindow, UIBase):
             """)
             
             # Update description with timestamp
-            self.overview_page.alarm_desc_label.setText(f"Last checked: {current_time}")
+            self.overview_page.alarm_desc_label.setText(_t("desc_checked_at", time=current_time))
             self.overview_page.alarm_desc_label.setStyleSheet("""
                 QLabel {
                     color: #aaaaaa;
-                    font-size: 12px;
+                    font-size: 14px;
                     font-weight: normal;
                     margin-top: 2px;
-                    font-style: italic;
                 }
             """)
             
@@ -651,25 +664,26 @@ class MainWindow(QMainWindow, UIBase):
             self.start_occupancy_flashing()
             self.overview_page.occupancy_title_icon.load(get_icon_svg('occupancy_active'))
             
-            self.overview_page.occupancy_status_label.setText("PERSON PASSING")
+            from core.translation import _t
+            self.overview_page.occupancy_status_label.setText(_t("status_passing"))
             self.overview_page.occupancy_status_label.setStyleSheet("""
                 QLabel {
                     color: #2196F3;
-                    font-size: 15px;
+                    font-size: 18px;
                     font-weight: bold;
-                    margin-top: 4px;
-                    padding: 3px 8px;
+                    margin-top: 8px;
+                    padding: 4px 12px;
                     background-color: rgba(33, 150, 243, 0.15);
-                    border-radius: 8px;
+                    border-radius: 10px;
                     border: 1px solid rgba(33, 150, 243, 0.4);
                 }
             """)
             
-            self.overview_page.occupancy_desc_label.setText("Traffic detected in channel")
+            self.overview_page.occupancy_desc_label.setText(_t("desc_traffic_detected"))
             self.overview_page.occupancy_desc_label.setStyleSheet("""
                 QLabel {
                     color: #90caf9;
-                    font-size: 12px;
+                    font-size: 14px;
                     font-weight: bold;
                     margin-top: 2px;
                 }
@@ -679,7 +693,7 @@ class MainWindow(QMainWindow, UIBase):
                 QFrame {
                     background-color: #2196F3;
                     border-radius: 1px;
-                    margin-top: 3px;
+                    margin-top: 5px;
                 }
             """)
             
@@ -703,28 +717,28 @@ class MainWindow(QMainWindow, UIBase):
             self.overview_page.occupancy_title_icon.load(get_icon_svg('occupancy_inactive'))
             self.overview_page.occupancy_indicator.load(get_icon_svg('occupancy_inactive'))
             
-            self.overview_page.occupancy_status_label.setText("CHANNEL VACANT")
+            from core.translation import _t
+            self.overview_page.occupancy_status_label.setText(_t("status_vacant"))
             self.overview_page.occupancy_status_label.setStyleSheet("""
                 QLabel {
                     color: #4caf50;
-                    font-size: 15px;
+                    font-size: 18px;
                     font-weight: bold;
-                    margin-top: 4px;
-                    padding: 3px 8px;
+                    margin-top: 8px;
+                    padding: 4px 12px;
                     background-color: rgba(76, 175, 80, 0.1);
-                    border-radius: 8px;
+                    border-radius: 10px;
                     border: 1px solid rgba(76, 175, 80, 0.3);
                 }
             """)
             
-            self.overview_page.occupancy_desc_label.setText("No traffic detected")
+            self.overview_page.occupancy_desc_label.setText(_t("desc_no_traffic"))
             self.overview_page.occupancy_desc_label.setStyleSheet("""
                 QLabel {
                     color: #aaaaaa;
-                    font-size: 12px;
+                    font-size: 14px;
                     font-weight: normal;
                     margin-top: 2px;
-                    font-style: italic;
                 }
             """)
             
@@ -732,7 +746,7 @@ class MainWindow(QMainWindow, UIBase):
                 QFrame {
                     background-color: #4caf50;
                     border-radius: 1px;
-                    margin-top: 3px;
+                    margin-top: 5px;
                 }
             """)
             
@@ -842,9 +856,10 @@ class MainWindow(QMainWindow, UIBase):
         self.save_data_btn.setEnabled(can_save_data)
         
         # 更新logout/login按钮文本和功能
+        from core.translation import _t
         if role == UserRole.VIEWER:
             # 普通用户模式：显示Login按钮
-            self.logout_btn.setText("Login")
+            self.logout_btn.setText(_t("btn_login"))
             self.logout_btn.setStyleSheet("""
                 QPushButton {
                     background-color: #4CAF50;
@@ -871,7 +886,7 @@ class MainWindow(QMainWindow, UIBase):
             self.logout_btn.clicked.connect(self.login)
         else:
             # 管理员模式：显示Logout按钮
-            self.logout_btn.setText("Logout")
+            self.logout_btn.setText(_t("btn_logout"))
             self.logout_btn.setStyleSheet("""
                 QPushButton {
                     background-color: #f44336;
@@ -1010,7 +1025,13 @@ class MainWindow(QMainWindow, UIBase):
         dialog.exec_()
     
     def check_permission_before_action(self, action_name, permission_required):
-        """在执行操作前检查权限"""
+        """在执行操作前检查权限。action_name 可为翻译键(action_*)或已翻译文案。"""
+        from core.translation import _t
+        # 若传入的是翻译键则翻译，否则原样显示
+        action_text = _t(action_name) if action_name.startswith("action_") else action_name
+        user_name = self.current_user['username'] if self.current_user else "Unknown"
+        perm_str = str(permission_required)
+
         if str(os.environ.get("ALLOW_VIEWER_SETTINGS", "0")).strip() == "1":
             return True
         # 首先检查当前用户的本地角色
@@ -1020,11 +1041,9 @@ class MainWindow(QMainWindow, UIBase):
             # 所以我们需要额外检查本地角色
             if not self.user_manager.has_permission(permission_required):
                 QMessageBox.warning(
-                    self, 
-                    "Insufficient Permission",
-                    f"You don't have permission to perform '{action_name}' operation.\n\n"
-                    f"Required permission: {permission_required}\n"
-                    f"Current user: {self.current_user['username'] if self.current_user else 'Unknown user'} (Viewer mode)"
+                    self,
+                    _t("msg_perm_title"),
+                    _t("msg_perm_denied", action=action_text, perm=perm_str, user=user_name)
                 )
                 return False
             # 即使用户管理器说有权限，如果本地角色是VIEWER，也要检查VIEWER是否有这个权限
@@ -1033,11 +1052,9 @@ class MainWindow(QMainWindow, UIBase):
             viewer_permissions = Perm.get_permissions_for_role(UserRole.VIEWER)
             if permission_required not in viewer_permissions:
                 QMessageBox.warning(
-                    self, 
-                    "Insufficient Permission",
-                    f"You are in viewer mode and don't have permission to perform '{action_name}' operation.\n\n"
-                    f"Required permission: {permission_required}\n"
-                    f"Current mode: Viewer (temporary mode)"
+                    self,
+                    _t("msg_perm_title"),
+                    _t("msg_perm_viewer", action=action_text, perm=perm_str)
                 )
                 return False
             return True
@@ -1045,11 +1062,9 @@ class MainWindow(QMainWindow, UIBase):
             # 管理员或其他角色，使用用户管理器的权限检查
             if not self.user_manager.has_permission(permission_required):
                 QMessageBox.warning(
-                    self, 
-                    "Insufficient Permission",
-                    f"You don't have permission to perform '{action_name}' operation.\n\n"
-                    f"Required permission: {permission_required}\n"
-                    f"Current user: {self.current_user['username'] if self.current_user else 'Unknown user'}"
+                    self,
+                    _t("msg_perm_title"),
+                    _t("msg_perm_denied_user", action=action_text, perm=perm_str, user=user_name)
                 )
                 return False
             return True
@@ -1156,7 +1171,7 @@ class MainWindow(QMainWindow, UIBase):
     
     def toggle_raw_packet_logging(self, state):
         """切换原始数据包记录 - 添加权限检查"""
-        if not self.check_permission_before_action("Modify log settings", Permission.MODIFY_LOG_SETTINGS):
+        if not self.check_permission_before_action("action_modify_log", Permission.MODIFY_LOG_SETTINGS):
             # 恢复原始状态
             self.telemetry_checkbox.blockSignals(True)
             self.telemetry_checkbox.setChecked(not state)
@@ -1168,7 +1183,7 @@ class MainWindow(QMainWindow, UIBase):
     
     def select_log_path(self):
         """选择日志路径 - 添加权限检查"""
-        if not self.check_permission_before_action("Modify log settings", Permission.MODIFY_LOG_SETTINGS):
+        if not self.check_permission_before_action("action_modify_log", Permission.MODIFY_LOG_SETTINGS):
             return
         
         # 调用父类方法
@@ -1176,7 +1191,7 @@ class MainWindow(QMainWindow, UIBase):
     
     def toggle_auto_save(self, state):
         """切换自动保存开关 - 添加权限检查"""
-        if not self.check_permission_before_action("Modify auto-save settings", Permission.SAVE_DATA):
+        if not self.check_permission_before_action("action_modify_autosave", Permission.SAVE_DATA):
             # 恢复原始状态
             self.auto_save_checkbox.blockSignals(True)
             self.auto_save_checkbox.setChecked(not state)
@@ -1191,7 +1206,7 @@ class MainWindow(QMainWindow, UIBase):
     
     def set_auto_save_interval(self, interval):
         """设置自动保存间隔 - 添加权限检查"""
-        if not self.check_permission_before_action("Modify auto-save settings", Permission.SAVE_DATA):
+        if not self.check_permission_before_action("action_modify_autosave", Permission.SAVE_DATA):
             # 恢复原始值
             self.auto_save_interval_spin.blockSignals(True)
             self.auto_save_interval_spin.setValue(self.auto_save_interval)
@@ -1206,7 +1221,7 @@ class MainWindow(QMainWindow, UIBase):
     
     def select_auto_save_path(self):
         """选择自动保存路径 - 添加权限检查"""
-        if not self.check_permission_before_action("Modify auto-save settings", Permission.SAVE_DATA):
+        if not self.check_permission_before_action("action_modify_autosave", Permission.SAVE_DATA):
             return
         
         # 更新操作时间（重置超时计时器）
@@ -1219,12 +1234,12 @@ class MainWindow(QMainWindow, UIBase):
         """退出到普通用户模式（viewer模式）"""
         # 注意：在logout过程中不更新操作时间，避免重新启动计时器
         # self.update_operate_time()  # 注释掉这一行
+        from core.translation import _t
         
         reply = QMessageBox.question(
             self,
-            "Logout",
-            "Are you sure you want to logout from admin mode?\n\n"
-            "You will be switched to normal user (viewer) mode.",
+            _t("msg_logout_title"),
+            _t("msg_logout_confirm"),
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No
         )
@@ -1255,9 +1270,8 @@ class MainWindow(QMainWindow, UIBase):
                 # 显示通知
                 QMessageBox.information(
                     self,
-                    "Switched to User Mode",
-                    "Successfully switched to normal user (viewer) mode.\n\n"
-                    "To perform settings operations, please log in as admin again."
+                    _t("msg_logout_success_title"),
+                    _t("msg_logout_success_text")
                 )
                 
                 # 记录日志
@@ -1270,8 +1284,8 @@ class MainWindow(QMainWindow, UIBase):
                 # 如果当前用户不是管理员，显示信息
                 QMessageBox.information(
                     self,
-                    "Already in User Mode",
-                    "You are already in normal user (viewer) mode."
+                    _t("msg_already_user_title"),
+                    _t("msg_already_user_text")
                 )
     
     def _delayed_relogin(self):
@@ -1400,11 +1414,11 @@ class MainWindow(QMainWindow, UIBase):
             
             # Show timeout notification (non-blocking)
             from PyQt5.QtCore import QTimer
+            from core.translation import _t
             QTimer.singleShot(100, lambda: QMessageBox.information(
                 self,
-                "Admin Mode Timeout",
-                "Admin mode inactive timeout (3 minutes), temporarily switched to normal view mode.\n\n"
-                "To perform settings operations, please log in as admin again."
+                _t("msg_admin_timeout_title"),
+                _t("msg_admin_timeout_text")
             ))
             
             # Log the event
@@ -1452,27 +1466,28 @@ class MainWindow(QMainWindow, UIBase):
                         self.setWindowTitle(f"Gamma-ray Spectrometer - {username} (Admin)")
                     
                     # 显示通知
+                    from core.translation import _t
                     QMessageBox.information(
                         self,
-                        "Switched to Admin Mode",
-                        "Successfully logged in as administrator.\n\n"
-                        "You now have full control permissions.\n"
-                        "Note: Admin mode will auto logout after 3 minutes of inactivity."
+                        _t("msg_admin_login_success_title"),
+                        _t("msg_admin_login_success_text")
                     )
                     
                     # 记录日志
                     self.log(f"Logged in as administrator: {current_user['username']}", 'INFO')
                 else:
+                    from core.translation import _t
                     QMessageBox.warning(
                         self,
-                        "Login Failed",
-                        "Failed to get user information from user manager."
+                        _t("msg_login_failed_title"),
+                        _t("msg_login_failed_user_manager")
                     )
             else:
+                from core.translation import _t
                 QMessageBox.warning(
                     self,
-                    "Login Failed",
-                    "Failed to get user information from login dialog."
+                    _t("msg_login_failed_title"),
+                    _t("msg_login_failed_dialog")
                 )
     
     def on_timeout_timer_updated(self, remaining_seconds: int):
@@ -1619,3 +1634,119 @@ class MainWindow(QMainWindow, UIBase):
         
         # 调用父类的按键事件处理
         super().keyPressEvent(event)
+
+    def on_language_changed(self, lang: str):
+        """Handle language changed signal from status bar"""
+        # Save to configuration
+        self.config.update_settings(language=lang)
+        self.config.save_settings()
+        
+        # Re-translate main window elements
+        from core.translation import _t
+        if self.current_user and 'username' in self.current_user:
+            username = self.current_user['username']
+            role_name = "Admin" if self.current_user['role'] == UserRole.ADMIN else "User"
+            self.setWindowTitle(f"Gamma-ray Spectrometer - {username} ({role_name})")
+        else:
+            self.setWindowTitle(_t("sys_title"))
+            
+        self.save_data_btn.setText(_t("btn_save"))
+        self.user_management_btn.setText(_t("btn_user_mgmt"))
+        # Viewer shows Login; Admin shows Logout
+        if self.current_user and self.current_user.get('role') == UserRole.VIEWER:
+            self.logout_btn.setText(_t("btn_login"))
+        else:
+            self.logout_btn.setText(_t("btn_logout"))
+        
+        # Retranslate settings page group boxes dynamically
+        if hasattr(self, 'comm_group'):
+            self.comm_group.setTitle(_t("set_comm_settings"))
+            self.tcp_enable_checkbox.setText(_t("set_tcp_enable"))
+            self.server_host_label.setText(_t("set_server_host"))
+            self.tcp_host_input.setPlaceholderText(_t("set_server_host_placeholder"))
+            self.server_port_label.setText(_t("set_server_port"))
+            self.serial_port_label.setText(_t("set_serial_port"))
+            self.refresh_serial_btn.setText(_t("btn_refresh"))
+            self.baudrate_label.setText(_t("set_baudrate"))
+            self.reconnect_serial_btn.setText(_t("btn_reconnect"))
+            self.client_selection_label.setText(_t("set_display_client"))
+            # Update first item in client selection combo
+            if self.client_selection_combo.count() > 0:
+                self.client_selection_combo.setItemText(0, _t("set_display_client_auto"))
+        
+        if hasattr(self, 'det_group'):
+            self.det_group.setTitle(_t("set_det_settings"))
+            self.bias_voltage_label.setText(_t("set_bias_voltage"))
+            self.threshold_label.setText(_t("set_threshold"))
+            # Find set buttons in det_group and retranslate
+            for btn in self.det_group.findChildren(QPushButton):
+                if btn.text() in ["Set HV", "设置高压"]:
+                    btn.setText(_t("btn_set_hv"))
+                elif btn.text() in ["Set Threshold", "设置阈值"]:
+                    btn.setText(_t("btn_set_threshold"))
+                    
+        if hasattr(self, 'ctrl_group'):
+            self.ctrl_group.setTitle(_t("set_control"))
+            self.gain_stabilizer_title_label.setText(_t("set_gain_stabilizer"))
+            self.update_control_labels()
+            
+        if hasattr(self, 'keyboard_group'):
+            self.keyboard_group.setTitle(_t("set_keyboard"))
+            self.keyboard_enable_checkbox.setText(_t("set_keyboard_enable"))
+            if self.keyboard_enable_checkbox.isChecked():
+                self.keyboard_status_label.setText(_t("status_enabled"))
+            else:
+                self.keyboard_status_label.setText(_t("status_disabled"))
+                
+        if hasattr(self, 'device_group'):
+            self.device_group.setTitle(_t("set_device_status"))
+            self.product_id_title_label.setText(_t("label_product_id"))
+            self.sensitivity_title_label.setText(_t("label_sensitivity"))
+            self.sensitivity_set_btn.setText(_t("btn_set"))
+            self.sensitivity_read_btn.setText(_t("btn_read"))
+            self.relay_control_title_label.setText(_t("set_relay_control"))
+            self.relay_read_btn.setText(_t("btn_read_status"))
+            
+            # Retranslate relay status label dynamically
+            if hasattr(self, 'relay_status_label'):
+                states = getattr(self, 'relay_states', None)
+                if states is not None and len(states) >= 3:
+                    r0, r1, r2 = states[0], states[1], states[2]
+                    self.relay_status_label.setText(_t("relay_status_format", r0=int(r0), r1=int(r1), r2=int(r2)))
+                else:
+                    self.relay_status_label.setText(_t("set_relay_status"))
+                    
+            self.alarm_status_title_label.setText(_t("card_alarm_title"))
+            self.alarm_read_btn.setText(_t("btn_read_alarm"))
+            self.occupancy_title_label.setText(_t("set_occupancy"))
+            self.counter_title_label.setText(_t("set_counter"))
+            
+        if hasattr(self, 'log_group'):
+            self.log_group.setTitle(_t("set_raw_logging"))
+            self.telemetry_checkbox.setText(_t("set_logging_enable"))
+            self.log_path_input.setPlaceholderText(_t("set_logging_placeholder"))
+            self.select_path_btn.setText(_t("btn_browse"))
+            
+        if hasattr(self, 'auto_save_group'):
+            self.auto_save_group.setTitle(_t("set_auto_save"))
+            self.auto_save_checkbox.setText(_t("set_auto_save_enable"))
+            self.save_interval_title_label.setText(_t("set_save_interval"))
+            self.save_path_title_label.setText(_t("set_save_path"))
+            self.auto_save_path_input.setPlaceholderText(_t("set_save_path_placeholder"))
+            self.auto_save_path_btn.setText(_t("btn_browse"))
+            self.update_auto_save_counter_label()
+            self.update_auto_save_interval_label(self.auto_save_interval)
+        
+        # Re-translate child pages
+        if hasattr(self, 'bottom_nav'):
+            self.bottom_nav.retranslate_ui()
+        if hasattr(self, 'acquisition_btn'):
+            self.acquisition_btn.retranslate_ui()
+            
+        # Call retranslate_ui on each page if they support it
+        for page in [self.overview_page, self.spectrum_page, self.clients_page, self.alarm_log_page, self.settings_page]:
+            if hasattr(page, 'retranslate_ui'):
+                page.retranslate_ui()
+                
+        # Force a UI update
+        self.update()

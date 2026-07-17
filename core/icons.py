@@ -175,6 +175,18 @@ def get_occupancy_flashing_svg():
     </svg>
     """
 
+def get_lock_svg():
+    """SVG for lock icon (padlock)"""
+    return """
+    <svg width="80" height="80" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="12" cy="12" r="11" fill="#ff9800" fill-opacity="0.15"/>
+        <rect x="6" y="10" width="12" height="10" rx="2" stroke="#ff9800" stroke-width="2" fill="none"/>
+        <path d="M9 10V7a3 3 0 0 1 6 0v3" stroke="#ff9800" stroke-width="2" stroke-linecap="round" fill="none"/>
+        <circle cx="12" cy="14" r="1.5" fill="#ff9800"/>
+        <line x1="12" y1="15.5" x2="12" y2="17.5" stroke="#ff9800" stroke-width="1.5" stroke-linecap="round"/>
+    </svg>
+    """
+
 def get_icon_svg(tag, w=14,h=14):
     svg = None
     if tag =='disconnected':
@@ -203,4 +215,6 @@ def get_icon_svg(tag, w=14,h=14):
         svg=get_alarm_log_svg().encode()
     elif tag == 'settings':
         svg=get_settings_svg().encode()
+    elif tag == 'lock':
+        svg=get_lock_svg().encode()
     return svg

@@ -3,7 +3,8 @@ from datetime import datetime
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
-    QLabel, QPushButton, QFrame, QSpacerItem, QSizePolicy
+    QLabel, QPushButton, QFrame, QSpacerItem, QSizePolicy,
+    QStackedWidget
 )
 from PyQt5.QtSvg import QSvgWidget
 from PyQt5.QtGui import QFont
@@ -17,14 +18,15 @@ class OverviewPage(QWidget):
     """Overview page showing radiation data cards and chart - optimized for 1024x600 screen"""
     def __init__(self, parent):
         super().__init__()
+        self.parent = parent
         layout = QVBoxLayout()
         # Reduce margins for small screen
         layout.setContentsMargins(10, 10, 10, 10)
         layout.setSpacing(8)
         
         # Title - smaller font
-        title = QLabel("Gamma-ray Spectrometer")
-        title.setStyleSheet("""
+        self.title = QLabel("伽马能谱探测系统")
+        self.title.setStyleSheet("""
             QLabel {
                 color: white;
                 font-size: 18px !important;
@@ -32,7 +34,7 @@ class OverviewPage(QWidget):
                 margin-bottom: 8px;
             }
         """)
-        layout.addWidget(title)
+        layout.addWidget(self.title)
         
         # Cards row - ensure three cards have equal width
         cards_layout = QHBoxLayout()
@@ -40,9 +42,9 @@ class OverviewPage(QWidget):
         
         # Radiation card - shows count rate (cps) with larger font, no dose rate
         self.radiation_card = DataCard(
-            "Radiation Level",
+            "辐射水平",
             "0 cps",
-            "Current count rate",  # Show second title
+            "当前计数率",  # Show second title
             "",  # Empty subvalue (no dose rate)
             "",  # Empty subtitle
             value_color="#ffffff",
@@ -52,11 +54,11 @@ class OverviewPage(QWidget):
         
         # Status card - shows temperature and HV
         self.status_card = DataCard(
-            "Status",
+            "设备状态",
             "0 " + chr(176) + "C",
-            "Temperature",
+            "探头温度",
             "0 V",
-            "HV",
+            "高压电压",
             value_color="#ff8c00"
         )
         
@@ -92,14 +94,13 @@ class OverviewPage(QWidget):
         self.alarm_title_icon.load(get_icon_svg('alarm_inactive'))
         title_layout.addWidget(self.alarm_title_icon)
         
-        self.alarm_title_label = QLabel("ALARM STATUS")
+        self.alarm_title_label = QLabel("报警状态")
         self.alarm_title_label.setStyleSheet("""
             QLabel {
                 color: #cccccc;
                 font-size: 13px;
                 font-weight: bold;
                 letter-spacing: 0.5px;
-                text-transform: uppercase;
             }
         """)
         title_layout.addWidget(self.alarm_title_label)
@@ -114,11 +115,11 @@ class OverviewPage(QWidget):
         alarm_layout.addWidget(self.alarm_indicator, 0, Qt.AlignCenter)
         
         # Alarm status label
-        self.alarm_status_label = QLabel("SYSTEM NORMAL")
+        self.alarm_status_label = QLabel("系统正常")
         self.alarm_status_label.setStyleSheet("""
             QLabel {
                 color: #4caf50;
-                font-size: 15px;
+                font-size: 16px;
                 font-weight: bold;
                 margin-top: 4px;
                 padding: 3px 8px;
@@ -131,14 +132,14 @@ class OverviewPage(QWidget):
         alarm_layout.addWidget(self.alarm_status_label, 0, Qt.AlignCenter)
         
         # Alarm description
-        self.alarm_desc_label = QLabel("No alarm detected")
+        self.alarm_desc_label = QLabel("未检测到异常")
+        self.alarm_desc_label.setWordWrap(True)
         self.alarm_desc_label.setStyleSheet("""
             QLabel {
                 color: #aaaaaa;
-                font-size: 12px;
+                font-size: 14px;
                 font-weight: normal;
                 margin-top: 2px;
-                font-style: italic;
             }
         """)
         self.alarm_desc_label.setAlignment(Qt.AlignCenter)
@@ -191,14 +192,13 @@ class OverviewPage(QWidget):
         self.occupancy_title_icon.load(get_icon_svg('occupancy_inactive'))
         occ_title_layout.addWidget(self.occupancy_title_icon)
         
-        self.occupancy_title_label = QLabel("CHANNEL STATUS")
+        self.occupancy_title_label = QLabel("通道状态")
         self.occupancy_title_label.setStyleSheet("""
             QLabel {
                 color: #cccccc;
                 font-size: 13px;
                 font-weight: bold;
                 letter-spacing: 0.5px;
-                text-transform: uppercase;
             }
         """)
         occ_title_layout.addWidget(self.occupancy_title_label)
@@ -213,11 +213,11 @@ class OverviewPage(QWidget):
         occupancy_layout.addWidget(self.occupancy_indicator, 0, Qt.AlignCenter)
         
         # Occupancy status label
-        self.occupancy_status_label = QLabel("CHANNEL VACANT")
+        self.occupancy_status_label = QLabel("通道空闲")
         self.occupancy_status_label.setStyleSheet("""
             QLabel {
                 color: #4caf50;
-                font-size: 15px;
+                font-size: 16px;
                 font-weight: bold;
                 margin-top: 4px;
                 padding: 3px 8px;
@@ -230,14 +230,14 @@ class OverviewPage(QWidget):
         occupancy_layout.addWidget(self.occupancy_status_label, 0, Qt.AlignCenter)
         
         # Occupancy description
-        self.occupancy_desc_label = QLabel("No traffic detected")
+        self.occupancy_desc_label = QLabel("未检测到人员经过")
+        self.occupancy_desc_label.setWordWrap(True)
         self.occupancy_desc_label.setStyleSheet("""
             QLabel {
                 color: #aaaaaa;
-                font-size: 12px;
+                font-size: 14px;
                 font-weight: normal;
                 margin-top: 2px;
-                font-style: italic;
             }
         """)
         self.occupancy_desc_label.setAlignment(Qt.AlignCenter)
@@ -267,12 +267,12 @@ class OverviewPage(QWidget):
         layout.addLayout(cards_layout)
         
         # Chart section
-        chart_title = QLabel("Count Rate Time Series")
+        self.chart_title = QLabel("实时计数率时序图")
         chart_title_font = QFont(FONTS["subtitle"][0], FONTS["subtitle"][1])
         if len(FONTS["subtitle"]) > 2 and "bold" in FONTS["subtitle"][2]:
             chart_title_font.setBold(True)
-        chart_title.setFont(chart_title_font)
-        chart_title.setStyleSheet("""
+        self.chart_title.setFont(chart_title_font)
+        self.chart_title.setStyleSheet("""
             QLabel {
                 color: white;
                 font-weight: bold;
@@ -281,7 +281,7 @@ class OverviewPage(QWidget):
                 margin-bottom: 5px;
             }
         """)
-        layout.addWidget(chart_title)
+        layout.addWidget(self.chart_title)
         
         self.chart = parent.create_cps_widget()
         layout.addWidget(self.chart, 1)
@@ -289,15 +289,43 @@ class OverviewPage(QWidget):
         self.setLayout(layout)
 
 
+    def retranslate_ui(self):
+        """Retranslate UI elements based on current language"""
+        from core.translation import _t
+        self.title.setText(_t("sys_title"))
+        
+        # Update DataCards titles
+        self.radiation_card.title_label.setText(_t("card_rad_title"))
+        self.radiation_card.second_title_label.setText(_t("card_rad_desc"))
+        
+        self.status_card.title_label.setText(_t("card_status_title"))
+        self.status_card.second_title_label.setText(_t("card_status_temp"))
+        self.status_card.subtitle_label.setText(_t("card_status_hv"))
+        
+        # Update Alarm card
+        self.alarm_title_label.setText(_t("card_alarm_title"))
+        self.alarm_status_label.setText(_t("status_normal"))
+        self.alarm_desc_label.setText(_t("desc_no_alarm"))
+        
+        # Update Occupancy card
+        self.occupancy_title_label.setText(_t("card_occ_title"))
+        self.occupancy_status_label.setText(_t("status_vacant"))
+        self.occupancy_desc_label.setText(_t("desc_no_traffic"))
+        
+        # Update Chart title
+        self.chart_title.setText(_t("chart_title"))
+
+
 class SpectrumPage(QWidget):
     """Spectrum page for displaying energy spectrum"""
     def __init__(self, parent):
         super().__init__()
+        self.parent = parent
         layout = QVBoxLayout()
         layout.setContentsMargins(20, 20, 20, 20)
         
-        title = QLabel("Energy Spectrum and Spectrogram")
-        title.setStyleSheet("""
+        self.title = QLabel("能谱与谱图分析")
+        self.title.setStyleSheet("""
             QLabel {
                 color: white;
                 font-size: 22px !important;
@@ -305,7 +333,7 @@ class SpectrumPage(QWidget):
                 margin-bottom: 20px;
             }
         """)
-        layout.addWidget(title)
+        layout.addWidget(self.title)
         
         # Create a splitter layout for better resizing
         from PyQt5.QtWidgets import QSplitter
@@ -340,16 +368,22 @@ class SpectrumPage(QWidget):
         
         self.setLayout(layout)
 
+    def retranslate_ui(self):
+        """Retranslate UI elements based on current language"""
+        from core.translation import _t
+        self.title.setText(_t("spec_title"))
+
 
 class SettingsPage(QWidget):
     """Settings page for configuration"""
     def __init__(self, parent):
         super().__init__()
+        self.parent = parent
         main_layout = QVBoxLayout()
         main_layout.setContentsMargins(20, 20, 20, 20)
         
-        title = QLabel("Settings")
-        title.setStyleSheet("""
+        self.title = QLabel("系统设置")
+        self.title.setStyleSheet("""
             QLabel {
                 color: white;
                 font-size: 22px !important;
@@ -357,7 +391,7 @@ class SettingsPage(QWidget):
                 margin-bottom: 20px;
             }
         """)
-        main_layout.addWidget(title)
+        main_layout.addWidget(self.title)
 
         # Create scroll area for settings content
         from PyQt5.QtWidgets import QScrollArea
@@ -396,19 +430,97 @@ class SettingsPage(QWidget):
         
         self.setLayout(main_layout)
 
+    def retranslate_ui(self):
+        """Retranslate UI elements based on current language"""
+        from core.translation import _t
+        self.title.setText(_t("settings_title"))
+
 
 class ClientsPage(QWidget):
     """Clients page showing detailed information for each connected client"""
     def __init__(self, parent):
         super().__init__()
         self.parent = parent
-        layout = QVBoxLayout()
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(15)
+        
+        # Main layout is a QVBoxLayout containing the QStackedWidget
+        main_layout = QVBoxLayout()
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        
+        self.stacked_widget = QStackedWidget()
+        
+        # 1. Lock screen widget (Index 0)
+        self.lock_widget = QWidget()
+        lock_layout = QVBoxLayout(self.lock_widget)
+        lock_layout.setContentsMargins(20, 40, 20, 20)
+        lock_layout.setSpacing(15)
+        lock_layout.setAlignment(Qt.AlignCenter)
+        
+        # Lock Icon
+        self.lock_icon = QSvgWidget()
+        self.lock_icon.setFixedSize(80, 80)
+        self.lock_icon.load(get_icon_svg('lock'))
+        lock_layout.addWidget(self.lock_icon, 0, Qt.AlignCenter)
+        
+        # Lock Title
+        self.lock_title = QLabel("工程师诊断界面 (工程师/维保人员专用)")
+        self.lock_title.setStyleSheet("""
+            QLabel {
+                color: #ff9800;
+                font-size: 20px;
+                font-weight: bold;
+                margin-top: 10px;
+            }
+        """)
+        self.lock_title.setAlignment(Qt.AlignCenter)
+        lock_layout.addWidget(self.lock_title)
+        
+        # Lock Description
+        self.lock_desc = QLabel(
+            "此界面包含详细的硬件参数、探头原始数据及故障诊断代码。\n"
+            "根据工业安全与 ISA-18.2 规范，日常运行中这些信息对普通操作员隐藏。\n\n"
+            "请点击下方按钮输入工程师密码进行解锁查看。"
+        )
+        self.lock_desc.setStyleSheet("""
+            QLabel {
+                color: #aaaaaa;
+                font-size: 14px;
+                line-height: 1.5;
+                margin-top: 5px;
+            }
+        """)
+        self.lock_desc.setAlignment(Qt.AlignCenter)
+        lock_layout.addWidget(self.lock_desc)
+        
+        # Unlock Button
+        self.unlock_btn = QPushButton("输入工程师密码解锁")
+        self.unlock_btn.setFixedHeight(45)
+        self.unlock_btn.setFixedWidth(240)
+        self.unlock_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #ff9800;
+                color: white;
+                border: none;
+                border-radius: 15px;
+                font-size: 16px;
+                font-weight: bold;
+                margin-top: 20px;
+            }
+            QPushButton:pressed {
+                background-color: #e65100;
+            }
+        """)
+        self.unlock_btn.clicked.connect(self.parent.login)
+        lock_layout.addWidget(self.unlock_btn, 0, Qt.AlignCenter)
+        
+        # 2. Content widget (Index 1)
+        self.content_widget = QWidget()
+        content_layout = QVBoxLayout(self.content_widget)
+        content_layout.setContentsMargins(20, 20, 20, 20)
+        content_layout.setSpacing(15)
         
         # Title
-        title = QLabel("Connected Clients")
-        title.setStyleSheet("""
+        self.clients_title = QLabel("已连接的探测器")
+        self.clients_title.setStyleSheet("""
             QLabel {
                 color: white;
                 font-size: 22px !important;
@@ -416,10 +528,10 @@ class ClientsPage(QWidget):
                 margin-bottom: 10px;
             }
         """)
-        layout.addWidget(title)
+        content_layout.addWidget(self.clients_title)
         
         # Client count summary
-        self.client_summary_label = QLabel("No clients connected")
+        self.client_summary_label = QLabel("无探测器连接")
         summary_font = QFont(FONTS["data_key"][0], FONTS["data_key"][1])
         self.client_summary_label.setFont(summary_font)
         self.client_summary_label.setStyleSheet("""
@@ -429,7 +541,7 @@ class ClientsPage(QWidget):
                 margin-bottom: 10px;
             }
         """)
-        layout.addWidget(self.client_summary_label)
+        content_layout.addWidget(self.client_summary_label)
         
         # Scroll area for client cards
         scroll_area = QWidget()
@@ -444,13 +556,13 @@ class ClientsPage(QWidget):
         scroll_container.layout().addWidget(scroll_area)
         scroll_container.layout().setContentsMargins(0, 0, 0, 0)
         
-        # Add scroll area to main layout
-        layout.addWidget(scroll_container, 1)
+        # Add scroll area to content layout
+        content_layout.addWidget(scroll_container, 1)
         
         # Add refresh button
-        refresh_btn = QPushButton("Refresh")
-        refresh_btn.setFixedHeight(40)
-        refresh_btn.setStyleSheet("""
+        self.refresh_btn = QPushButton("刷新")
+        self.refresh_btn.setFixedHeight(40)
+        self.refresh_btn.setStyleSheet("""
             QPushButton {
                 background-color: #4caf50;
                 color: white;
@@ -464,10 +576,15 @@ class ClientsPage(QWidget):
                 background-color: #45a049;
             }
         """)
-        refresh_btn.clicked.connect(self.refresh_client_display)
-        layout.addWidget(refresh_btn, 0, Qt.AlignCenter)
+        self.refresh_btn.clicked.connect(self.refresh_client_display)
+        content_layout.addWidget(self.refresh_btn, 0, Qt.AlignCenter)
         
-        self.setLayout(layout)
+        # Add widgets to stacked widget
+        self.stacked_widget.addWidget(self.lock_widget)
+        self.stacked_widget.addWidget(self.content_widget)
+        
+        main_layout.addWidget(self.stacked_widget)
+        self.setLayout(main_layout)
         
         # Timer to auto-refresh client display
         self.refresh_timer = QTimer()
@@ -479,6 +596,18 @@ class ClientsPage(QWidget):
     
     def refresh_client_display(self):
         """Refresh the client display with current data"""
+        # Check current user role
+        from core.user_manager import UserRole
+        is_admin = False
+        if hasattr(self.parent, 'current_user') and self.parent.current_user:
+            is_admin = self.parent.current_user.get('role') == UserRole.ADMIN
+            
+        if not is_admin:
+            self.stacked_widget.setCurrentIndex(0)
+            return
+        else:
+            self.stacked_widget.setCurrentIndex(1)
+
         # Get client data from parent
         if hasattr(self.parent, 'client_data'):
             client_data = self.parent.client_data
@@ -486,11 +615,12 @@ class ClientsPage(QWidget):
             client_data = getattr(self.parent, 'client_data', {})
         
         # Update summary
+        from core.translation import _t
         client_count = len(client_data)
         if client_count == 0:
-            self.client_summary_label.setText("No clients connected")
+            self.client_summary_label.setText(_t("clients_no_conn"))
         else:
-            self.client_summary_label.setText(f"{client_count} client(s) connected")
+            self.client_summary_label.setText(_t("clients_conn_count", count=client_count))
         
         # Remove old client widgets
         for client_id, widget in list(self.client_widgets.items()):
@@ -519,6 +649,7 @@ class ClientsPage(QWidget):
     
     def create_client_widget(self, client_id: str, data: dict) -> QFrame:
         """Create a widget for displaying client information"""
+        from core.translation import _t
         widget = QFrame()
         widget.setFixedHeight(150)
         widget.setStyleSheet("""
@@ -537,7 +668,7 @@ class ClientsPage(QWidget):
         left_layout = QVBoxLayout()
         left_layout.setSpacing(3)
         
-        client_id_label = QLabel(f"Client: {client_id}")
+        client_id_label = QLabel(_t("probe_id", id=client_id))
         client_id_label.setStyleSheet("""
             QLabel {
                 color: white;
@@ -551,9 +682,9 @@ class ClientsPage(QWidget):
         last_update = data.get('last_update', 0)
         time_diff = time.time() - last_update
         status_color = "#4caf50" if time_diff < 5 else "#ff9800" if time_diff < 15 else "#f44336"
-        status_text = "Active" if time_diff < 5 else "Idle" if time_diff < 15 else "Inactive"
+        status_text = _t("status_active") if time_diff < 5 else _t("status_idle") if time_diff < 15 else _t("status_inactive")
         
-        status_label = QLabel(f"Status: {status_text}")
+        status_label = QLabel(_t("probe_status", status=status_text))
         status_label.setStyleSheet(f"""
             QLabel {{
                 color: {status_color};
@@ -565,7 +696,7 @@ class ClientsPage(QWidget):
         
         # Alarm status
         alarm_status = data.get('alarm', False)
-        alarm_label = QLabel("ALARM" if alarm_status else "Normal")
+        alarm_label = QLabel(_t("probe_alarm_active") if alarm_status else _t("probe_alarm_normal"))
         alarm_label.setStyleSheet(f"""
             QLabel {{
                 color: {'#ff4444' if alarm_status else '#4caf50'};
@@ -578,7 +709,7 @@ class ClientsPage(QWidget):
 
         # Occupancy status
         occupancy_status = data.get('occupancy', False)
-        occupancy_label = QLabel("Occupied" if occupancy_status else "Free")
+        occupancy_label = QLabel(_t("probe_occ_active") if occupancy_status else _t("probe_occ_normal"))
         occupancy_label.setStyleSheet(f"""
             QLabel {{
                 color: {'#ffb74d' if occupancy_status else '#4caf50'};
@@ -590,7 +721,7 @@ class ClientsPage(QWidget):
         left_layout.addWidget(occupancy_label)
 
         # Faults status
-        faults_label = QLabel("No Faults")
+        faults_label = QLabel(_t("probe_faults_normal"))
         faults_label.setStyleSheet("""
             QLabel {
                 color: #4caf50;
@@ -610,7 +741,7 @@ class ClientsPage(QWidget):
         data_layout.setVerticalSpacing(5)
         
         # Count rate
-        count_rate_label = QLabel("Count Rate:")
+        count_rate_label = QLabel(_t("label_rates"))
         count_rate_label.setStyleSheet("""
             QLabel {
                 color: #aaaaaa;
@@ -631,7 +762,7 @@ class ClientsPage(QWidget):
         data_layout.addWidget(count_rate_value, 0, 1)
         
         # Temperature
-        temp_label = QLabel("Temperature:")
+        temp_label = QLabel(_t("label_temp"))
         temp_label.setStyleSheet("""
             QLabel {
                 color: #aaaaaa;
@@ -652,7 +783,7 @@ class ClientsPage(QWidget):
         data_layout.addWidget(temp_value, 1, 1)
         
         # High Voltage
-        hv_label = QLabel("High Voltage:")
+        hv_label = QLabel(_t("label_hv"))
         hv_label.setStyleSheet("""
             QLabel {
                 color: #aaaaaa;
@@ -673,7 +804,7 @@ class ClientsPage(QWidget):
         data_layout.addWidget(hv_value, 2, 1)
         
         # Product ID and Sensitivity
-        product_label = QLabel("Product ID:")
+        product_label = QLabel(_t("label_product_id"))
         product_label.setStyleSheet("""
             QLabel {
                 color: #aaaaaa;
@@ -693,7 +824,7 @@ class ClientsPage(QWidget):
         """)
         data_layout.addWidget(product_value, 0, 3)
         
-        sensitivity_label = QLabel("Sensitivity:")
+        sensitivity_label = QLabel(_t("label_sensitivity"))
         sensitivity_label.setStyleSheet("""
             QLabel {
                 color: #aaaaaa;
@@ -734,6 +865,7 @@ class ClientsPage(QWidget):
     
     def update_client_widget(self, widget: QFrame, data: dict):
         """Update an existing client widget with new data"""
+        from core.translation import _t
         labels = widget.data_labels
         
         # Update data values
@@ -747,9 +879,9 @@ class ClientsPage(QWidget):
         last_update = data.get('last_update', 0)
         time_diff = time.time() - last_update
         status_color = "#4caf50" if time_diff < 5 else "#ff9800" if time_diff < 15 else "#f44336"
-        status_text = "Active" if time_diff < 5 else "Idle" if time_diff < 15 else "Inactive"
+        status_text = _t("status_active") if time_diff < 5 else _t("status_idle") if time_diff < 15 else _t("status_inactive")
         
-        labels['status'].setText(f"Status: {status_text}")
+        labels['status'].setText(_t("probe_status", status=status_text))
         labels['status'].setStyleSheet(f"""
             QLabel {{
                 color: {status_color};
@@ -760,7 +892,7 @@ class ClientsPage(QWidget):
         
         # Update alarm status
         alarm_status = data.get('alarm', False)
-        labels['alarm'].setText("ALARM" if alarm_status else "Normal")
+        labels['alarm'].setText(_t("probe_alarm_active") if alarm_status else _t("probe_alarm_normal"))
         labels['alarm'].setStyleSheet(f"""
             QLabel {{
                 color: {'#ff4444' if alarm_status else '#4caf50'};
@@ -772,7 +904,7 @@ class ClientsPage(QWidget):
 
         # Update occupancy status
         occupancy_status = data.get('occupancy', False)
-        labels['occupancy'].setText("Occupied" if occupancy_status else "Free")
+        labels['occupancy'].setText(_t("probe_occ_active") if occupancy_status else _t("probe_occ_normal"))
         labels['occupancy'].setStyleSheet(f"""
             QLabel {{
                 color: {'#ffb74d' if occupancy_status else '#4caf50'};
@@ -788,7 +920,7 @@ class ClientsPage(QWidget):
             active_faults = self.parent.diagnostics_manager.active_faults.get(client_id, {})
             if active_faults:
                 faults_str = ", ".join(active_faults.keys())
-                labels['faults'].setText(f"Faults: {faults_str}")
+                labels['faults'].setText(_t("probe_faults_active", faults=faults_str))
                 labels['faults'].setStyleSheet("""
                     QLabel {
                         color: #ff9800;
@@ -798,7 +930,7 @@ class ClientsPage(QWidget):
                     }
                 """)
             else:
-                labels['faults'].setText("No Faults")
+                labels['faults'].setText(_t("probe_faults_normal"))
                 labels['faults'].setStyleSheet("""
                     QLabel {
                         color: #4caf50;
@@ -807,3 +939,15 @@ class ClientsPage(QWidget):
                         margin-top: 5px;
                     }
                 """)
+
+    def retranslate_ui(self):
+        """Retranslate UI elements based on current language"""
+        from core.translation import _t
+        self.lock_title.setText(_t("lock_title"))
+        self.lock_desc.setText(_t("lock_desc"))
+        self.unlock_btn.setText(_t("btn_unlock"))
+        self.clients_title.setText(_t("clients_title"))
+        self.refresh_btn.setText(_t("btn_refresh"))
+        
+        # Trigger refresh to update summary and existing client widgets
+        self.refresh_client_display()

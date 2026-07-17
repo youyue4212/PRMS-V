@@ -31,22 +31,22 @@ class FaultCode:
     E501 = "E501"  # 通道占用传感器异常 / 卡死
 
     MAP = {
-        E101: ("探测器无数据", "配置的探测器未上报数据，请检查网络、IP设置或探测器供电", "ERROR"),
-        E102: ("通信中断", "探测器通信超时，已超过30秒未收到数据包", "ERROR"),
-        E201: ("高压未建立", "探测器高压接近0V，可能高压模块未供电或已损坏", "ERROR"),
-        E202: ("高压偏离设定", "检测到高压与设定值偏差过大，请检查高压模块或稳谱设置", "WARNING"),
-        E203: ("高压突然跌落", "高压在短时间内大幅度下降，可能存在过流保护或硬件故障", "ERROR"),
-        E301: ("温度超闪烁体上限", "探测器温度超过塑料闪烁体承受温度(>55°C)", "ERROR"),
-        E302: ("温度超PMT范围", "温度超出光电倍增管正常工作范围(-20°C ~ 50°C)", "WARNING"),
-        E303: ("温度传感器故障", "温度在短时间内出现大幅度跳变(>8°C)，可能传感器接触不良", "ERROR"),
-        E304: ("温度读数异常", "温度读数极值或恒定异常，可能温度传感器损坏", "WARNING"),
-        E401: ("计数率异常波动", "计数率(CPS)出现非正常的突发性大幅度波动，可能前端受电磁干扰", "WARNING"),
-        E501: ("占用传感器异常", "通道占用传感器状态持续异常或卡死，请检查接线", "WARNING"),
+        E101: ("探测器无数据", "配置的探测器未上报数据，请检查网络、IP设置或探测器供电", "ERROR", "探测器连接异常！请检查网线连接，或尝试断电重启设备。若仍异常，请联系维保人员。"),
+        E102: ("通信中断", "探测器通信超时，已超过30秒未收到数据包", "ERROR", "1号辐射探头通讯异常 → 请断电重启设备，仍异常联系维保人员。"),
+        E201: ("高压未建立", "探测器高压接近0V，可能高压模块未供电或已损坏", "ERROR", "探测器高压异常！设备已自动停止采集，请暂停通道通行，并立即报修。"),
+        E202: ("高压偏离设定", "检测到高压与设定值偏差过大，请检查高压模块或稳谱设置", "WARNING", "高压模块过压/欠压保护 → 设备自动停机，禁止通行，立即报修。"),
+        E203: ("高压突然跌落", "高压在短时间内大幅度下降，可能存在过流保护或硬件故障", "ERROR", "探测器高压异常！设备已自动停止采集，请暂停通道通行，并立即报修。"),
+        E301: ("温度超闪烁体上限", "探测器温度超过塑料闪烁体承受温度(>55°C)", "ERROR", "探测器温度超限！请检查环境散热，暂停使用，并联系维保人员。"),
+        E302: ("温度超PMT范围", "温度超出光电倍增管正常工作范围(-20°C ~ 50°C)", "WARNING", "探测器温度异常！请检查环境散热，暂停使用，并联系维保人员。"),
+        E303: ("温度传感器故障", "温度在短时间内出现大幅度跳变(>8°C)，可能传感器接触不良", "ERROR", "通道温度传感器故障 → 无法准确读取温度，请联系维保人员。"),
+        E304: ("温度读数异常", "温度读数极值或恒定异常，可能温度传感器损坏", "WARNING", "通道温度传感器故障 → 无法准确读取温度，请联系维保人员。"),
+        E401: ("计数率异常波动", "计数率(CPS)出现非正常的突发性大幅度波动，可能前端受电磁干扰", "WARNING", "探测器信号不稳定！请检查周边是否有强电磁干扰，或重启设备。"),
+        E501: ("占用传感器异常", "通道占用传感器状态持续异常或卡死，请检查接线", "WARNING", "通道人体感应故障 → 无法识别行人，暂停使用，请联系维保人员。"),
     }
 
     @classmethod
-    def get_info(cls, code: str) -> Tuple[str, str, str]:
-        return cls.MAP.get(code, ("未知故障", "未知的系统故障", "WARNING"))
+    def get_info(cls, code: str) -> Tuple[str, str, str, str]:
+        return cls.MAP.get(code, ("未知故障", "未知的系统故障", "WARNING", "系统出现未知故障，请联系维保人员。"))
 
 
 class DiagnosticsManager:
@@ -293,14 +293,14 @@ class DiagnosticsManager:
 
         return {cid: list(faults.keys()) for cid, faults in self.active_faults.items()}
 
-    def get_all_active_faults(self) -> List[Tuple[str, str, str, str, str]]:
+    def get_all_active_faults(self) -> List[Tuple[str, str, str, str, str, str]]:
         """
         Get a list of all active faults across all clients.
-        Returns: List of (client_id, fault_code, name, description, severity)
+        Returns: List of (client_id, fault_code, name, description, severity, operator_message)
         """
         results = []
         for client_id, faults in self.active_faults.items():
             for code in faults.keys():
-                name, desc, severity = FaultCode.get_info(code)
-                results.append((client_id, code, name, desc, severity))
+                name, desc, severity, op_msg = FaultCode.get_info(code)
+                results.append((client_id, code, name, desc, severity, op_msg))
         return results

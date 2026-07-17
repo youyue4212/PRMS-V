@@ -12,6 +12,7 @@ from PyQt5.QtCore import Qt, pyqtSignal, QSettings
 from PyQt5.QtGui import QFont, QIcon
 
 from core.user_manager import get_user_manager, UserRole
+from core.translation import _t
 
 # 字体配置
 FONTS = {
@@ -51,7 +52,7 @@ class LoginDialog(QDialog):
         
     def setup_ui(self):
         """Setup UI - Clean and direct layout"""
-        self.setWindowTitle("Login - Gamma-ray Spectrometer")
+        self.setWindowTitle(_t("login_title"))
         self.setFixedSize(500, 450)
         
         # Set dialog style
@@ -132,7 +133,7 @@ class LoginDialog(QDialog):
         main_layout.setSpacing(10)  # 进一步减少间距从10到8
         
         # Title
-        title_label = QLabel("Gamma-ray Spectrometer")
+        title_label = QLabel(_t("login_title"))
         title_label.setAlignment(Qt.AlignCenter)
         title_font = QFont(FONTS["title"][0], FONTS["title"][1] - 2)
         if len(FONTS["title"]) > 2 and "bold" in FONTS["title"][2]:
@@ -141,7 +142,7 @@ class LoginDialog(QDialog):
         title_label.setStyleSheet("color: #e0e0e0; font-weight: bold;")  # 更柔和的白色
         main_layout.addWidget(title_label)
         
-        subtitle_label = QLabel("Data Acquisition System")
+        subtitle_label = QLabel(_t("login_subtitle"))
         subtitle_label.setAlignment(Qt.AlignCenter)
         subtitle_font = QFont(FONTS["subtitle"][0], FONTS["subtitle"][1] - 2)
         if len(FONTS["subtitle"]) > 2 and "bold" in FONTS["subtitle"][2]:
@@ -162,14 +163,14 @@ class LoginDialog(QDialog):
         main_layout.addSpacing(10)  # 增加间距从8到10，让username标签再下移一点
         
         # Username
-        username_label = QLabel("Username")
+        username_label = QLabel(_t("login_username"))
         username_font = QFont(FONTS["data_key"][0], FONTS["data_key"][1])
         username_label.setFont(username_font)
         username_label.setStyleSheet("color: #e0e0e0; font-weight: bold; margin-bottom: 2px;")  # 减少间距从5px到2px，让输入框上移
         main_layout.addWidget(username_label)
         
         self.username_input = QLineEdit()
-        self.username_input.setPlaceholderText("Enter username")
+        self.username_input.setPlaceholderText(_t("login_username_placeholder"))
         self.username_input.setText("")
         username_input_font = QFont(FONTS["data_value"][0], FONTS["data_value"][1])
         if len(FONTS["data_value"]) > 2 and "bold" in FONTS["data_value"][2]:
@@ -181,14 +182,14 @@ class LoginDialog(QDialog):
         main_layout.addSpacing(4)
         
         # Password
-        password_label = QLabel("Password")
+        password_label = QLabel(_t("login_password"))
         password_font = QFont(FONTS["data_key"][0], FONTS["data_key"][1])
         password_label.setFont(password_font)
         password_label.setStyleSheet("color: #e0e0e0; font-weight: bold; margin-bottom: 2px;")  # 减少间距从5px到2px，让输入框上移
         main_layout.addWidget(password_label)
         
         self.password_input = QLineEdit()
-        self.password_input.setPlaceholderText("Enter password")
+        self.password_input.setPlaceholderText(_t("login_password_placeholder"))
         self.password_input.setEchoMode(QLineEdit.Password)
         self.password_input.setText("")
         password_input_font = QFont(FONTS["data_value"][0], FONTS["data_value"][1])
@@ -201,7 +202,7 @@ class LoginDialog(QDialog):
         main_layout.addSpacing(8)
         
         # Remember password - use same font size as password label
-        self.remember_checkbox = QCheckBox("Remember password")
+        self.remember_checkbox = QCheckBox(_t("login_remember"))
         self.remember_checkbox.setChecked(False)
         # Use data_key font size (12px) instead of tip font size (10px)
         checkbox_font = QFont(FONTS["data_key"][0], FONTS["data_key"][1])
@@ -218,7 +219,7 @@ class LoginDialog(QDialog):
         button_layout = QHBoxLayout()
         button_layout.setSpacing(15)
         
-        self.cancel_btn = QPushButton("Cancel")
+        self.cancel_btn = QPushButton(_t("btn_cancel"))
         self.cancel_btn.setObjectName("cancel_btn")
         self.cancel_btn.clicked.connect(self.reject)
         cancel_btn_font = QFont(FONTS["btn"][0], FONTS["btn"][1])
@@ -227,7 +228,7 @@ class LoginDialog(QDialog):
         
         button_layout.addStretch(1)
         
-        self.login_btn = QPushButton("Login")
+        self.login_btn = QPushButton(_t("btn_login"))
         self.login_btn.clicked.connect(self.on_login_clicked)
         login_btn_font = QFont(FONTS["btn"][0], FONTS["btn"][1])
         self.login_btn.setFont(login_btn_font)
@@ -301,7 +302,7 @@ class LoginDialog(QDialog):
         password = self.password_input.text().strip()
         
         if not username:
-            QMessageBox.warning(self, "Input Error", "Please enter username")
+            QMessageBox.warning(self, _t("msg_input_error"), _t("msg_enter_username"))
             self.username_input.setFocus()
             return
         
@@ -324,9 +325,9 @@ class LoginDialog(QDialog):
                 # Close dialog
                 self.accept()
             else:
-                QMessageBox.critical(self, "Login Error", "Failed to get user information")
+                QMessageBox.critical(self, _t("msg_login_failed"), _t("msg_get_user_failed"))
         else:
-            QMessageBox.warning(self, "Login Failed", message)
+            QMessageBox.warning(self, _t("msg_login_failed"), message)
             self.password_input.clear()
             self.password_input.setFocus()
     

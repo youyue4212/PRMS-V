@@ -29,13 +29,14 @@ class AlarmLogPage(QWidget):
     
     def setup_ui(self):
         """Setup UI interface"""
+        from core.translation import _t
         layout = QVBoxLayout()
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(15)
         
         # Title
-        title = QLabel("Alarm Log Records")
-        title.setStyleSheet("""
+        self.title_label = QLabel(_t("log_title"))
+        self.title_label.setStyleSheet("""
             QLabel {
                 color: white;
                 font-size: 22px;
@@ -43,7 +44,7 @@ class AlarmLogPage(QWidget):
                 margin-bottom: 10px;
             }
         """)
-        layout.addWidget(title)
+        layout.addWidget(self.title_label)
         
         # Statistics cards and control buttons row
         stats_buttons_layout = QHBoxLayout()
@@ -54,15 +55,15 @@ class AlarmLogPage(QWidget):
         stats_cards_layout.setSpacing(10)
         
         # Total alarm events
-        self.total_events_card = self.create_stat_card("Total Events", "0", "#4caf50")
+        self.total_events_card = self.create_stat_card(_t("log_total_events"), "0", "#4caf50", "total_events")
         stats_cards_layout.addWidget(self.total_events_card)
         
         # Active alarms
-        self.active_alarms_card = self.create_stat_card("Active Alarms", "0", "#ff4444")
+        self.active_alarms_card = self.create_stat_card(_t("log_active_alarms"), "0", "#ff4444", "active_alarms")
         stats_cards_layout.addWidget(self.active_alarms_card)
         
         # Alarm types
-        self.alarm_types_card = self.create_stat_card("Alarm Types", "0", "#2196F3")
+        self.alarm_types_card = self.create_stat_card(_t("log_alarm_types"), "0", "#2196F3", "alarm_types")
         stats_cards_layout.addWidget(self.alarm_types_card)
         
         stats_buttons_layout.addLayout(stats_cards_layout)
@@ -73,7 +74,7 @@ class AlarmLogPage(QWidget):
         buttons_layout.setContentsMargins(0, 0, 0, 0)
         
         # Refresh button - smaller and more compact
-        self.refresh_btn = QPushButton("Refresh")
+        self.refresh_btn = QPushButton(_t("btn_refresh"))
         self.refresh_btn.setFixedHeight(30)
         self.refresh_btn.setStyleSheet("""
             QPushButton {
@@ -97,7 +98,7 @@ class AlarmLogPage(QWidget):
         buttons_layout.addWidget(self.refresh_btn)
         
         # Clear records button
-        self.clear_btn = QPushButton("Clear")
+        self.clear_btn = QPushButton(_t("btn_clear_log"))
         self.clear_btn.setFixedHeight(30)
         self.clear_btn.setStyleSheet("""
             QPushButton {
@@ -121,7 +122,7 @@ class AlarmLogPage(QWidget):
         buttons_layout.addWidget(self.clear_btn)
         
         # Save to EXCEL button
-        self.save_btn = QPushButton("Save Excel")
+        self.save_btn = QPushButton(_t("btn_save_excel"))
         self.save_btn.setFixedHeight(30)
         self.save_btn.setStyleSheet("""
             QPushButton {
@@ -152,7 +153,8 @@ class AlarmLogPage(QWidget):
         pagination_layout.setSpacing(10)
         
         # Page size selector
-        pagination_layout.addWidget(QLabel("Page Size:"))
+        self.page_size_label = QLabel(_t("page_size"))
+        pagination_layout.addWidget(self.page_size_label)
         self.page_size_combo = QComboBox()
         self.page_size_combo.addItems(["10", "20", "50", "100"])
         self.page_size_combo.setCurrentText("20")
@@ -161,12 +163,12 @@ class AlarmLogPage(QWidget):
         pagination_layout.addWidget(self.page_size_combo)
         
         # Total pages label
-        self.total_pages_label = QLabel("Page: 0/0")
+        self.total_pages_label = QLabel(_t("page_info", curr=0, total=0))
         self.total_pages_label.setStyleSheet("color: #aaaaaa; font-size: 12px;")
         pagination_layout.addWidget(self.total_pages_label)
         
         # First page button
-        self.first_page_btn = QPushButton("<< First")
+        self.first_page_btn = QPushButton(_t("btn_first"))
         self.first_page_btn.setFixedHeight(30)
         self.first_page_btn.setStyleSheet("""
             QPushButton {
@@ -189,7 +191,7 @@ class AlarmLogPage(QWidget):
         pagination_layout.addWidget(self.first_page_btn)
         
         # Previous page button
-        self.prev_page_btn = QPushButton("< Prev")
+        self.prev_page_btn = QPushButton(_t("btn_prev"))
         self.prev_page_btn.setFixedHeight(30)
         self.prev_page_btn.setStyleSheet("""
             QPushButton {
@@ -228,7 +230,7 @@ class AlarmLogPage(QWidget):
         pagination_layout.addWidget(self.current_page_input)
         
         # Next page button
-        self.next_page_btn = QPushButton("Next >")
+        self.next_page_btn = QPushButton(_t("btn_next"))
         self.next_page_btn.setFixedHeight(30)
         self.next_page_btn.setStyleSheet("""
             QPushButton {
@@ -251,7 +253,7 @@ class AlarmLogPage(QWidget):
         pagination_layout.addWidget(self.next_page_btn)
         
         # Last page button
-        self.last_page_btn = QPushButton("Last >>")
+        self.last_page_btn = QPushButton(_t("btn_last"))
         self.last_page_btn.setFixedHeight(30)
         self.last_page_btn.setStyleSheet("""
             QPushButton {
@@ -283,8 +285,8 @@ class AlarmLogPage(QWidget):
         self.total_pages = 0
         
         # Alarm records table with scroll area for better small window support
-        table_group = QGroupBox("Alarm Event Records")
-        table_group.setStyleSheet("""
+        self.table_group = QGroupBox(_t("log_title"))
+        self.table_group.setStyleSheet("""
             QGroupBox {
                 color: white;
                 font-size: 14px;
@@ -301,7 +303,7 @@ class AlarmLogPage(QWidget):
             }
         """)
         
-        table_layout = QVBoxLayout(table_group)
+        table_layout = QVBoxLayout(self.table_group)
         
         # Create scroll area for table
         scroll_area = QScrollArea()
@@ -327,8 +329,8 @@ class AlarmLogPage(QWidget):
         self.table_widget = QTableWidget()
         self.table_widget.setColumnCount(10)
         self.table_widget.setHorizontalHeaderLabels([
-            'Time', 'Client', 'Alarm Type', 'Status', 'Count Rate(cps)', 
-            'Trigger Rate(cps)', 'Temperature(C)', 'HV(V)', 'Duration(s)', 'Message'
+            _t("header_time"), _t("header_client"), _t("header_type"), _t("header_status"), _t("header_rates"), 
+            _t("header_trigger"), _t("header_temp"), _t("header_hv"), _t("header_duration"), _t("header_message")
         ])
         
         # Set table style - Improved readability with smaller font for small windows
@@ -393,14 +395,14 @@ class AlarmLogPage(QWidget):
         scroll_area.setWidget(table_container)
         
         table_layout.addWidget(scroll_area)
-        layout.addWidget(table_group, 1)  # 1 means occupy remaining space
+        layout.addWidget(self.table_group, 1)  # 1 means occupy remaining space
         
         self.setLayout(layout)
         
         # Initial refresh
         self.refresh_display()
     
-    def create_stat_card(self, title: str, value: str, color: str) -> QFrame:
+    def create_stat_card(self, title: str, value: str, color: str, card_id: str = "") -> QFrame:
         """Create statistics card - Simplified design without redundant description"""
         card = QFrame()
         # Reduced height since we removed the description label
@@ -452,11 +454,11 @@ class AlarmLogPage(QWidget):
         card.setLayout(layout)
         
         # Store label references for updating (only value label needed now)
-        if title == "Total Events":
+        if card_id == "total_events":
             self.total_events_label = value_label
-        elif title == "Active Alarms":
+        elif card_id == "active_alarms":
             self.active_alarms_label = value_label
-        elif title == "Alarm Types":
+        elif card_id == "alarm_types":
             self.alarm_types_label = value_label
         
         return card
@@ -836,7 +838,8 @@ class AlarmLogPage(QWidget):
     def update_pagination_controls(self):
         """Update pagination control states"""
         # Update page info label
-        self.total_pages_label.setText(f"Page: {self.current_page}/{self.total_pages}")
+        from core.translation import _t
+        self.total_pages_label.setText(_t("page_info", curr=self.current_page, total=self.total_pages))
         
         # Update current page input
         self.current_page_input.setText(str(self.current_page))
@@ -849,6 +852,42 @@ class AlarmLogPage(QWidget):
         
         # Update page size combo
         self.page_size_combo.setCurrentText(str(self.page_size))
+
+    def retranslate_ui(self):
+        """Retranslate UI elements based on current language"""
+        from core.translation import _t
+        self.title_label.setText(_t("log_title"))
+        
+        # Update stats cards titles
+        # Since we stored references to value labels, we need to find the title labels of cards
+        # Let's update the card title labels directly
+        self.total_events_card.findChild(QLabel).setText(_t("log_total_events"))
+        self.active_alarms_card.findChild(QLabel).setText(_t("log_active_alarms"))
+        self.alarm_types_card.findChild(QLabel).setText(_t("log_alarm_types"))
+        
+        # Update buttons
+        self.refresh_btn.setText(_t("btn_refresh"))
+        self.clear_btn.setText(_t("btn_clear_log"))
+        self.save_btn.setText(_t("btn_save_excel"))
+        
+        # Update pagination labels
+        self.page_size_label.setText(_t("page_size"))
+        self.first_page_btn.setText(_t("btn_first"))
+        self.prev_page_btn.setText(_t("btn_prev"))
+        self.next_page_btn.setText(_t("btn_next"))
+        self.last_page_btn.setText(_t("btn_last"))
+        
+        # Update table group title
+        self.table_group.setTitle(_t("log_title"))
+        
+        # Update table headers
+        self.table_widget.setHorizontalHeaderLabels([
+            _t("header_time"), _t("header_client"), _t("header_type"), _t("header_status"), _t("header_rates"), 
+            _t("header_trigger"), _t("header_temp"), _t("header_hv"), _t("header_duration"), _t("header_message")
+        ])
+        
+        # Refresh display to update pagination info text
+        self.refresh_display()
     
     
     def clear_alarm_logs(self):

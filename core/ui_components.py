@@ -1,7 +1,7 @@
 ﻿import time
 from datetime import datetime
 
-from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtCore import Qt, QTimer, pyqtSignal
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QLabel, QPushButton, QFrame, QSpacerItem, QSizePolicy
@@ -38,6 +38,8 @@ PADDING = {
 
 class StatusBar(QWidget):
     """Android-style status bar with battery, connection status, and user info"""
+    language_changed = pyqtSignal(str)
+    
     def __init__(self):
         super().__init__()
         self.setFixedHeight(32)  # 稍微增加高度以容纳更好的字体显示
@@ -112,7 +114,32 @@ class StatusBar(QWidget):
         if len(FONTS["tip"]) > 2 and "bold" in FONTS["tip"][2]:
             status_font.setBold(True)
         self.status_label.setFont(status_font)
-        self.status_label.setStyleSheet("margin-left: 5px;")
+        self.status_label.setStyleSheet("margin-left: 5px; margin-right: 15px;")
+
+        # Language Switch Button
+        self.lang_btn = QPushButton()
+        self.lang_btn.setFixedSize(50, 20)
+        lang_font = QFont(FONTS["tip"][0], 10, QFont.Bold)
+        self.lang_btn.setFont(lang_font)
+        self.lang_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #333333;
+                color: #ff9800;
+                border: 1px solid #ff9800;
+                border-radius: 4px;
+                padding: 0px;
+            }
+            QPushButton:pressed {
+                background-color: #ff9800;
+                color: black;
+            }
+        """)
+        self.lang_btn.clicked.connect(self.toggle_language)
+        
+        # Set initial text based on current language
+        from core.translation import TranslationManager
+        current_lang = TranslationManager().get_language()
+        self.lang_btn.setText("EN" if current_lang == "zh" else "中文")
 
         # Add widgets to layout
         layout.addWidget(self.time_label)
@@ -121,6 +148,7 @@ class StatusBar(QWidget):
         layout.addItem(spacer)
         layout.addWidget(self.connection_icon_widget)
         layout.addWidget(self.status_label)
+        layout.addWidget(self.lang_btn)
 
         self.setLayout(layout)
 
@@ -207,6 +235,15 @@ class StatusBar(QWidget):
             }}
         """)
         self.timeout_label.setVisible(True)
+
+    def toggle_language(self):
+        """Toggle system language and emit signal"""
+        from core.translation import TranslationManager
+        tm = TranslationManager()
+        new_lang = "en" if tm.get_language() == "zh" else "zh"
+        tm.set_language(new_lang)
+        self.lang_btn.setText("EN" if new_lang == "zh" else "中文")
+        self.language_changed.emit(new_lang)
     
     def hide_timeout_display(self):
         """Hide timeout display"""
@@ -423,27 +460,28 @@ class BottomNavBar(QWidget):
         }
         
         # Overview button
-        overview_widget = self.create_nav_button("Overview", "overview", button_colors["overview"], True)
+        from core.translation import _t
+        overview_widget = self.create_nav_button(_t("nav_overview"), "overview", button_colors["overview"], True)
         self.button_widgets.append(overview_widget)
         self.buttons.append(overview_widget.findChild(QPushButton))
         
         # Spectrum button (第二个页面)
-        spectrum_widget = self.create_nav_button("Spectrum", "spectrum", button_colors["spectrum"], False)
+        spectrum_widget = self.create_nav_button(_t("nav_spectrum"), "spectrum", button_colors["spectrum"], False)
         self.button_widgets.append(spectrum_widget)
         self.buttons.append(spectrum_widget.findChild(QPushButton))
         
         # Clients button (第三个页面)
-        clients_widget = self.create_nav_button("Clients", "clients", button_colors["clients"], False)
+        clients_widget = self.create_nav_button(_t("nav_clients"), "clients", button_colors["clients"], False)
         self.button_widgets.append(clients_widget)
         self.buttons.append(clients_widget.findChild(QPushButton))
         
         # Alarm log button (第四个页面)
-        alarm_log_widget = self.create_nav_button("Alarm Log", "alarm_log", button_colors["alarm_log"], False)
+        alarm_log_widget = self.create_nav_button(_t("nav_alarm_log"), "alarm_log", button_colors["alarm_log"], False)
         self.button_widgets.append(alarm_log_widget)
         self.buttons.append(alarm_log_widget.findChild(QPushButton))
         
         # Settings button
-        settings_widget = self.create_nav_button("Settings", "settings", button_colors["settings"], False)
+        settings_widget = self.create_nav_button(_t("nav_settings"), "settings", button_colors["settings"], False)
         self.button_widgets.append(settings_widget)
         self.buttons.append(settings_widget.findChild(QPushButton))
         
@@ -646,13 +684,32 @@ class BottomNavBar(QWidget):
             else:
                 self._apply_inactive_style(widget, widget.icon_tag)
 
+    def retranslate_ui(self):
+        """Retranslate bottom navigation bar buttons"""
+        from core.translation import _t
+        nav_keys = ["nav_overview", "nav_spectrum", "nav_clients", "nav_alarm_log", "nav_settings"]
+        for i, widget in enumerate(self.button_widgets):
+            if i < len(nav_keys):
+                new_text = _t(nav_keys[i])
+                widget.text_label.setText(new_text)
+                # Re-apply styling to update text color and icons properly
+                if widget.styleSheet() and "rgba" in widget.styleSheet():
+                    self._apply_active_style(widget, widget.icon_tag, widget.theme_color)
+                else:
+                    self._apply_inactive_style(widget, widget.icon_tag)
+
 
 class AcquisitionButton(QPushButton):
     """Clear Data button"""
     def __init__(self):
-        super().__init__("Clear Data")
+        from core.translation import _t
+        super().__init__(_t("btn_clear"))
         self.setFixedHeight(40)
         self.update_style()
+    
+    def retranslate_ui(self):
+        from core.translation import _t
+        self.setText(_t("btn_clear"))
     
     def update_style(self):
         self.setStyleSheet("""

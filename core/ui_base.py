@@ -26,6 +26,7 @@ from core.raw_logger import RawLogger
 from core import logger 
 from core.alarm_logger import get_alarm_logger  # 导入报警记录器
 from core.diagnostics import DiagnosticsManager  # 导入诊断管理器
+from core.translation import _t  # 导入翻译函数
 
 log_inst=logger.get_logger()
 
@@ -538,7 +539,7 @@ class UIBase():
         self.plot_timer.start(100)  # 10 Hz
 
         self.packet_counts = {'cmd': 0, 'spectrum': 0, 'errors': 0,'dev_msg':0}
-        self.relay_states = [False, False]
+        self.relay_states = None  # (r0, r1, r2) after first packet; None = not yet received
         self.is_acquiring = False
         
         # Multi-client time series data storage
@@ -853,7 +854,12 @@ class UIBase():
             self.raw_logger.set_enabled(self.log_raw_packet_enabled)
 
     def select_log_path(self):
-        path = QFileDialog.getExistingDirectory(self, "Select folder to log raw packets ")
+        path = QFileDialog.getExistingDirectory(
+            self,
+            _t("dlg_select_log_folder"),
+            self.log_file_path or "",
+            QFileDialog.ShowDirsOnly | QFileDialog.DontUseNativeDialog
+        )
         if path:
             self.log_file_path = path
             self.log_path_input.setText(path)
@@ -897,23 +903,25 @@ class UIBase():
        # Settings placeholder
         
         # Group 1: Communication Settings
-        comm_group = QGroupBox("Communication Settings")
-        comm_layout = QGridLayout(comm_group)
+        self.comm_group = QGroupBox(_t("set_comm_settings"))
+        comm_layout = QGridLayout(self.comm_group)
         
         # TCP/IP Enable Checkbox
-        self.tcp_enable_checkbox = QCheckBox("Enable TCP/IP Server Mode")
+        self.tcp_enable_checkbox = QCheckBox(_t("set_tcp_enable"))
         self.tcp_enable_checkbox.setChecked(self.config.tcp_enabled)
         self.tcp_enable_checkbox.stateChanged.connect(self.on_tcp_enable_changed)
         comm_layout.addWidget(self.tcp_enable_checkbox, 0, 0, 1, 4)
         
         # Server Settings (always shown when TCP is enabled)
-        comm_layout.addWidget(QLabel("Server Host:"), 1, 0)
+        self.server_host_label = QLabel(_t("set_server_host"))
+        comm_layout.addWidget(self.server_host_label, 1, 0)
         self.tcp_host_input = QLineEdit(self.config.tcp_host)
-        self.tcp_host_input.setPlaceholderText("0.0.0.0 for all interfaces")
+        self.tcp_host_input.setPlaceholderText(_t("set_server_host_placeholder"))
         self.tcp_host_input.textChanged.connect(self.on_tcp_host_changed)
         comm_layout.addWidget(self.tcp_host_input, 1, 1)
         
-        comm_layout.addWidget(QLabel("Server Port:"), 1, 2)
+        self.server_port_label = QLabel(_t("set_server_port"))
+        comm_layout.addWidget(self.server_port_label, 1, 2)
         self.tcp_port_spin = QSpinBox()
         self.tcp_port_spin.setRange(1, 65535)
         self.tcp_port_spin.setValue(self.config.tcp_port)
@@ -921,18 +929,18 @@ class UIBase():
         comm_layout.addWidget(self.tcp_port_spin, 1, 3)
         
         # Serial Settings (only shown when TCP is disabled)
-        self.serial_port_label = QLabel("Serial Port:")
+        self.serial_port_label = QLabel(_t("set_serial_port"))
         self.serial_port_combo = QComboBox()
         self.serial_port_combo.addItems(search_serial_devices())
         self.serial_port_combo.setCurrentText(self.config.device)
         self.serial_port_combo.currentTextChanged.connect(self.on_serial_port_changed)
         
         # Add refresh button next to serial port combo
-        self.refresh_serial_btn = QPushButton("Refresh")
+        self.refresh_serial_btn = QPushButton(_t("btn_refresh"))
         self.refresh_serial_btn.setToolTip("Refresh available serial ports")
         self.refresh_serial_btn.clicked.connect(self.refresh_serial_ports)
         
-        self.baudrate_label = QLabel("Baudrate:")
+        self.baudrate_label = QLabel(_t("set_baudrate"))
         self.baudrate_combo = QComboBox()
         self.baudrate_combo.addItems(["9600", "19200", "38400", "57600", "115200", "230400", "460800", "921600"])
         self.baudrate_combo.setCurrentText(str(self.config.baudrate))
@@ -944,7 +952,7 @@ class UIBase():
         comm_layout.addWidget(self.refresh_serial_btn, 2, 2)
         
         # Add manual reconnect button
-        self.reconnect_serial_btn = QPushButton("Reconnect")
+        self.reconnect_serial_btn = QPushButton(_t("btn_reconnect"))
         self.reconnect_serial_btn.setToolTip("Manually reconnect to selected serial port")
         self.reconnect_serial_btn.clicked.connect(self.manual_reconnect_serial)
         comm_layout.addWidget(self.reconnect_serial_btn, 2, 3)
@@ -953,9 +961,9 @@ class UIBase():
         comm_layout.addWidget(self.baudrate_combo, 3, 1)
         
         # Client Selection for multi-client mode - MOVED HERE as requested by user
-        self.client_selection_label = QLabel("Display Client:")
+        self.client_selection_label = QLabel(_t("set_display_client"))
         self.client_selection_combo = QComboBox()
-        self.client_selection_combo.addItem("Auto (First Connected)")
+        self.client_selection_combo.addItem(_t("set_display_client_auto"))
         self.client_selection_combo.currentTextChanged.connect(self.on_client_selection_changed)
         self.client_selection_combo.setEnabled(False)  # Initially disabled until clients are available
         
@@ -965,11 +973,11 @@ class UIBase():
         # Update visibility based on current settings
         self.update_comm_settings_visibility()
         
-        settings_layout.addWidget(comm_group)
+        settings_layout.addWidget(self.comm_group)
   
         # Group 2: Detector Settings
-        det_group = QGroupBox("Detector Settings")
-        det_layout = QGridLayout(det_group)
+        self.det_group = QGroupBox(_t("set_det_settings"))
+        det_layout = QGridLayout(self.det_group)
         
         self.hv_spin = QDoubleSpinBox()
         self.hv_spin.setDecimals(2)
@@ -977,7 +985,7 @@ class UIBase():
         self.hv_spin.setValue(self.config.hv)
         self.hv_spin.editingFinished.connect(self.persist_hv_setting)
         
-        hv_set_btn = QPushButton("Set HV")
+        hv_set_btn = QPushButton(_t("btn_set_hv"))
         hv_set_btn.clicked.connect(self.set_high_voltage)
         
         self.threshold_spin = QSpinBox()
@@ -985,53 +993,57 @@ class UIBase():
         self.threshold_spin.setValue(self.config.threshold)
         self.threshold_spin.editingFinished.connect(self.persist_threshold_setting)
         
-        trig_set_btn = QPushButton("Set Threshold")
+        trig_set_btn = QPushButton(_t("btn_set_threshold"))
         trig_set_btn.clicked.connect(self.set_threshold)
         
-        det_layout.addWidget(QLabel("Bias Voltage (V):"), 0, 0)
+        self.bias_voltage_label = QLabel(_t("set_bias_voltage"))
+        det_layout.addWidget(self.bias_voltage_label, 0, 0)
         det_layout.addWidget(self.hv_spin, 0, 1)
         det_layout.addWidget(hv_set_btn, 0, 2)
-        det_layout.addWidget(QLabel("Threshold (mV):"), 1, 0)
+        self.threshold_label = QLabel(_t("set_threshold"))
+        det_layout.addWidget(self.threshold_label, 1, 0)
         det_layout.addWidget(self.threshold_spin, 1, 1)
         det_layout.addWidget(trig_set_btn, 1, 2)
         
-        settings_layout.addWidget(det_group)
+        settings_layout.addWidget(self.det_group)
         
         # Group 3: Control
-        ctrl_group = QGroupBox("Control")
-        ctrl_layout = QGridLayout(ctrl_group)
+        self.ctrl_group = QGroupBox(_t("set_control"))
+        ctrl_layout = QGridLayout(self.ctrl_group)
 
         # 根据参考代码，只保留Gain Stabilizer
-        self.gain_stabilizer_btn = QPushButton("Turn On")
-        self.gain_stabilizer_label = QLabel("[OFF]")
+        self.gain_stabilizer_btn = QPushButton(_t("btn_turn_on"))
+        self.gain_stabilizer_label = QLabel(_t("status_off"))
         self.gain_stabilizer_btn.clicked.connect(lambda: self.toggle_gain_stabilizer())
-        ctrl_layout.addWidget(QLabel("Gain Stabilizer:"), 0, 0, 1, 1)
+        self.gain_stabilizer_title_label = QLabel(_t("set_gain_stabilizer"))
+        ctrl_layout.addWidget(self.gain_stabilizer_title_label, 0, 0, 1, 1)
         ctrl_layout.addWidget(self.gain_stabilizer_label, 0, 1)
         ctrl_layout.addWidget(self.gain_stabilizer_btn, 0, 2)
 
-        settings_layout.addWidget(ctrl_group)
+        settings_layout.addWidget(self.ctrl_group)
 
         # --- Virtual Keyboard Group ---
-        keyboard_group = QGroupBox("Virtual Keyboard")
-        keyboard_layout = QGridLayout(keyboard_group)
+        self.keyboard_group = QGroupBox(_t("set_keyboard"))
+        keyboard_layout = QGridLayout(self.keyboard_group)
         
-        self.keyboard_enable_checkbox = QCheckBox("Enable virtual keyboard auto-trigger")
+        self.keyboard_enable_checkbox = QCheckBox(_t("set_keyboard_enable"))
         self.keyboard_enable_checkbox.setChecked(False)
         self.keyboard_enable_checkbox.stateChanged.connect(self.toggle_virtual_keyboard)
         keyboard_layout.addWidget(self.keyboard_enable_checkbox, 0, 0, 1, 2)
         
-        self.keyboard_status_label = QLabel("Status: Disabled")
+        self.keyboard_status_label = QLabel(_t("status_disabled"))
         keyboard_layout.addWidget(self.keyboard_status_label, 1, 0, 1, 2)
         
-        settings_layout.addWidget(keyboard_group)
+        settings_layout.addWidget(self.keyboard_group)
 
         # --- Device Control and Status Group (根据参考代码添加) ---
-        device_group = QGroupBox("Device Control and Status")
-        device_layout = QGridLayout(device_group)
+        self.device_group = QGroupBox(_t("set_device_status"))
+        device_layout = QGridLayout(self.device_group)
         
         # Product ID (只显示，不设置)
         self.product_id_label = QLabel("--")
-        device_layout.addWidget(QLabel("Product ID:"), 0, 0)
+        self.product_id_title_label = QLabel(_t("label_product_id"))
+        device_layout.addWidget(self.product_id_title_label, 0, 0)
         device_layout.addWidget(self.product_id_label, 0, 1, 1, 4)
         
         # Sensitivity Coefficient (报警灵敏度系数)
@@ -1040,12 +1052,13 @@ class UIBase():
         self.sensitivity_spin.setRange(1, 100)
         self.sensitivity_spin.setValue(self.config.sensitivity)
         self.sensitivity_spin.editingFinished.connect(self.persist_sensitivity_setting)
-        self.sensitivity_set_btn = QPushButton("Set")
+        self.sensitivity_set_btn = QPushButton(_t("btn_set"))
         self.sensitivity_set_btn.clicked.connect(self.set_sensitivity_coefficient)
-        self.sensitivity_read_btn = QPushButton("Read")
+        self.sensitivity_read_btn = QPushButton(_t("btn_read"))
         self.sensitivity_read_btn.clicked.connect(self.read_sensitivity_coefficient)
         
-        device_layout.addWidget(QLabel("Sensitivity:"), 1, 0)
+        self.sensitivity_title_label = QLabel(_t("label_sensitivity"))
+        device_layout.addWidget(self.sensitivity_title_label, 1, 0)
         device_layout.addWidget(self.sensitivity_label, 1, 1)
         device_layout.addWidget(self.sensitivity_spin, 1, 2)
         device_layout.addWidget(self.sensitivity_set_btn, 1, 3)
@@ -1059,8 +1072,8 @@ class UIBase():
         self.relay2_checkbox = QCheckBox("Relay 2")
         self.relay2_checkbox.stateChanged.connect(lambda state: self.control_single_relay(2, state == Qt.Checked))
         
-        self.relay_status_label = QLabel("Relay Status: --")
-        self.relay_read_btn = QPushButton("Read Status")
+        self.relay_status_label = QLabel(_t("set_relay_status"))
+        self.relay_read_btn = QPushButton(_t("btn_read_status"))
         self.relay_read_btn.clicked.connect(self.read_relay_status)
         
         # 创建一个水平布局来均匀放置三个继电器复选框
@@ -1070,7 +1083,8 @@ class UIBase():
         relay_checkbox_layout.addWidget(self.relay2_checkbox)
         relay_checkbox_layout.addStretch()  # 添加弹性空间
         
-        device_layout.addWidget(QLabel("Relay Control:"), 2, 0)
+        self.relay_control_title_label = QLabel(_t("set_relay_control"))
+        device_layout.addWidget(self.relay_control_title_label, 2, 0)
         # 将水平布局添加到网格布局中，跨3列
         device_layout.addLayout(relay_checkbox_layout, 2, 1, 1, 3)
         device_layout.addWidget(self.relay_read_btn, 2, 4)
@@ -1078,39 +1092,42 @@ class UIBase():
         
         # Alarm Status (报警状态)
         self.alarm_status_label = QLabel("--")
-        self.alarm_read_btn = QPushButton("Read Alarm")
+        self.alarm_read_btn = QPushButton(_t("btn_read_alarm"))
         self.alarm_read_btn.clicked.connect(self.read_alarm_status)
         
-        device_layout.addWidget(QLabel("Alarm Status:"), 4, 0)
+        self.alarm_status_title_label = QLabel(_t("card_alarm_title"))
+        device_layout.addWidget(self.alarm_status_title_label, 4, 0)
         device_layout.addWidget(self.alarm_status_label, 4, 1, 1, 3)
         device_layout.addWidget(self.alarm_read_btn, 4, 4)
         
         # Occupancy Status (通道占用状态) - device_status bit5 (0=Free, 1=Occupied)
         self.occupancy_status_label = QLabel("--")
-        device_layout.addWidget(QLabel("Occupancy:"), 5, 0)
+        self.occupancy_title_label = QLabel(_t("set_occupancy"))
+        device_layout.addWidget(self.occupancy_title_label, 5, 0)
         device_layout.addWidget(self.occupancy_status_label, 5, 1, 1, 4)
 
         # Counter Display
         self.counter_label = QLabel("--")
-        device_layout.addWidget(QLabel("Counter:"), 6, 0)
+        self.counter_title_label = QLabel(_t("set_counter"))
+        device_layout.addWidget(self.counter_title_label, 6, 0)
         device_layout.addWidget(self.counter_label, 6, 1, 1, 4)
         
-        settings_layout.addWidget(device_group)
+        settings_layout.addWidget(self.device_group)
 
 
         # --- Telemetry Logging Group ---
-        log_group = QGroupBox("Raw packet logging")
-        log_to_file_layout = QVBoxLayout(log_group)
+        self.log_group = QGroupBox(_t("set_raw_logging"))
+        log_to_file_layout = QVBoxLayout(self.log_group)
 
-        self.telemetry_checkbox = QCheckBox("Enable logging to file")
+        self.telemetry_checkbox = QCheckBox(_t("set_logging_enable"))
         self.telemetry_checkbox.setChecked(False)
         self.telemetry_checkbox.stateChanged.connect(self.toggle_raw_packet_logging)
 
         self.log_path_input = QLineEdit()
-        self.log_path_input.setPlaceholderText("Select log file path...")
+        self.log_path_input.setPlaceholderText(_t("set_logging_placeholder"))
         self.log_path_input.setEnabled(False)
 
-        self.select_path_btn = QPushButton("Browse...")
+        self.select_path_btn = QPushButton(_t("btn_browse"))
         self.select_path_btn.setEnabled(False)
         self.select_path_btn.clicked.connect(self.select_log_path)
 
@@ -1121,24 +1138,25 @@ class UIBase():
         log_to_file_layout.addWidget(self.telemetry_checkbox)
         log_to_file_layout.addLayout(path_layout)
 
-        settings_layout.addWidget(log_group)
+        settings_layout.addWidget(self.log_group)
 
         # Storage for telemetry config
         self.log_raw_packet_enabled= False
         self.log_file_path = ""
 
         # --- Auto-Save Group ---
-        auto_save_group = QGroupBox("Data Auto-Save")
-        auto_save_layout = QGridLayout(auto_save_group)
+        self.auto_save_group = QGroupBox(_t("set_auto_save"))
+        auto_save_layout = QGridLayout(self.auto_save_group)
         
         # Auto-save enable checkbox - DEFAULT CHECKED as requested by user
-        self.auto_save_checkbox = QCheckBox("Enable data auto-save")
+        self.auto_save_checkbox = QCheckBox(_t("set_auto_save_enable"))
         self.auto_save_checkbox.setChecked(True)  # Default checked
         self.auto_save_checkbox.stateChanged.connect(self.toggle_auto_save)
         auto_save_layout.addWidget(self.auto_save_checkbox, 0, 0, 1, 4)
         
         # Auto-save interval
-        auto_save_layout.addWidget(QLabel("Save interval (seconds):"), 1, 0)
+        self.save_interval_title_label = QLabel(_t("set_save_interval"))
+        auto_save_layout.addWidget(self.save_interval_title_label, 1, 0)
         self.auto_save_interval_spin = QSpinBox()
         self.auto_save_interval_spin.setRange(60, 86400)  # 1 minute to 1 day (24 hours)
         self.auto_save_interval_spin.setValue(self.auto_save_interval)
@@ -1147,18 +1165,19 @@ class UIBase():
         auto_save_layout.addWidget(self.auto_save_interval_spin, 1, 1)
         
         # Add time unit conversion helper
-        self.auto_save_interval_label = QLabel("(5 minutes)")
+        self.auto_save_interval_label = QLabel(f"({self.format_time_interval(self.auto_save_interval)})")
         auto_save_layout.addWidget(self.auto_save_interval_label, 1, 2)
         
         # Auto-save path
-        auto_save_layout.addWidget(QLabel("Save path:"), 2, 0)
+        self.save_path_title_label = QLabel(_t("set_save_path"))
+        auto_save_layout.addWidget(self.save_path_title_label, 2, 0)
         self.auto_save_path_input = QLineEdit()
-        self.auto_save_path_input.setPlaceholderText("Default: ~/Raysen/AutoSave/")
+        self.auto_save_path_input.setPlaceholderText(_t("set_save_path_placeholder"))
         self.auto_save_path_input.setText(self.auto_save_path)
         self.auto_save_path_input.setEnabled(False)
         auto_save_layout.addWidget(self.auto_save_path_input, 2, 1, 1, 2)
         
-        self.auto_save_path_btn = QPushButton("Browse...")
+        self.auto_save_path_btn = QPushButton(_t("btn_browse"))
         self.auto_save_path_btn.clicked.connect(self.select_auto_save_path)
         self.auto_save_path_btn.setEnabled(False)
         auto_save_layout.addWidget(self.auto_save_path_btn, 2, 3)
@@ -1168,14 +1187,14 @@ class UIBase():
         self.auto_save_path_btn.setEnabled(True)
         
         # Auto-save counter display
-        self.auto_save_counter_label = QLabel("Auto-saves: 0")
+        self.auto_save_counter_label = QLabel(_t("set_auto_saves_count", count=0))
         auto_save_layout.addWidget(self.auto_save_counter_label, 3, 0, 1, 4)
         
         # Enable/disable path controls based on auto-save state
         self.auto_save_path_input.setEnabled(self.auto_save_enabled)
         self.auto_save_path_btn.setEnabled(self.auto_save_enabled)
         
-        settings_layout.addWidget(auto_save_group)
+        settings_layout.addWidget(self.auto_save_group)
 
         settings_layout.addStretch()
 
@@ -1193,12 +1212,12 @@ class UIBase():
 
     def update_control_labels(self):
         if self.gain_stabilizer_flag == 1:
-            self.gain_stabilizer_btn.setText("Turn OFF")
-            self.gain_stabilizer_label.setText("[ON]")
+            self.gain_stabilizer_btn.setText(_t("btn_turn_off"))
+            self.gain_stabilizer_label.setText(_t("status_on"))
             self.gain_stabilizer_label.setStyleSheet('background-color:#b8e994; color:#000000;')
         else:
-            self.gain_stabilizer_btn.setText("Turn ON")
-            self.gain_stabilizer_label.setText("[OFF]")
+            self.gain_stabilizer_btn.setText(_t("btn_turn_on"))
+            self.gain_stabilizer_label.setText(_t("status_off"))
             self.gain_stabilizer_label.setStyleSheet('background-color:#ffcccc; color:#000000;')
         
         # Update client selection combo box —— 仅当客户端集合变化时才重建，
@@ -1211,7 +1230,7 @@ class UIBase():
     def update_auto_save_counter_label(self):
         """更新自动保存计数器标签"""
         if hasattr(self, 'auto_save_counter_label'):
-            self.auto_save_counter_label.setText(f"Auto-saves: {self.auto_save_counter}")
+            self.auto_save_counter_label.setText(_t("set_auto_saves_count", count=self.auto_save_counter))
     
     def set_hv_off(self):
         if self.set_operation_mode('STANDBY'):
@@ -1357,7 +1376,7 @@ class UIBase():
         
         # 自动保存时跳过数据检查，即使数据为0也要保存
         if not auto_save and np.sum(self.spectrum_data)==0:
-            QMessageBox.warning(self, "No Data", "No spectrum data available to save.")
+            QMessageBox.warning(self, _t("msg_no_data_title"), _t("msg_no_data_text"))
             return
         
         # Check if we're in TCP mode or serial mode
@@ -1381,7 +1400,7 @@ class UIBase():
             
             if not client_id_to_save:
                 if not auto_save:
-                    QMessageBox.warning(self, "No Client Data", "No client data available to save.")
+                    QMessageBox.warning(self, _t("msg_no_client_data_title"), _t("msg_no_client_data_text"))
                 return
             
             # Create filename with client ID for TCP mode
@@ -1396,13 +1415,13 @@ class UIBase():
                     client_identifier = f"client_{ip_port_safe}"
             
             default_filename = f"rayzen_spectrometer_data_{client_identifier}.xlsx"
-            dialog_title = f"Save Data for {client_id_to_save}"
+            dialog_title = _t("dlg_save_data_for", client=client_id_to_save)
             
         else:
             # Serial mode: save all data (only one "client")
             client_id_to_save = "serial_device"
             default_filename = "rayzen_spectrometer_data.xlsx"
-            dialog_title = "Save Data"
+            dialog_title = _t("dlg_save_data")
         
         if auto_save:
             # Auto-save mode: use provided path or generate default
@@ -1624,34 +1643,39 @@ class UIBase():
             self.auto_save_interval_label.setText(f"({formatted_time})")
     
     def format_time_interval(self, seconds):
-        """格式化时间间隔为可读格式"""
+        """格式化时间间隔为可读格式（随当前语言切换）"""
         if seconds < 60:
-            return f"{seconds}秒"
+            return _t("time_seconds", n=seconds)
         elif seconds < 3600:  # 小于1小时
             minutes = seconds // 60
             remaining_seconds = seconds % 60
             if remaining_seconds > 0:
-                return f"{minutes}分{remaining_seconds}秒"
+                return _t("time_min_sec", m=minutes, s=remaining_seconds)
             else:
-                return f"{minutes}分钟"
+                return _t("time_minutes", n=minutes)
         elif seconds < 86400:  # 小于1天
             hours = seconds // 3600
             remaining_minutes = (seconds % 3600) // 60
             if remaining_minutes > 0:
-                return f"{hours}小时{remaining_minutes}分"
+                return _t("time_hour_min", h=hours, m=remaining_minutes)
             else:
-                return f"{hours}小时"
+                return _t("time_hours", n=hours)
         else:  # 1天或以上
             days = seconds // 86400
             remaining_hours = (seconds % 86400) // 3600
             if remaining_hours > 0:
-                return f"{days}天{remaining_hours}小时"
+                return _t("time_day_hour", d=days, h=remaining_hours)
             else:
-                return f"{days}天"
+                return _t("time_days", n=days)
     
     def select_auto_save_path(self):
         """选择自动保存路径"""
-        path = QFileDialog.getExistingDirectory(self, "Select folder for auto-save")
+        path = QFileDialog.getExistingDirectory(
+            self,
+            _t("dlg_select_autosave_folder"),
+            self.auto_save_path or "",
+            QFileDialog.ShowDirsOnly | QFileDialog.DontUseNativeDialog
+        )
         if path:
             self.auto_save_path = path
             self.auto_save_path_input.setText(path)
@@ -2335,7 +2359,8 @@ class UIBase():
             self.relay2_checkbox.blockSignals(False)
             
             # 更新继电器状态标签
-            relay_status_text = f"Relay Status: 0={relay0_state}, 1={relay1_state}, 2={relay2_state}"
+            self.relay_states = (relay0_state, relay1_state, relay2_state)
+            relay_status_text = _t("relay_status_format", r0=int(relay0_state), r1=int(relay1_state), r2=int(relay2_state))
             self.relay_status_label.setText(relay_status_text)
             
             # 更新报警状态

@@ -13,6 +13,7 @@ class ConfigManager:
         self.hv = self.settings.value("HV", 1120, float)
         self.threshold = self.settings.value("THRESHOLD", 30, int)
         self.sensitivity = self.settings.value("SENSITIVITY", 3, int)
+        self.language = self.settings.value("LANGUAGE", "zh", str)  # "zh" or "en"
         
         # TCP/IP settings
         self.tcp_enabled = self.settings.value("TCP_ENABLED", False, bool)
@@ -24,7 +25,10 @@ class ConfigManager:
 
     def update_settings(self, baudrate=None, device=None, adc_channels=None, hv=None, threshold=None, sensitivity=None,
                        tcp_enabled=None, tcp_mode=None, tcp_host=None, tcp_port=None,
-                       tcp_client_host=None, tcp_client_port=None):
+                       tcp_client_host=None, tcp_client_port=None, language=None):
+        if language is not None:
+            self.language = language
+            self.settings.setValue("LANGUAGE", language)
         if baudrate is not None:
             self.baudrate = baudrate
             self.settings.setValue("BAUDRATE", baudrate)
