@@ -554,15 +554,16 @@ class AlarmLogPage(QWidget):
                             status_item.setForeground(Qt.green)
                         self.table_widget.setItem(row, 3, status_item)
                 
-                # Count rate
-                count_rate_text = f"{event.count_rate:.1f}"
+                # Peak rate (ACTIVE: trigger; INACTIVE: peak during alarm)
+                peak_rate = getattr(event, 'peak_count_rate', event.count_rate)
+                peak_rate_text = f"{peak_rate:.1f}"
                 if row < self.table_widget.rowCount():
                     if self.table_widget.item(row, 4):
-                        self.table_widget.item(row, 4).setText(count_rate_text)
+                        self.table_widget.item(row, 4).setText(peak_rate_text)
                     else:
-                        count_rate_item = QTableWidgetItem(count_rate_text)
-                        count_rate_item.setTextAlignment(Qt.AlignCenter)
-                        self.table_widget.setItem(row, 4, count_rate_item)
+                        peak_rate_item = QTableWidgetItem(peak_rate_text)
+                        peak_rate_item.setTextAlignment(Qt.AlignCenter)
+                        self.table_widget.setItem(row, 4, peak_rate_item)
                 
                 # Trigger count rate
                 trigger_count_rate_text = f"{event.trigger_count_rate:.1f}"
@@ -801,10 +802,11 @@ class AlarmLogPage(QWidget):
                     status_item.setForeground(Qt.green)
                 self.table_widget.setItem(row, 3, status_item)
                 
-                # Count rate
-                count_rate_item = QTableWidgetItem(f"{event.count_rate:.1f}")
-                count_rate_item.setTextAlignment(Qt.AlignCenter)
-                self.table_widget.setItem(row, 4, count_rate_item)
+                # Peak rate
+                peak_rate = getattr(event, 'peak_count_rate', event.count_rate)
+                peak_rate_item = QTableWidgetItem(f"{peak_rate:.1f}")
+                peak_rate_item.setTextAlignment(Qt.AlignCenter)
+                self.table_widget.setItem(row, 4, peak_rate_item)
                 
                 # Trigger count rate
                 trigger_count_rate_item = QTableWidgetItem(f"{event.trigger_count_rate:.1f}")

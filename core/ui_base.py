@@ -2593,34 +2593,27 @@ class UIBase():
     
     def log_alarm_event(self, packet: SpectrumPacket, client_id: str, alarm_status: bool):
         """
-        记录报警事件到报警日志
-        
-        Args:
-            packet: 数据包
-            client_id: 客户端ID
-            alarm_status: 报警状态 (True: 报警开始, False: 报警结束)
+        记录报警事件到报警日志。
+        以设备报警位为准；ACTIVE 期间由 logger 跟踪峰值 CPS。
         """
         try:
-            # 获取报警记录器
             alarm_logger = get_alarm_logger()
-            
-            # 确定客户端ID（如果是串口模式，使用默认ID）
+
             if client_id is None:
                 client_id = "serial_device"
-            
-            # 记录报警事件
+
             alarm_logger.log_alarm_event(
                 client_id=client_id,
                 alarm_status=alarm_status,
-                count_rate=packet.counter,  # 计数率 (cps)
-                temperature=packet.temperature / 100.0,  # 温度 (°C)
-                hv=packet.HV,  # 高压 (V)
-                product_id=packet.product_id,  # 产品ID
-                sensitivity=packet.sen_coef,  # 灵敏度系数
-                alarm_type="Radiation",  # 报警类型
-                message=f"计数率: {packet.counter} cps, 温度: {packet.temperature/100.0:.1f}°C, 高压: {packet.HV:.1f}V"
+                count_rate=packet.counter,
+                temperature=packet.temperature / 100.0,
+                hv=packet.HV,
+                product_id=packet.product_id,
+                sensitivity=packet.sen_coef,
+                alarm_type="Radiation",
+                message=""
             )
-            
+
         except Exception as e:
             self.log(f"记录报警事件失败: {e}", 'ERROR')
 
