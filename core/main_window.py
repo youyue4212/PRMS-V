@@ -47,6 +47,21 @@ from core.ui_components import StatusBar, DataCard, BottomNavBar, AcquisitionBut
 from core.diagnostics import FaultCode
 from core.pages import OverviewPage, SpectrumPage, SettingsPage, ClientsPage
 
+# 概览报警卡内说明区最多显示行数（超出部分在卡片内滚动，完整内容放 tooltip）
+_FAULT_DESC_MAX_LINES = 2
+
+
+def _format_fault_description(messages: list, max_lines: int = _FAULT_DESC_MAX_LINES) -> tuple:
+    """返回 (卡片内显示文本, 完整文本用于 tooltip)。"""
+    if not messages:
+        return "", ""
+    full_text = "\n".join(messages)
+    if len(messages) <= max_lines:
+        return full_text, full_text
+    shown = "\n".join(messages[:max_lines])
+    shown += f"\n… (+{len(messages) - max_lines})"
+    return shown, full_text
+
 # 导入用户管理模块
 from core.user_manager import get_user_manager, UserRole, Permission
 
@@ -480,24 +495,25 @@ class MainWindow(QMainWindow, UIBase):
             self.overview_page.alarm_status_label.setStyleSheet("""
                 QLabel {
                     color: #ff4444;
-                    font-size: 18px;
+                    font-size: 15px;
                     font-weight: bold;
-                    margin-top: 8px;
-                    padding: 4px 12px;
+                    margin-top: 2px;
+                    padding: 2px 6px;
                     background-color: rgba(255, 68, 68, 0.15);
-                    border-radius: 10px;
+                    border-radius: 8px;
                     border: 1px solid rgba(255, 68, 68, 0.4);
                 }
             """)
             
             # Update description with timestamp
             self.overview_page.alarm_desc_label.setText(_t("desc_alarm_at", time=current_time))
+            self.overview_page.alarm_desc_scroll.setToolTip("")
             self.overview_page.alarm_desc_label.setStyleSheet("""
                 QLabel {
                     color: #ff8888;
-                    font-size: 14px;
+                    font-size: 11px;
                     font-weight: bold;
-                    margin-top: 2px;
+                    margin-top: 0px;
                 }
             """)
             
@@ -541,31 +557,32 @@ class MainWindow(QMainWindow, UIBase):
                 if translated_msg not in unique_op_msgs:
                     unique_op_msgs.append(translated_msg)
             
-            fault_msg_str = "\n".join(unique_op_msgs)
+            display_text, tooltip_text = _format_fault_description(unique_op_msgs)
             
             # Update status label with orange styling
             self.overview_page.alarm_status_label.setText(_t("status_fault"))
             self.overview_page.alarm_status_label.setStyleSheet("""
                 QLabel {
                     color: #ff9800;
-                    font-size: 18px;
+                    font-size: 15px;
                     font-weight: bold;
-                    margin-top: 8px;
-                    padding: 4px 12px;
+                    margin-top: 2px;
+                    padding: 2px 6px;
                     background-color: rgba(255, 152, 0, 0.15);
-                    border-radius: 10px;
+                    border-radius: 8px;
                     border: 1px solid rgba(255, 152, 0, 0.4);
                 }
             """)
             
-            # Show the active fault messages in description (plain Chinese)
-            self.overview_page.alarm_desc_label.setText(fault_msg_str)
+            # 卡片内限高滚动；完整故障列表放 tooltip
+            self.overview_page.alarm_desc_label.setText(display_text)
+            self.overview_page.alarm_desc_scroll.setToolTip(tooltip_text)
             self.overview_page.alarm_desc_label.setStyleSheet("""
                 QLabel {
                     color: #ffb74d;
-                    font-size: 14px;
+                    font-size: 11px;
                     font-weight: bold;
-                    margin-top: 2px;
+                    margin-top: 0px;
                 }
             """)
             
@@ -607,24 +624,25 @@ class MainWindow(QMainWindow, UIBase):
             self.overview_page.alarm_status_label.setStyleSheet("""
                 QLabel {
                     color: #4caf50;
-                    font-size: 18px;
+                    font-size: 15px;
                     font-weight: bold;
-                    margin-top: 8px;
-                    padding: 4px 12px;
+                    margin-top: 2px;
+                    padding: 2px 6px;
                     background-color: rgba(76, 175, 80, 0.1);
-                    border-radius: 10px;
+                    border-radius: 8px;
                     border: 1px solid rgba(76, 175, 80, 0.3);
                 }
             """)
             
             # Update description with timestamp
             self.overview_page.alarm_desc_label.setText(_t("desc_checked_at", time=current_time))
+            self.overview_page.alarm_desc_scroll.setToolTip("")
             self.overview_page.alarm_desc_label.setStyleSheet("""
                 QLabel {
                     color: #aaaaaa;
-                    font-size: 14px;
+                    font-size: 11px;
                     font-weight: normal;
-                    margin-top: 2px;
+                    margin-top: 0px;
                 }
             """)
             
@@ -654,12 +672,58 @@ class MainWindow(QMainWindow, UIBase):
             """)
 
         # 4. Update Occupancy Status on Overview Page
+        from core.translation import _t
+        occupancy_enabled = bool(getattr(self.config, 'occupancy_sensor_enabled', False))
         is_occupied = False
-        if self.primary_client_id and self.primary_client_id in self.client_latest_packets:
+        if occupancy_enabled and self.primary_client_id and self.primary_client_id in self.client_latest_packets:
             latest_packet = self.client_latest_packets[self.primary_client_id]
             is_occupied = (latest_packet.device_status & 0b100000) != 0
-        
-        if is_occupied:
+
+        if not occupancy_enabled:
+            self.stop_occupancy_flashing()
+            self.overview_page.occupancy_title_icon.load(get_icon_svg('occupancy_inactive'))
+            self.overview_page.occupancy_indicator.load(get_icon_svg('occupancy_inactive'))
+            self.overview_page.occupancy_status_label.setText(_t("status_occ_disabled"))
+            self.overview_page.occupancy_status_label.setStyleSheet("""
+                QLabel {
+                    color: #9e9e9e;
+                    font-size: 18px;
+                    font-weight: bold;
+                    margin-top: 8px;
+                    padding: 4px 12px;
+                    background-color: rgba(158, 158, 158, 0.12);
+                    border-radius: 10px;
+                    border: 1px solid rgba(158, 158, 158, 0.35);
+                }
+            """)
+            self.overview_page.occupancy_desc_label.setText(_t("desc_occ_disabled"))
+            self.overview_page.occupancy_desc_label.setStyleSheet("""
+                QLabel {
+                    color: #888888;
+                    font-size: 12px;
+                }
+            """)
+            self.overview_page.occupancy_indicator_bar.setStyleSheet("""
+                QFrame {
+                    background-color: #555555;
+                    border: none;
+                }
+            """)
+            self.overview_page.occupancy_card.setStyleSheet("""
+                QFrame {
+                    background-color: #2a2a2a;
+                    border-radius: 12px;
+                    border: none;
+                    background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
+                        stop: 0 #2a2a2a, stop: 1 #1f1f1f);
+                }
+                QFrame:hover {
+                    border: 2px solid #444444;
+                    background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
+                        stop: 0 #2f2f2f, stop: 1 #242424);
+                }
+            """)
+        elif is_occupied:
             # Flashing Blue for occupied (person passing)
             self.start_occupancy_flashing()
             self.overview_page.occupancy_title_icon.load(get_icon_svg('occupancy_active'))
@@ -1688,6 +1752,8 @@ class MainWindow(QMainWindow, UIBase):
         if hasattr(self, 'ctrl_group'):
             self.ctrl_group.setTitle(_t("set_control"))
             self.gain_stabilizer_title_label.setText(_t("set_gain_stabilizer"))
+            if hasattr(self, 'occupancy_sensor_checkbox'):
+                self.occupancy_sensor_checkbox.setText(_t("set_occupancy_enable"))
             self.update_control_labels()
             
         if hasattr(self, 'keyboard_group'):

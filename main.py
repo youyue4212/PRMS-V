@@ -4,7 +4,7 @@ import tempfile
 import os
 from core.main_window import MainWindow, INSTANCE_ACTIVATE_SERVER
 from core.login_dialog import LoginDialog
-from core.user_manager import UserRole
+from core.user_manager import get_user_manager
 from PyQt5.QtWidgets import QApplication, QMessageBox
 from PyQt5.QtCore import Qt, QLockFile
 from PyQt5.QtNetwork import QLocalSocket
@@ -108,41 +108,10 @@ def main():
     app.setStyleSheet(themes.dark_stylesheet)
     
     # 默认以普通用户（viewer）模式启动，不需要密码
-    from core.user_manager import get_user_manager, UserRole
-    
     user_manager = get_user_manager()
-    
-    # 查找viewer用户
-    viewer_username = None
-    for username, user in user_manager.users.items():
-        if user.role == UserRole.VIEWER:
-            viewer_username = username
-            break
-    
-    if not viewer_username:
-        # 如果没有viewer用户，创建新的"viewer"用户（空密码）
-        viewer_username = "viewer"
-        user_manager.add_user(
-            username=viewer_username,
-            password="",  # 空密码
-            role=UserRole.VIEWER,
-            full_name="普通用户",
-            email="viewer@example.com"
-        )
-    
-    # 自动登录为viewer用户（使用空密码）
-    success, message = user_manager.authenticate(viewer_username, "")
-    
-    # 如果认证失败，尝试直接设置当前用户（绕过密码检查）
-    if not success:
-        print(f"自动登录失败: {message}，尝试直接设置用户...")
-        for username, user in user_manager.users.items():
-            if user.role == UserRole.VIEWER:
-                user_manager.current_user = user
-                success = True
-                message = "直接设置用户成功"
-                break
-    
+
+    success, viewer_username, message = user_manager.authenticate_viewer_auto()
+
     if success:
         user = user_manager.get_current_user()
         current_user = {
@@ -151,9 +120,9 @@ def main():
         }
         print(f"自动以普通用户模式启动: {user.username} ({user.role.value})")
     else:
-        # 如果自动登录失败，显示登录对话框
+        # 自动登录失败时才显示登录框（例如 viewer 被改过密码）
         print(f"自动登录失败: {message}")
-        login_dialog = LoginDialog()
+        login_dialog = LoginDialog(prefer_viewer_autofill=True)
         
         # 如果用户取消登录，退出程序
         if login_dialog.exec_() != LoginDialog.Accepted:

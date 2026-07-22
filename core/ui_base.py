@@ -1020,6 +1020,12 @@ class UIBase():
         ctrl_layout.addWidget(self.gain_stabilizer_label, 0, 1)
         ctrl_layout.addWidget(self.gain_stabilizer_btn, 0, 2)
 
+        # 占用传感器：未接线时关闭，避免 bit5 浮空导致“有人经过/人体感应故障”
+        self.occupancy_sensor_checkbox = QCheckBox(_t("set_occupancy_enable"))
+        self.occupancy_sensor_checkbox.setChecked(bool(getattr(self.config, 'occupancy_sensor_enabled', False)))
+        self.occupancy_sensor_checkbox.stateChanged.connect(self.on_occupancy_sensor_enabled_changed)
+        ctrl_layout.addWidget(self.occupancy_sensor_checkbox, 1, 0, 1, 3)
+
         settings_layout.addWidget(self.ctrl_group)
 
         # --- Virtual Keyboard Group ---
@@ -2008,7 +2014,8 @@ class UIBase():
         try:
             voltage = self._read_spinbox_value(self.hv_spin, self.hv_spin.value())
             self.hv_spin.setValue(float(voltage))
-            self.config.update_settings(hv=voltage)
+            # 标记为用户主动设定，此后才启用 E202（相对设定值偏差）
+            self.config.mark_hv_user_set(voltage)
             self.config.save_settings()
         except Exception:
             pass
@@ -2156,6 +2163,18 @@ class UIBase():
             self.config.update_settings(baudrate=baudrate)
         except ValueError:
             self.log(f"Invalid baudrate: {baudrate_text}", 'ERROR')
+
+    def on_occupancy_sensor_enabled_changed(self, state):
+        enabled = state == Qt.Checked
+        self.config.update_settings(occupancy_sensor_enabled=enabled)
+        self.config.save_settings()
+        self.log(f"Occupancy sensor {'enabled' if enabled else 'disabled'}", 'INFO')
+        # 关闭时清掉占用相关故障，避免残留 E501
+        if (not enabled and hasattr(self, 'diagnostics_manager')
+                and self.diagnostics_manager is not None):
+            for client_id in list(self.diagnostics_manager.active_faults.keys()):
+                self.diagnostics_manager.remove_fault(client_id, 'E501')
+                self.diagnostics_manager.occupancy_start_time.pop(client_id, None)
     
     def update_comm_settings_visibility(self):
         """Update visibility of communication settings based on current configuration"""
@@ -2382,13 +2401,17 @@ class UIBase():
 
             # 更新占用状态（device_status bit5: 0=Free, 1=Occupied）
             if hasattr(self, 'occupancy_status_label'):
-                is_occupied = (packet.device_status & 0b100000) != 0
-                self.occupancy_status_label.setText("Occupied" if is_occupied else "Free")
-                # Occupied -> amber, Free -> green
-                if is_occupied:
-                    self.occupancy_status_label.setStyleSheet("background-color: #ffe0b2; color: #000000;")
+                occupancy_enabled = bool(getattr(self.config, 'occupancy_sensor_enabled', False))
+                if not occupancy_enabled:
+                    self.occupancy_status_label.setText("Disabled")
+                    self.occupancy_status_label.setStyleSheet("background-color: #dddddd; color: #000000;")
                 else:
-                    self.occupancy_status_label.setStyleSheet("background-color: #ccffcc; color: #000000;")
+                    is_occupied = (packet.device_status & 0b100000) != 0
+                    self.occupancy_status_label.setText("Occupied" if is_occupied else "Free")
+                    if is_occupied:
+                        self.occupancy_status_label.setStyleSheet("background-color: #ffe0b2; color: #000000;")
+                    else:
+                        self.occupancy_status_label.setStyleSheet("background-color: #ccffcc; color: #000000;")
 
             # 注意：报警事件的记录已移至 on_spectrum_packet_received，对每个客户端独立
             # 进行边沿检测与记录，不再受“仅主客户端”限制，确保多 IP 设备的报警都能进记录表。
@@ -2410,7 +2433,10 @@ class UIBase():
             'temp': packet.temperature / 100.0,  # 温度（°C）
             'last_update': current_time,
             'alarm': (packet.device_status & 0b10000) != 0,  # 报警状态
-            'occupancy': (packet.device_status & 0b100000) != 0,  # 占用状态 bit5
+            'occupancy': (
+                bool(getattr(self.config, 'occupancy_sensor_enabled', False))
+                and (packet.device_status & 0b100000) != 0
+            ),
             'client_id': client_id,
             'product_id': packet.product_id,
             'sensitivity': packet.sen_coef

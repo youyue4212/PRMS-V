@@ -4,10 +4,18 @@
 """
 import json
 import os
+import sys
 from enum import Enum
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass, asdict
 from PyQt5.QtCore import QSettings, QObject, pyqtSignal
+
+
+def _app_data_dir() -> str:
+    """程序数据目录（users.json 等），避免自启动时工作目录不一致。"""
+    if getattr(sys, 'frozen', False):
+        return os.path.dirname(sys.executable)
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 class UserRole(Enum):
@@ -85,7 +93,7 @@ class UserManager(QObject):
     def __init__(self):
         super().__init__()
         self.settings = QSettings("Raysen", "Spectrometer")
-        self.users_file = "users.json"
+        self.users_file = os.path.join(_app_data_dir(), "users.json")
         self.current_user: Optional[User] = None
         self.users: Dict[str, User] = {}
         
@@ -150,6 +158,44 @@ class UserManager(QObject):
         # 这里使用简单的哈希，实际应用中应该使用bcrypt或类似的安全哈希
         import hashlib
         return hashlib.sha256(password.encode()).hexdigest()
+
+    def ensure_viewer_user(self) -> str:
+        """确保存在可用于免密自动登录的 viewer 账户，返回用户名。"""
+        for username, user in self.users.items():
+            if user.role == UserRole.VIEWER:
+                return username
+
+        from datetime import datetime
+        username = "user"
+        if username in self.users:
+            username = "viewer"
+
+        self.users[username] = User(
+            username=username,
+            password_hash=self._hash_password(""),
+            role=UserRole.VIEWER,
+            full_name="普通用户",
+            email="",
+            created_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            last_login=""
+        )
+        self.save_users()
+        return username
+
+    def authenticate_viewer_auto(self) -> Tuple[bool, Optional[str], Optional[str]]:
+        """Kiosk 模式：用 viewer 空密码自动登录，不弹登录框。"""
+        viewer_username = self.ensure_viewer_user()
+        success, message = self.authenticate(viewer_username, "")
+        if success:
+            return True, viewer_username, message
+
+        # 兜底：直接设为当前 viewer（例如 users.json 只读导致 authenticate 写回失败）
+        user = self.users.get(viewer_username)
+        if user and user.role == UserRole.VIEWER:
+            self.current_user = user
+            self.user_logged_in.emit(viewer_username, user.role)
+            return True, viewer_username, "viewer 自动登录（兜底）"
+        return False, None, message
     
     def authenticate(self, username: str, password: str) -> Tuple[bool, Optional[str]]:
         """用户认证"""

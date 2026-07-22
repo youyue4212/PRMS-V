@@ -4,7 +4,7 @@ from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QLabel, QPushButton, QFrame, QSpacerItem, QSizePolicy,
-    QStackedWidget
+    QStackedWidget, QScrollArea
 )
 from PyQt5.QtSvg import QSvgWidget
 from PyQt5.QtGui import QFont
@@ -12,6 +12,30 @@ from PyQt5.QtGui import QFont
 from core.ui_components import DataCard, FONTS, PADDING
 from core.icons import get_icon_svg
 import time
+
+# 概览页四张卡片统一高度，避免故障多行文字把整页撑出全屏
+OVERVIEW_CARD_HEIGHT = 180
+
+
+def _make_card_scroll_label(max_height: int = 40) -> QScrollArea:
+    """卡片内可滚动说明文字，限制高度防止撑破全屏布局。"""
+    scroll = QScrollArea()
+    scroll.setWidgetResizable(True)
+    scroll.setFrameShape(QFrame.NoFrame)
+    scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+    scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+    scroll.setMaximumHeight(max_height)
+    scroll.setStyleSheet("""
+        QScrollArea { background: transparent; border: none; }
+        QScrollBar:vertical { width: 4px; background: transparent; }
+        QScrollBar::handle:vertical { background: #555555; border-radius: 2px; }
+    """)
+    label = QLabel("")
+    label.setWordWrap(True)
+    label.setAlignment(Qt.AlignCenter)
+    label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+    scroll.setWidget(label)
+    return scroll, label
 
 
 class OverviewPage(QWidget):
@@ -64,6 +88,8 @@ class OverviewPage(QWidget):
         
         # Alarm indicator card - optimized for compact
         self.alarm_card = QFrame()
+        self.alarm_card.setFixedHeight(OVERVIEW_CARD_HEIGHT)
+        self.alarm_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.alarm_card.setStyleSheet("""
             QFrame {
                 background-color: #2a2a2a;
@@ -110,7 +136,7 @@ class OverviewPage(QWidget):
         
         # Main alarm indicator
         self.alarm_indicator = QSvgWidget()
-        self.alarm_indicator.setFixedSize(50, 50)
+        self.alarm_indicator.setFixedSize(40, 40)
         self.alarm_indicator.load(get_icon_svg('alarm_inactive'))
         alarm_layout.addWidget(self.alarm_indicator, 0, Qt.AlignCenter)
         
@@ -119,10 +145,10 @@ class OverviewPage(QWidget):
         self.alarm_status_label.setStyleSheet("""
             QLabel {
                 color: #4caf50;
-                font-size: 16px;
+                font-size: 15px;
                 font-weight: bold;
-                margin-top: 4px;
-                padding: 3px 8px;
+                margin-top: 2px;
+                padding: 2px 6px;
                 background-color: rgba(76, 175, 80, 0.1);
                 border-radius: 8px;
                 border: 1px solid rgba(76, 175, 80, 0.3);
@@ -131,19 +157,18 @@ class OverviewPage(QWidget):
         self.alarm_status_label.setAlignment(Qt.AlignCenter)
         alarm_layout.addWidget(self.alarm_status_label, 0, Qt.AlignCenter)
         
-        # Alarm description
-        self.alarm_desc_label = QLabel("未检测到异常")
-        self.alarm_desc_label.setWordWrap(True)
+        # Alarm description (scrollable, max 2 lines visible)
+        self.alarm_desc_scroll, self.alarm_desc_label = _make_card_scroll_label(38)
+        self.alarm_desc_label.setText("未检测到异常")
         self.alarm_desc_label.setStyleSheet("""
             QLabel {
                 color: #aaaaaa;
-                font-size: 14px;
+                font-size: 11px;
                 font-weight: normal;
-                margin-top: 2px;
+                margin-top: 0px;
             }
         """)
-        self.alarm_desc_label.setAlignment(Qt.AlignCenter)
-        alarm_layout.addWidget(self.alarm_desc_label, 0, Qt.AlignCenter)
+        alarm_layout.addWidget(self.alarm_desc_scroll)
         
         # Status indicator bar
         self.status_indicator_bar = QFrame()
@@ -157,11 +182,12 @@ class OverviewPage(QWidget):
         """)
         alarm_layout.addWidget(self.status_indicator_bar)
         
-        alarm_layout.addStretch()
         self.alarm_card.setLayout(alarm_layout)
 
         # Occupancy indicator card - optimized for compact
         self.occupancy_card = QFrame()
+        self.occupancy_card.setFixedHeight(OVERVIEW_CARD_HEIGHT)
+        self.occupancy_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.occupancy_card.setStyleSheet("""
             QFrame {
                 background-color: #2a2a2a;
@@ -208,7 +234,7 @@ class OverviewPage(QWidget):
         
         # Main occupancy indicator
         self.occupancy_indicator = QSvgWidget()
-        self.occupancy_indicator.setFixedSize(50, 50)
+        self.occupancy_indicator.setFixedSize(40, 40)
         self.occupancy_indicator.load(get_icon_svg('occupancy_inactive'))
         occupancy_layout.addWidget(self.occupancy_indicator, 0, Qt.AlignCenter)
         
@@ -217,10 +243,10 @@ class OverviewPage(QWidget):
         self.occupancy_status_label.setStyleSheet("""
             QLabel {
                 color: #4caf50;
-                font-size: 16px;
+                font-size: 15px;
                 font-weight: bold;
-                margin-top: 4px;
-                padding: 3px 8px;
+                margin-top: 2px;
+                padding: 2px 6px;
                 background-color: rgba(76, 175, 80, 0.1);
                 border-radius: 8px;
                 border: 1px solid rgba(76, 175, 80, 0.3);
@@ -229,19 +255,18 @@ class OverviewPage(QWidget):
         self.occupancy_status_label.setAlignment(Qt.AlignCenter)
         occupancy_layout.addWidget(self.occupancy_status_label, 0, Qt.AlignCenter)
         
-        # Occupancy description
-        self.occupancy_desc_label = QLabel("未检测到人员经过")
-        self.occupancy_desc_label.setWordWrap(True)
+        # Occupancy description (scrollable)
+        self.occupancy_desc_scroll, self.occupancy_desc_label = _make_card_scroll_label(38)
+        self.occupancy_desc_label.setText("未检测到人员经过")
         self.occupancy_desc_label.setStyleSheet("""
             QLabel {
                 color: #aaaaaa;
-                font-size: 14px;
+                font-size: 11px;
                 font-weight: normal;
-                margin-top: 2px;
+                margin-top: 0px;
             }
         """)
-        self.occupancy_desc_label.setAlignment(Qt.AlignCenter)
-        occupancy_layout.addWidget(self.occupancy_desc_label, 0, Qt.AlignCenter)
+        occupancy_layout.addWidget(self.occupancy_desc_scroll)
         
         # Occupancy indicator bar
         self.occupancy_indicator_bar = QFrame()
@@ -255,7 +280,6 @@ class OverviewPage(QWidget):
         """)
         occupancy_layout.addWidget(self.occupancy_indicator_bar)
         
-        occupancy_layout.addStretch()
         self.occupancy_card.setLayout(occupancy_layout)
         
         # Add four cards to layout with equal width
@@ -448,27 +472,38 @@ class ClientsPage(QWidget):
         
         self.stacked_widget = QStackedWidget()
         
-        # 1. Lock screen widget (Index 0)
+        # 1. Lock screen widget (Index 0) — 可滚动，适配 1024x600 全屏
         self.lock_widget = QWidget()
-        lock_layout = QVBoxLayout(self.lock_widget)
-        lock_layout.setContentsMargins(20, 40, 20, 20)
-        lock_layout.setSpacing(15)
+        lock_outer = QVBoxLayout(self.lock_widget)
+        lock_outer.setContentsMargins(0, 0, 0, 0)
+
+        lock_scroll = QScrollArea()
+        lock_scroll.setWidgetResizable(True)
+        lock_scroll.setFrameShape(QFrame.NoFrame)
+        lock_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        lock_scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
+
+        lock_content = QWidget()
+        lock_layout = QVBoxLayout(lock_content)
+        lock_layout.setContentsMargins(20, 16, 20, 16)
+        lock_layout.setSpacing(10)
         lock_layout.setAlignment(Qt.AlignCenter)
         
         # Lock Icon
         self.lock_icon = QSvgWidget()
-        self.lock_icon.setFixedSize(80, 80)
+        self.lock_icon.setFixedSize(64, 64)
         self.lock_icon.load(get_icon_svg('lock'))
         lock_layout.addWidget(self.lock_icon, 0, Qt.AlignCenter)
         
         # Lock Title
         self.lock_title = QLabel("工程师诊断界面 (工程师/维保人员专用)")
+        self.lock_title.setWordWrap(True)
         self.lock_title.setStyleSheet("""
             QLabel {
                 color: #ff9800;
-                font-size: 20px;
+                font-size: 18px;
                 font-weight: bold;
-                margin-top: 10px;
+                margin-top: 6px;
             }
         """)
         self.lock_title.setAlignment(Qt.AlignCenter)
@@ -480,12 +515,12 @@ class ClientsPage(QWidget):
             "根据工业安全与 ISA-18.2 规范，日常运行中这些信息对普通操作员隐藏。\n\n"
             "请点击下方按钮输入工程师密码进行解锁查看。"
         )
+        self.lock_desc.setWordWrap(True)
         self.lock_desc.setStyleSheet("""
             QLabel {
                 color: #aaaaaa;
-                font-size: 14px;
-                line-height: 1.5;
-                margin-top: 5px;
+                font-size: 13px;
+                margin-top: 4px;
             }
         """)
         self.lock_desc.setAlignment(Qt.AlignCenter)
@@ -493,17 +528,18 @@ class ClientsPage(QWidget):
         
         # Unlock Button
         self.unlock_btn = QPushButton("输入工程师密码解锁")
-        self.unlock_btn.setFixedHeight(45)
-        self.unlock_btn.setFixedWidth(240)
+        self.unlock_btn.setFixedHeight(42)
+        self.unlock_btn.setMinimumWidth(220)
+        self.unlock_btn.setMaximumWidth(320)
         self.unlock_btn.setStyleSheet("""
             QPushButton {
                 background-color: #ff9800;
                 color: white;
                 border: none;
                 border-radius: 15px;
-                font-size: 16px;
+                font-size: 15px;
                 font-weight: bold;
-                margin-top: 20px;
+                margin-top: 12px;
             }
             QPushButton:pressed {
                 background-color: #e65100;
@@ -511,21 +547,24 @@ class ClientsPage(QWidget):
         """)
         self.unlock_btn.clicked.connect(self.parent.login)
         lock_layout.addWidget(self.unlock_btn, 0, Qt.AlignCenter)
+
+        lock_scroll.setWidget(lock_content)
+        lock_outer.addWidget(lock_scroll)
         
         # 2. Content widget (Index 1)
         self.content_widget = QWidget()
         content_layout = QVBoxLayout(self.content_widget)
-        content_layout.setContentsMargins(20, 20, 20, 20)
-        content_layout.setSpacing(15)
+        content_layout.setContentsMargins(12, 10, 12, 8)
+        content_layout.setSpacing(8)
         
         # Title
         self.clients_title = QLabel("已连接的探测器")
         self.clients_title.setStyleSheet("""
             QLabel {
                 color: white;
-                font-size: 22px !important;
+                font-size: 18px !important;
                 font-weight: bold !important;
-                margin-bottom: 10px;
+                margin-bottom: 4px;
             }
         """)
         content_layout.addWidget(self.clients_title)
@@ -538,30 +577,33 @@ class ClientsPage(QWidget):
             QLabel {
                 color: #aaaaaa;
                 font-weight: normal;
-                margin-bottom: 10px;
+                margin-bottom: 4px;
             }
         """)
         content_layout.addWidget(self.client_summary_label)
         
-        # Scroll area for client cards
-        scroll_area = QWidget()
-        scroll_area.setStyleSheet("background-color: transparent;")
-        self.scroll_layout = QVBoxLayout(scroll_area)
+        # Scroll area for client cards (真正的 QScrollArea)
+        self.client_list_widget = QWidget()
+        self.scroll_layout = QVBoxLayout(self.client_list_widget)
         self.scroll_layout.setContentsMargins(0, 0, 0, 0)
         self.scroll_layout.setSpacing(10)
-        
-        # Container for scroll area
-        scroll_container = QWidget()
-        scroll_container.setLayout(QVBoxLayout())
-        scroll_container.layout().addWidget(scroll_area)
-        scroll_container.layout().setContentsMargins(0, 0, 0, 0)
-        
-        # Add scroll area to content layout
-        content_layout.addWidget(scroll_container, 1)
+
+        client_scroll = QScrollArea()
+        client_scroll.setWidgetResizable(True)
+        client_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        client_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        client_scroll.setFrameShape(QFrame.NoFrame)
+        client_scroll.setStyleSheet("""
+            QScrollArea { border: none; background-color: transparent; }
+            QScrollArea > QWidget > QWidget { background-color: transparent; }
+        """)
+        client_scroll.setWidget(self.client_list_widget)
+        self.client_scroll = client_scroll
+        content_layout.addWidget(client_scroll, 1)
         
         # Add refresh button
         self.refresh_btn = QPushButton("刷新")
-        self.refresh_btn.setFixedHeight(40)
+        self.refresh_btn.setFixedHeight(36)
         self.refresh_btn.setStyleSheet("""
             QPushButton {
                 background-color: #4caf50;
@@ -583,7 +625,7 @@ class ClientsPage(QWidget):
         self.stacked_widget.addWidget(self.lock_widget)
         self.stacked_widget.addWidget(self.content_widget)
         
-        main_layout.addWidget(self.stacked_widget)
+        main_layout.addWidget(self.stacked_widget, 1)
         self.setLayout(main_layout)
         
         # Timer to auto-refresh client display
@@ -651,7 +693,9 @@ class ClientsPage(QWidget):
         """Create a widget for displaying client information"""
         from core.translation import _t
         widget = QFrame()
-        widget.setFixedHeight(150)
+        widget.setMinimumHeight(140)
+        widget.setMaximumHeight(160)
+        widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         widget.setStyleSheet("""
             QFrame {
                 background-color: #2a2a2a;

@@ -34,7 +34,7 @@ class FaultCode:
         E101: ("探测器无数据", "配置的探测器未上报数据，请检查网络、IP设置或探测器供电", "ERROR", "探测器连接异常！请检查网线连接，或尝试断电重启设备。若仍异常，请联系维保人员。"),
         E102: ("通信中断", "探测器通信超时，已超过30秒未收到数据包", "ERROR", "1号辐射探头通讯异常 → 请断电重启设备，仍异常联系维保人员。"),
         E201: ("高压未建立", "探测器高压接近0V，可能高压模块未供电或已损坏", "ERROR", "探测器高压异常！设备已自动停止采集，请暂停通道通行，并立即报修。"),
-        E202: ("高压偏离设定", "检测到高压与设定值偏差过大，请检查高压模块或稳谱设置", "WARNING", "高压模块过压/欠压保护 → 设备自动停机，禁止通行，立即报修。"),
+        E202: ("高压偏离设定", "检测到高压与设定值偏差过大（仅在用户主动设置高压且稳谱关闭时检测）", "WARNING", "高压模块过压/欠压保护 → 设备自动停机，禁止通行，立即报修。"),
         E203: ("高压突然跌落", "高压在短时间内大幅度下降，可能存在过流保护或硬件故障", "ERROR", "探测器高压异常！设备已自动停止采集，请暂停通道通行，并立即报修。"),
         E301: ("温度超闪烁体上限", "探测器温度超过塑料闪烁体承受温度(>55°C)", "ERROR", "探测器温度超限！请检查环境散热，暂停使用，并联系维保人员。"),
         E302: ("温度超PMT范围", "温度超出光电倍增管正常工作范围(-20°C ~ 50°C)", "WARNING", "探测器温度异常！请检查环境散热，暂停使用，并联系维保人员。"),
@@ -131,6 +131,9 @@ class DiagnosticsManager:
         # 1. High Voltage (高压) Diagnostics
         hv = float(packet.HV)
         hv_set = float(self.config.hv)
+        # device_status bit3: gain stabilizer on/off
+        gain_stabilizer_on = ((int(packet.device_status) >> 3) & 0x1) == 1
+        hv_user_set = bool(getattr(self.config, 'hv_user_set', False))
         
         # E201: No High Voltage (HV < 200V)
         if hv < 200.0:
@@ -140,8 +143,13 @@ class DiagnosticsManager:
         else:
             self.remove_fault(client_id, FaultCode.E201)
             
-            # E202: HV deviation from setpoint (> 80V)
-            if abs(hv - hv_set) > 80.0:
+            # E202: HV deviation from user setpoint (> 80V)
+            # 防误报：
+            # 1) 用户从未点击「设置高压」时，不与默认 1120V 比较
+            # 2) 稳谱开启时设备会主动调压，不报 E202（突降仍由 E203 覆盖）
+            if (not hv_user_set) or gain_stabilizer_on:
+                self.remove_fault(client_id, FaultCode.E202)
+            elif abs(hv - hv_set) > 80.0:
                 self.add_fault(client_id, FaultCode.E202)
             else:
                 self.remove_fault(client_id, FaultCode.E202)
@@ -226,17 +234,23 @@ class DiagnosticsManager:
 
         # 4. Occupancy Sensor (通道占用) Diagnostics
         # device_status bit5: 0=Free, 1=Occupied
-        is_occupied = (packet.device_status & 0b100000) != 0
-        if is_occupied:
-            if client_id not in self.occupancy_start_time:
-                self.occupancy_start_time[client_id] = now
-            else:
-                # E501: Occupancy stuck (occupied for more than 5 minutes / 300 seconds)
-                if now - self.occupancy_start_time[client_id] > 300.0:
-                    self.add_fault(client_id, FaultCode.E501)
-        else:
-            self.occupancy_start_time[client_id] = 0.0
+        # 未接入传感器时 bit5 可能浮空误报；关闭开关后忽略占用与 E501
+        if not getattr(self.config, 'occupancy_sensor_enabled', False):
+            self.occupancy_start_time.pop(client_id, None)
             self.remove_fault(client_id, FaultCode.E501)
+        else:
+            is_occupied = (packet.device_status & 0b100000) != 0
+            if is_occupied:
+                start_ts = self.occupancy_start_time.get(client_id)
+                # 仅在真正从空闲进入占用时开始计时；勿用 0.0 占位（会导致立刻误报 E501）
+                if not start_ts:
+                    self.occupancy_start_time[client_id] = now
+                elif now - start_ts > 300.0:
+                    # E501: Occupancy stuck (occupied for more than 5 minutes)
+                    self.add_fault(client_id, FaultCode.E501)
+            else:
+                self.occupancy_start_time.pop(client_id, None)
+                self.remove_fault(client_id, FaultCode.E501)
 
         return list(self.active_faults[client_id].keys())
 

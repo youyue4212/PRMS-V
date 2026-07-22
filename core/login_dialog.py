@@ -42,10 +42,11 @@ class LoginDialog(QDialog):
     # 登录成功信号
     login_successful = pyqtSignal(str, UserRole)  # 用户名, 角色
     
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, prefer_viewer_autofill=False):
         super().__init__(parent)
         self.user_manager = get_user_manager()
         self.settings = QSettings("Raysen", "Spectrometer")
+        self.prefer_viewer_autofill = prefer_viewer_autofill
         self.setup_ui()
         self.load_saved_credentials()
         self.enable_login_virtual_keyboard()
@@ -273,6 +274,13 @@ class LoginDialog(QDialog):
     
     def load_saved_credentials(self):
         """Load saved credentials from settings"""
+        if self.prefer_viewer_autofill:
+            viewer_username = self.user_manager.ensure_viewer_user()
+            self.username_input.setText(viewer_username)
+            self.password_input.setText("")
+            self.remember_checkbox.setChecked(False)
+            return
+
         remember = self.settings.value("login/remember_password", False, type=bool)
         if remember:
             username = self.settings.value("login/username", "", type=str)
