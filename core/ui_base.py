@@ -579,6 +579,69 @@ class UIBase():
         # Start auto-save timer if enabled
         if self.auto_save_enabled:
             self.auto_save_timer.start(self.auto_save_interval * 1000)
+
+    def _apply_cps_plot_labels(self):
+        """Apply localized title/axis labels to count-rate plot."""
+        if not hasattr(self, 'cps_widget') or self.cps_widget is None:
+            return
+        if not hasattr(self.cps_widget, 'setTitle'):
+            return
+        from core.translation import _t
+        self.cps_widget.setTitle(_t("plot_cps_title"), color='#ffffff', size='12pt')
+        self.cps_widget.setLabel('left', _t("plot_cps_y"), color='#ffffff')
+        self.cps_widget.setLabel('bottom', _t("plot_cps_x"), color='#ffffff')
+        if hasattr(self, 'curve_cps') and self.curve_cps is not None:
+            try:
+                self.curve_cps.opts['name'] = _t("plot_cps_legend")
+            except Exception:
+                pass
+
+    def _apply_spec_plot_labels(self):
+        """Apply localized title/axis labels to spectrum plot."""
+        if not hasattr(self, 'spec_widget') or self.spec_widget is None:
+            return
+        if not hasattr(self.spec_widget, 'setTitle'):
+            return
+        from core.translation import _t
+        channels = getattr(self.config, 'adc_channels', 4096)
+        self.spec_widget.setTitle(
+            _t("plot_spec_title", channels=channels), color='#ffffff', size='12pt'
+        )
+        self.spec_widget.setLabel('left', _t("plot_spec_y"), color='#ffffff')
+        self.spec_widget.setLabel('bottom', _t("plot_spec_x"), color='#ffffff')
+        if hasattr(self, 'curve_spectrum') and self.curve_spectrum is not None:
+            try:
+                self.curve_spectrum.opts['name'] = _t("plot_spec_legend")
+            except Exception:
+                pass
+
+    def _apply_spectrogram_plot_labels(self):
+        """Apply localized title/axis labels to spectrogram plot."""
+        from core.translation import _t
+        if hasattr(self, 'plot_spectrogram') and self.plot_spectrogram is not None:
+            try:
+                self.plot_spectrogram.setTitle(_t("plot_spectrogram_title"))
+                self.plot_spectrogram.setLabel('bottom', _t("plot_spectrogram_x"))
+                self.plot_spectrogram.setLabel('left', _t("plot_spectrogram_y"))
+            except Exception:
+                pass
+        if hasattr(self, 'colorbar') and self.colorbar is not None:
+            try:
+                # ColorBarItem label API varies by pyqtgraph version
+                if hasattr(self.colorbar, 'setLabel'):
+                    self.colorbar.setLabel(_t("plot_colorbar_counts"))
+                elif hasattr(self.colorbar, 'label'):
+                    label = self.colorbar.label
+                    if hasattr(label, 'setText'):
+                        label.setText(_t("plot_colorbar_counts"))
+            except Exception:
+                pass
+
+    def retranslate_plot_labels(self):
+        """Refresh plot titles/axes after language switch."""
+        self._apply_cps_plot_labels()
+        self._apply_spec_plot_labels()
+        self._apply_spectrogram_plot_labels()
     
     def set_chart_stylesheet(self, widget):
         """
@@ -626,9 +689,7 @@ class UIBase():
         
         # 设置图表样式
         self.cps_widget.setBackground('#2a2a2a')
-        self.cps_widget.setTitle("Count Rate vs Time", color='#ffffff', size='12pt')
-        self.cps_widget.setLabel('left', 'Counts / sec', color='#ffffff')
-        self.cps_widget.setLabel('bottom', 'Time (s)', color='#ffffff')
+        self._apply_cps_plot_labels()
         
         # 设置轴颜色
         self.cps_widget.getAxis('left').setPen(pg.mkPen(color='#ffffff', width=1))
@@ -641,7 +702,10 @@ class UIBase():
         self.cps_widget.getAxis('bottom').setTextPen(pg.mkPen(color='#ffffff'))
         
         # 创建曲线
-        self.curve_cps = self.cps_widget.plot([], [], pen=pg.mkPen(color='#1f77b4', width=2), name='Count Rate')
+        from core.translation import _t
+        self.curve_cps = self.cps_widget.plot(
+            [], [], pen=pg.mkPen(color='#1f77b4', width=2), name=_t("plot_cps_legend")
+        )
         
         # 添加图例
         self.cps_widget.addLegend()
@@ -677,9 +741,7 @@ class UIBase():
         
         # 设置图表样式
         self.spec_widget.setBackground('#2a2a2a')
-        self.spec_widget.setTitle(f"Spectrum ({self.config.adc_channels} Channels)", color='#ffffff', size='12pt')
-        self.spec_widget.setLabel('left', 'Counts', color='#ffffff')
-        self.spec_widget.setLabel('bottom', 'Channel', color='#ffffff')
+        self._apply_spec_plot_labels()
         
         # 设置轴颜色
         self.spec_widget.getAxis('left').setPen(pg.mkPen(color='#ffffff', width=1))
@@ -692,8 +754,12 @@ class UIBase():
         self.spec_widget.getAxis('bottom').setTextPen(pg.mkPen(color='#ffffff'))
         
         # 创建曲线 - 使用stepMode="center"显示阶梯状能谱
-        self.curve_spectrum = self.spec_widget.plot([], [], stepMode="center", fillLevel=0, 
-                                                    brush=(31, 119, 180, 100), pen=pg.mkPen(color='#1f77b4', width=2), name='Spectrum')
+        from core.translation import _t
+        self.curve_spectrum = self.spec_widget.plot(
+            [], [], stepMode="center", fillLevel=0,
+            brush=(31, 119, 180, 100), pen=pg.mkPen(color='#1f77b4', width=2),
+            name=_t("plot_spec_legend")
+        )
         
         # 添加图例
         self.spec_widget.addLegend()
@@ -730,15 +796,16 @@ class UIBase():
             layout.addWidget(QLabel("Spectrogram initialization failed"))
             return container
         
+        from core.translation import _t
         self.plot_spectrogram = widget.addPlot(
-            row=0, col=0, title="Spectrogram (ADC Channels vs Time)"
+            row=0, col=0, title=_t("plot_spectrogram_title")
         )
         self.plot_spectrogram.showAxis('right', True)
         self.plot_spectrogram.showAxis('top', True)
         self.plot_spectrogram.getAxis('right').setStyle(showValues=False)
         self.plot_spectrogram.getAxis('top').setStyle(showValues=False)
-        self.plot_spectrogram.setLabel('bottom', 'Time (s)')
-        self.plot_spectrogram.setLabel('left', 'ADC Channel')
+        self.plot_spectrogram.setLabel('bottom', _t("plot_spectrogram_x"))
+        self.plot_spectrogram.setLabel('left', _t("plot_spectrogram_y"))
         
         # Initialize the spectrogram data buffer
         self.spectrogram_data = np.zeros((MAX_SPECTRUM_STORED, self.config.adc_channels))
@@ -768,10 +835,11 @@ class UIBase():
         )
         
         # Add color bar
+        from core.translation import _t
         self.colorbar = pg.ColorBarItem(
             values=(0, 1),
             colorMap=colormap,
-            label='Counts'
+            label=_t("plot_colorbar_counts")
         )
         self.colorbar.setImageItem(self.img_spectrogram)
         widget.addItem(self.colorbar, row=0, col=1)

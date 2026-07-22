@@ -47,6 +47,19 @@ class TranslationManager:
             
             "chart_title": "实时计数率时序图",
             
+            "plot_cps_title": "计数率–时间",
+            "plot_cps_y": "计数率 (cps)",
+            "plot_cps_x": "时间 (s)",
+            "plot_cps_legend": "计数率",
+            "plot_spec_title": "能谱（{channels} 道）",
+            "plot_spec_y": "计数",
+            "plot_spec_x": "道址",
+            "plot_spec_legend": "能谱",
+            "plot_spectrogram_title": "谱图（ADC道址–时间）",
+            "plot_spectrogram_y": "ADC 道址",
+            "plot_spectrogram_x": "时间 (s)",
+            "plot_colorbar_counts": "计数",
+            
             # SpectrumPage
             "spec_title": "能谱与谱图分析",
             
@@ -328,6 +341,19 @@ class TranslationManager:
             "desc_traffic_detected": "Traffic detected in channel",
             
             "chart_title": "Real-time Count Rate Time Series",
+            
+            "plot_cps_title": "Count Rate vs Time",
+            "plot_cps_y": "Count Rate (cps)",
+            "plot_cps_x": "Time (s)",
+            "plot_cps_legend": "Count Rate",
+            "plot_spec_title": "Spectrum ({channels} Channels)",
+            "plot_spec_y": "Counts",
+            "plot_spec_x": "Channel",
+            "plot_spec_legend": "Spectrum",
+            "plot_spectrogram_title": "Spectrogram (ADC Channels vs Time)",
+            "plot_spectrogram_y": "ADC Channel",
+            "plot_spectrogram_x": "Time (s)",
+            "plot_colorbar_counts": "Counts",
             
             # SpectrumPage
             "spec_title": "Energy Spectrum & Spectrogram",

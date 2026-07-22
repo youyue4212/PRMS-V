@@ -1813,6 +1813,10 @@ class MainWindow(QMainWindow, UIBase):
         for page in [self.overview_page, self.spectrum_page, self.clients_page, self.alarm_log_page, self.settings_page]:
             if hasattr(page, 'retranslate_ui'):
                 page.retranslate_ui()
+
+        # Plot axis titles follow language
+        if hasattr(self, 'retranslate_plot_labels'):
+            self.retranslate_plot_labels()
                 
         # Force a UI update
         self.update()
