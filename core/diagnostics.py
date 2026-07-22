@@ -31,8 +31,8 @@ class FaultCode:
     E501 = "E501"  # 通道占用传感器异常 / 卡死
 
     MAP = {
-        E101: ("探测器无数据", "配置的探测器未上报数据，请检查网络、IP设置或探测器供电", "ERROR", "探测器连接异常！请检查网线连接，或尝试断电重启设备。若仍异常，请联系维保人员。"),
-        E102: ("通信中断", "探测器通信超时，已超过30秒未收到数据包", "ERROR", "1号辐射探头通讯异常 → 请断电重启设备，仍异常联系维保人员。"),
+        E101: ("探测器无数据", "配置的探测器未上报数据，请检查网络、IP设置或探测器供电", "ERROR", "{probe}探测器连接异常！请检查网线连接，或尝试断电重启设备。若仍异常，请联系维保人员。"),
+        E102: ("通信中断", "探测器通信超时，已超过30秒未收到数据包", "ERROR", "{probe}辐射探头通讯异常 → 请断电重启设备，仍异常联系维保人员。"),
         E201: ("高压未建立", "探测器高压接近0V，可能高压模块未供电或已损坏", "ERROR", "探测器高压异常！设备已自动停止采集，请暂停通道通行，并立即报修。"),
         E202: ("高压偏离设定", "检测到高压与设定值偏差过大（仅在用户主动设置高压且稳谱关闭时检测）", "WARNING", "高压模块过压/欠压保护 → 设备自动停机，禁止通行，立即报修。"),
         E203: ("高压突然跌落", "高压在短时间内大幅度下降，可能存在过流保护或硬件故障", "ERROR", "探测器高压异常！设备已自动停止采集，请暂停通道通行，并立即报修。"),
@@ -296,14 +296,34 @@ class DiagnosticsManager:
                     else:
                         self.remove_fault(client_id, FaultCode.E102)
 
-        # Clean up faults for clients that are no longer in connected_clients list
-        # (except "system" and clients that timed out)
+        # 收到过数据的客户端：process_packet 已清 E101/E102；
+        # 这里再保证“有新鲜数据”时通讯类故障不会因旧会话残留。
+        # Clean up faults for clients that are no longer connected.
+        # 旧逻辑会永久保留已断开客户端上的 E102，TCP 重连后 client_id 一变
+        # 就会出现“数据已正常但仍提示通讯异常”。现改为：会话不在连接列表则清理。
         for client_id in list(self.active_faults.keys()):
-            if client_id != "system" and client_id not in connected_clients:
-                # If they timed out, keep E102 active
-                if FaultCode.E102 in self.active_faults[client_id]:
-                    continue
+            if client_id == "system":
+                continue
+            if client_id not in connected_clients:
                 self.remove_client(client_id)
+
+        # 额外保险：只要当前仍有“近期有数据”的探头，清掉其余客户端残留的通讯类故障
+        has_fresh_data = any(
+            (now - self.last_packet_time.get(cid, 0.0)) <= 30.0
+            for cid in connected_clients
+        )
+        if has_fresh_data:
+            for client_id in list(self.active_faults.keys()):
+                if client_id == "system":
+                    self.remove_fault("system", FaultCode.E101)
+                    continue
+                if client_id not in connected_clients:
+                    self.remove_client(client_id)
+                    continue
+                last_seen = self.last_packet_time.get(client_id, 0.0)
+                if last_seen > 0.0 and (now - last_seen) <= 30.0:
+                    self.remove_fault(client_id, FaultCode.E101)
+                    self.remove_fault(client_id, FaultCode.E102)
 
         return {cid: list(faults.keys()) for cid, faults in self.active_faults.items()}
 

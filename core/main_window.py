@@ -549,11 +549,14 @@ class MainWindow(QMainWindow, UIBase):
             self.overview_page.alarm_title_icon.load(get_icon_svg('alarm_inactive'))
             self.overview_page.alarm_indicator.load(get_icon_svg('alarm_inactive'))
             
-            # Format fault messages for display (join unique operator messages)
+            # Format fault messages for display (per-client probe number)
             from core.translation import _t
             unique_op_msgs = []
-            for _, code, _, _, _, _ in active_faults:
-                translated_msg = _t(f"fault_op_{code}")
+            for client_id, code, _, _, _, _ in active_faults:
+                if hasattr(self, "format_fault_operator_message"):
+                    translated_msg = self.format_fault_operator_message(client_id, code)
+                else:
+                    translated_msg = _t(f"fault_op_{code}")
                 if translated_msg not in unique_op_msgs:
                     unique_op_msgs.append(translated_msg)
             

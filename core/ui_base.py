@@ -505,10 +505,13 @@ class UIBase():
         # Multi-client data tracking
         self.client_data = {}  # {client_id: {'hv': 0, 'rates': 0, 'temp': 0, 'last_update': timestamp}}
         self.total_count_rate = 0  # Sum of all client count rates
+        # 稳定探头编号：优先 product_id，否则按 IP 首次出现顺序分配 1/2/...
+        self._probe_ip_index = {}
         
         # Create worker based on configuration
         self.worker = None
         self.worker_thread = QThread()
+        self.mirror_hub = None
         
         # Initialize worker based on TCP enabled setting
         self.initialize_worker()
@@ -2622,6 +2625,92 @@ class UIBase():
             return list(dict.fromkeys(connected_clients + historical_clients))
 
         return list(self.client_time_series.keys())
+
+    @staticmethod
+    def _extract_client_ip(client_id: str) -> str:
+        """Parse IP from ids like client_1_192.168.0.10:54321"""
+        if not client_id or client_id == "system":
+            return ""
+        if client_id == "serial_client":
+            return "serial"
+        # Prefer trailing host:port
+        if "_" in client_id:
+            tail = client_id.split("_")[-1]
+            if ":" in tail:
+                return tail.split(":")[0]
+            # dotted IP without port
+            parts = tail.split(".")
+            if len(parts) == 4 and all(p.isdigit() for p in parts):
+                return tail
+        return client_id
+
+    def get_probe_label(self, client_id: str) -> str:
+        """
+        Human label for a detector: '1号' / '2号' / ...
+        Priority: packet product_id (1..99) -> stable IP index.
+        """
+        if not client_id or client_id == "system":
+            return ""
+
+        data = self.client_data.get(client_id) or {}
+        pid = data.get("product_id")
+        try:
+            pid_int = int(pid)
+            if 1 <= pid_int <= 99:
+                return f"{pid_int}\u53f7"
+        except (TypeError, ValueError):
+            pass
+
+        # Also try latest packet
+        pkt = self.client_latest_packets.get(client_id)
+        if pkt is not None:
+            try:
+                pid_int = int(getattr(pkt, "product_id", 0))
+                if 1 <= pid_int <= 99:
+                    return f"{pid_int}\u53f7"
+            except (TypeError, ValueError):
+                pass
+
+        ip = self._extract_client_ip(client_id)
+        if not ip:
+            return "\u63a2\u5934"  # 探头
+
+        if not hasattr(self, "_probe_ip_index") or self._probe_ip_index is None:
+            self._probe_ip_index = {}
+
+        if ip not in self._probe_ip_index:
+            used = set(self._probe_ip_index.values())
+            n = 1
+            while n in used:
+                n += 1
+            self._probe_ip_index[ip] = n
+            # Prefer sorted IP order when first assigning multiple unknowns
+            # Reassign compact indices by sorted IP for stable 1/2 mapping
+            ips = sorted(self._probe_ip_index.keys())
+            self._probe_ip_index = {k: i + 1 for i, k in enumerate(ips)}
+
+        return f"{self._probe_ip_index[ip]}\u53f7"
+
+    def format_fault_operator_message(self, client_id: str, code: str) -> str:
+        """Build operator-facing fault text with correct probe number."""
+        from core.translation import _t
+        probe = self.get_probe_label(client_id)
+        # system-level: no probe prefix number
+        if not probe:
+            probe = ""
+        msg = _t(f"fault_op_{code}", probe=probe)
+        # If translation key missing, fall back
+        if msg == f"fault_op_{code}":
+            from core.diagnostics import FaultCode
+            _, _, _, op = FaultCode.get_info(code)
+            try:
+                msg = op.format(probe=probe or "\u63a2\u5934")
+            except Exception:
+                msg = op
+        # Ensure probe identity visible for other codes without {probe}
+        if probe and code not in ("E101", "E102") and probe not in msg:
+            msg = f"{probe}{msg}"
+        return msg
     
     def update_client_selection_combo(self):
         """
@@ -2649,13 +2738,14 @@ class UIBase():
             # 添加所有可用客户端
             available_clients = self.get_available_clients()
             for client_id in available_clients:
-                # 简化显示名称
-                display_name = client_id
-                if "_" in client_id:
-                    # 提取IP和端口部分
-                    parts = client_id.split("_")
-                    if len(parts) >= 3:
-                        display_name = f"Client {parts[1]}: {parts[2]}"
+                probe = self.get_probe_label(client_id)
+                ip = self._extract_client_ip(client_id)
+                if probe and ip:
+                    display_name = f"{probe} ({ip})"
+                elif probe:
+                    display_name = probe
+                else:
+                    display_name = client_id
                 
                 # 正确设置itemData
                 self.client_selection_combo.addItem(display_name)
