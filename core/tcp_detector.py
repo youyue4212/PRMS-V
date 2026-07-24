@@ -24,6 +24,34 @@ CMD_FEEDBACK_ID = 0x4346
 SPECTRUM_PACKET_ID = 0x5350
 DEV_MESSAGE_ID = 0x7783  # New packet ID
 
+
+def _enable_tcp_keepalive(sock: socket.socket,
+                          idle: int = 3, interval: int = 1, count: int = 3) -> None:
+    """Detect dead peers faster after cable unplug (Linux/Windows best-effort)."""
+    try:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+    except OSError:
+        return
+    # Linux
+    for opt, val in (
+        (getattr(socket, "TCP_KEEPIDLE", None), idle),
+        (getattr(socket, "TCP_KEEPINTVL", None), interval),
+        (getattr(socket, "TCP_KEEPCNT", None), count),
+    ):
+        if opt is None:
+            continue
+        try:
+            sock.setsockopt(socket.IPPROTO_TCP, opt, val)
+        except OSError:
+            pass
+    # Windows
+    if hasattr(sock, "ioctl") and hasattr(socket, "SIO_KEEPALIVE_VALS"):
+        try:
+            # (on/off, keepalivetime ms, keepaliveinterval ms)
+            sock.ioctl(socket.SIO_KEEPALIVE_VALS, (1, idle * 1000, interval * 1000))
+        except OSError:
+            pass
+
 @dataclass
 class CmdFeedback:
     id: int
@@ -103,9 +131,9 @@ class TcpPacketWorker(QObject):
         # Buffer size limit - prevent memory overflow
         self.max_buffer_size = 1024 * 1024  # 1MB maximum buffer size
         
-        # Timeout control
+        # Timeout control（与诊断 E102 一致，加快掉线提醒）
         self.last_packet_time = time.time()
-        self.timeout_threshold = 30.0  # 30 second timeout
+        self.timeout_threshold = 5.0  # seconds without data
         
         # TCP socket settings
         self.receive_buffer_size = 4096  # Size of receive buffer
@@ -165,6 +193,7 @@ class TcpPacketWorker(QObject):
                     
                     # Set socket to non-blocking for reading
                     client_socket.setblocking(False)
+                    _enable_tcp_keepalive(client_socket)
                     
                     # Add to client list
                     client_id = f"client_{self.client_counter}"
@@ -282,6 +311,7 @@ class TcpPacketWorker(QObject):
                     
                     # Set socket to non-blocking
                     client_socket.setblocking(False)
+                    _enable_tcp_keepalive(client_socket)
                     
                     # Add to client list
                     self.client_sockets[client_id] = client_socket

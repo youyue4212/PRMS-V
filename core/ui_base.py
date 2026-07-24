@@ -505,8 +505,9 @@ class UIBase():
         # Multi-client data tracking
         self.client_data = {}  # {client_id: {'hv': 0, 'rates': 0, 'temp': 0, 'last_update': timestamp}}
         self.total_count_rate = 0  # Sum of all client count rates
-        # 稳定探头编号：优先 product_id，否则按 IP 首次出现顺序分配 1/2/...
+        # 探头编号：优先用唯一的 product_id；若冲突/缺失再按 IP 分配 1/2/...
         self._probe_ip_index = {}
+        self._probe_registry = {}  # {ip: {'product_id': int, 'client_id': str}}
         
         # Create worker based on configuration
         self.worker = None
@@ -1991,6 +1992,13 @@ class UIBase():
 
     def on_tcp_client_disconnected(self, client_id: str):
         self.log(f"TCP client disconnected: {client_id}", 'INFO')
+        # 断线前保留 product_id/IP 编号，并立即记 E102
+        self._remember_probe(client_id, self._resolve_product_id(client_id))
+        if (getattr(self, 'diagnostics_manager', None) is not None
+                and getattr(self, 'is_acquiring', False)):
+            from core.diagnostics import FaultCode
+            self.diagnostics_manager.add_fault(client_id, FaultCode.E102)
+
         self.remove_client_display_data(client_id)
 
         if self.primary_client_id == client_id:
@@ -1999,6 +2007,8 @@ class UIBase():
             self.apply_primary_client_snapshot()
 
         self.update_client_selection_combo()
+        if hasattr(self, 'update_system_status'):
+            self.update_system_status()
 
     def remove_client_display_data(self, client_id: str):
         # 断线前先结算该客户端的报警状态：若仍在报警中，补记一条“报警结束”，
@@ -2054,12 +2064,101 @@ class UIBase():
         except Exception:
             return default_value
 
+    def _current_probe_key(self, client_id: str = None) -> str:
+        cid = client_id or self.primary_client_id
+        if not cid:
+            return "serial" if not getattr(self.config, "tcp_enabled", False) else ""
+        if cid == "serial_client":
+            return "serial"
+        return self._extract_client_ip(cid) or cid
+
+    def _save_probe_panel_settings(self, client_id: str = None, hv=None, threshold=None,
+                                   sensitivity=None, product_id=None):
+        """Persist panel values for the given/current probe IP."""
+        key = self._current_probe_key(client_id)
+        if not key:
+            return
+        kwargs = {}
+        if hv is not None:
+            kwargs["hv"] = hv
+        if threshold is not None:
+            kwargs["threshold"] = threshold
+        if sensitivity is not None:
+            kwargs["sensitivity"] = sensitivity
+        if product_id is not None:
+            kwargs["product_id"] = product_id
+        if not kwargs:
+            return
+        self.config.update_probe_settings(key, **kwargs)
+        self.config.save_settings()
+
+    def load_probe_panel_settings(self, client_id: str = None):
+        """Fill HV/threshold/sensitivity spinboxes for the selected probe."""
+        cid = client_id or self.primary_client_id
+        key = self._current_probe_key(cid)
+        if not key or not hasattr(self, "hv_spin"):
+            return
+
+        stored = self.config.get_probe_settings(key)
+        # 无历史记录时，尽量用该探头最新包里的实际值作参考显示
+        pkt = self.client_latest_packets.get(cid) if cid else None
+        data = self.client_data.get(cid) if cid else None
+        probe_store = (getattr(self.config, "client_probe_settings", {}) or {}).get(key, {})
+
+        hv = stored["hv"]
+        if "hv" not in probe_store:
+            if pkt is not None and getattr(pkt, "HV", 0):
+                hv = float(pkt.HV)
+            elif data and data.get("hv"):
+                hv = float(data["hv"])
+
+        thr = stored["threshold"]
+        sens = stored["sensitivity"]
+        if "sensitivity" not in probe_store:
+            if pkt is not None and getattr(pkt, "sen_coef", None) not in (None, 0):
+                sens = int(pkt.sen_coef)
+            elif data and data.get("sensitivity") not in (None, 0, "--"):
+                try:
+                    sens = int(data["sensitivity"])
+                except (TypeError, ValueError):
+                    pass
+
+        pid = stored.get("product_id")
+        if pid is None:
+            if pkt is not None:
+                pid = getattr(pkt, "product_id", None)
+            elif data:
+                pid = data.get("product_id")
+
+        widgets = []
+        if hasattr(self, "hv_spin"):
+            widgets.append(self.hv_spin)
+        if hasattr(self, "threshold_spin"):
+            widgets.append(self.threshold_spin)
+        if hasattr(self, "sensitivity_spin"):
+            widgets.append(self.sensitivity_spin)
+        if hasattr(self, "product_id_spin"):
+            widgets.append(self.product_id_spin)
+        for w in widgets:
+            w.blockSignals(True)
+        try:
+            self.hv_spin.setValue(float(hv))
+            self.threshold_spin.setValue(int(thr))
+            self.sensitivity_spin.setValue(int(sens))
+            if hasattr(self, "product_id_spin") and pid is not None:
+                try:
+                    self.product_id_spin.setValue(int(pid))
+                except Exception:
+                    pass
+        finally:
+            for w in widgets:
+                w.blockSignals(False)
+
     def persist_hv_setting(self):
         try:
             voltage = self._read_spinbox_value(self.hv_spin, self.hv_spin.value())
             self.hv_spin.setValue(float(voltage))
-            self.config.update_settings(hv=voltage)
-            self.config.save_settings()
+            self._save_probe_panel_settings(hv=voltage)
         except Exception:
             pass
 
@@ -2067,8 +2166,7 @@ class UIBase():
         try:
             level = self._read_spinbox_value(self.threshold_spin, self.threshold_spin.value())
             self.threshold_spin.setValue(int(level))
-            self.config.update_settings(threshold=level)
-            self.config.save_settings()
+            self._save_probe_panel_settings(threshold=level)
         except Exception:
             pass
 
@@ -2076,8 +2174,7 @@ class UIBase():
         try:
             coefficient = self._read_spinbox_value(self.sensitivity_spin, self.sensitivity_spin.value())
             self.sensitivity_spin.setValue(int(coefficient))
-            self.config.update_settings(sensitivity=int(coefficient))
-            self.config.save_settings()
+            self._save_probe_panel_settings(sensitivity=int(coefficient))
         except Exception:
             pass
     
@@ -2085,8 +2182,20 @@ class UIBase():
         try:
             voltage = self._read_spinbox_value(self.hv_spin, self.hv_spin.value())
             self.hv_spin.setValue(float(voltage))
-            # 标记为用户主动设定，此后才启用 E202（相对设定值偏差）
-            self.config.mark_hv_user_set(voltage)
+            # 仅对当前选中探头记录设定值（两台可分别 1100/1200，避免互相反报 E202）
+            target_client = None
+            if self.config.tcp_enabled and self.primary_client_id:
+                target_client = self.primary_client_id
+            elif not self.config.tcp_enabled:
+                target_client = "serial_client"
+
+            if target_client:
+                probe_key = self._extract_client_ip(target_client) or target_client
+                self.config.mark_client_hv_setpoint(probe_key, voltage)
+                if hasattr(self, "diagnostics_manager") and self.diagnostics_manager:
+                    self.diagnostics_manager.mark_client_hv_setpoint(target_client, voltage)
+            else:
+                self.config.mark_hv_user_set(voltage)
             self.config.save_settings()
         except Exception:
             pass
@@ -2112,8 +2221,7 @@ class UIBase():
         try:
             level = self._read_spinbox_value(self.threshold_spin, self.threshold_spin.value())
             self.threshold_spin.setValue(int(level))
-            self.config.update_settings(threshold=level)
-            self.config.save_settings()
+            self._save_probe_panel_settings(threshold=level)
         except Exception:
             pass
         if self.ensure_serial_ready():
@@ -2302,6 +2410,7 @@ class UIBase():
     def set_product_id(self):
         if self.ensure_serial_ready():
             product_id = self.product_id_spin.value()
+            self._save_probe_panel_settings(product_id=product_id)
             # 如果TCP模式且有多客户端，发送到当前选中客户端
             if self.config.tcp_enabled and self.primary_client_id:
                 # TCP模式下，需要将命令发送到特定客户端
@@ -2336,8 +2445,7 @@ class UIBase():
         coefficient = self._read_spinbox_value(self.sensitivity_spin, self.sensitivity_spin.value())
         try:
             self.sensitivity_spin.setValue(int(coefficient))
-            self.config.update_settings(sensitivity=int(coefficient))
-            self.config.save_settings()
+            self._save_probe_panel_settings(sensitivity=int(coefficient))
         except Exception:
             pass
         if self.ensure_serial_ready():
@@ -2514,8 +2622,9 @@ class UIBase():
         }
         
         self.client_data[client_id] = client_data
+        self._remember_probe(client_id, packet.product_id)
         
-        # 清理过期的客户端数据（30秒无更新）
+        # 清理过期的客户端数据（30秒无更新）；编号登记表按 IP 保留，不断线丢失
         expired_clients = []
         for cid, data in self.client_data.items():
             if current_time - data['last_update'] > 30:  # 30秒超时
@@ -2571,6 +2680,9 @@ class UIBase():
         if self.data_updated_callback is not None:
             self.data_updated_callback(self.current_stat, 0, self.client_data)
 
+        # 切换探头时，设置面板恢复该探头此前保存的高压/触发/灵敏度等
+        self.load_probe_panel_settings(client_id)
+
         if len(self.channels) != len(self.spectrum_data) + 1:
             self.channels = np.arange(len(self.spectrum_data) + 1)
         self.curve_spectrum.setData(self.channels, self.spectrum_data)
@@ -2582,6 +2694,20 @@ class UIBase():
             client_id: 要设置为主要客户端的客户端ID
         """
         if client_id in self.get_available_clients() or client_id in self.client_time_series:
+            # 切换前先把当前面板数值记到旧探头，避免丢改动
+            if self.primary_client_id and self.primary_client_id != client_id:
+                try:
+                    self._save_probe_panel_settings(
+                        client_id=self.primary_client_id,
+                        hv=self._read_spinbox_value(self.hv_spin, self.hv_spin.value()),
+                        threshold=self._read_spinbox_value(self.threshold_spin, self.threshold_spin.value()),
+                        sensitivity=self._read_spinbox_value(self.sensitivity_spin, self.sensitivity_spin.value()),
+                        product_id=(self.product_id_spin.value()
+                                    if hasattr(self, "product_id_spin") else None),
+                    )
+                except Exception:
+                    pass
+
             old_primary = self.primary_client_id
             self.primary_client_id = client_id
             
@@ -2604,7 +2730,7 @@ class UIBase():
             # Update client selection combo box
             self.update_client_selection_combo()
             
-            # 立即更新显示
+            # 立即更新显示（含该探头面板参数）
             self.apply_primary_client_snapshot()
             self.update_data()
         else:
@@ -2644,73 +2770,114 @@ class UIBase():
                 return tail
         return client_id
 
+    def _remember_probe(self, client_id: str, product_id=None) -> str:
+        """Remember probe IP/index (and optional product_id). Returns IP or ''."""
+        ip = self._extract_client_ip(client_id)
+        if not ip or ip == "serial":
+            return ip or ""
+
+        if not hasattr(self, "_probe_ip_index") or self._probe_ip_index is None:
+            self._probe_ip_index = {}
+        if not hasattr(self, "_probe_registry") or self._probe_registry is None:
+            self._probe_registry = {}
+
+        if ip not in self._probe_ip_index:
+            ips = sorted(set(list(self._probe_ip_index.keys()) + [ip]))
+            self._probe_ip_index = {k: i + 1 for i, k in enumerate(ips)}
+
+        entry = self._probe_registry.get(ip, {})
+        entry["client_id"] = client_id
+        if product_id is not None:
+            try:
+                pid = int(product_id)
+                entry["product_id"] = pid
+            except (TypeError, ValueError):
+                pass
+        self._probe_registry[ip] = entry
+        return ip
+
+    def _resolve_product_id(self, client_id: str):
+        data = self.client_data.get(client_id) or {}
+        try:
+            return int(data.get("product_id"))
+        except (TypeError, ValueError):
+            pass
+        pkt = self.client_latest_packets.get(client_id)
+        if pkt is not None:
+            try:
+                return int(getattr(pkt, "product_id", None))
+            except (TypeError, ValueError):
+                pass
+        ip = self._extract_client_ip(client_id)
+        if ip:
+            pid = (getattr(self, "_probe_registry", {}) or {}).get(ip, {}).get("product_id")
+            if pid is not None:
+                try:
+                    return int(pid)
+                except (TypeError, ValueError):
+                    pass
+        return None
+
+    def _product_id_is_unique(self, pid: int) -> bool:
+        """True only when this product_id maps to at most one probe IP."""
+        ips = set()
+        for ip, info in (getattr(self, "_probe_registry", {}) or {}).items():
+            try:
+                if int(info.get("product_id")) == pid:
+                    ips.add(ip)
+            except (TypeError, ValueError):
+                continue
+        for cid, data in self.client_data.items():
+            try:
+                if int(data.get("product_id")) == pid:
+                    ips.add(self._extract_client_ip(cid))
+            except (TypeError, ValueError):
+                continue
+        ips.discard("")
+        return len(ips) <= 1
+
     def get_probe_label(self, client_id: str) -> str:
         """
-        Human label for a detector: '1号' / '2号' / ...
-        Priority: packet product_id (1..99) -> stable IP index.
+        Human label for a detector: '1号' / 'Probe 1' / ...
+        - Prefer product_id only when it uniquely identifies one probe.
+        - Otherwise (common: both factory-default to 1) use stable IP order.
         """
         if not client_id or client_id == "system":
             return ""
 
-        data = self.client_data.get(client_id) or {}
-        pid = data.get("product_id")
-        try:
-            pid_int = int(pid)
-            if 1 <= pid_int <= 99:
-                return f"{pid_int}\u53f7"
-        except (TypeError, ValueError):
-            pass
+        from core.translation import TranslationManager
+        lang = TranslationManager().get_language()
 
-        # Also try latest packet
-        pkt = self.client_latest_packets.get(client_id)
-        if pkt is not None:
-            try:
-                pid_int = int(getattr(pkt, "product_id", 0))
-                if 1 <= pid_int <= 99:
-                    return f"{pid_int}\u53f7"
-            except (TypeError, ValueError):
-                pass
+        ip = self._remember_probe(client_id)
+        num = None
+        pid = self._resolve_product_id(client_id)
+        if pid is not None and 1 <= pid <= 99 and self._product_id_is_unique(pid):
+            num = pid
+        elif ip and ip in self._probe_ip_index:
+            num = self._probe_ip_index[ip]
 
-        ip = self._extract_client_ip(client_id)
-        if not ip:
-            return "\u63a2\u5934"  # 探头
-
-        if not hasattr(self, "_probe_ip_index") or self._probe_ip_index is None:
-            self._probe_ip_index = {}
-
-        if ip not in self._probe_ip_index:
-            used = set(self._probe_ip_index.values())
-            n = 1
-            while n in used:
-                n += 1
-            self._probe_ip_index[ip] = n
-            # Prefer sorted IP order when first assigning multiple unknowns
-            # Reassign compact indices by sorted IP for stable 1/2 mapping
-            ips = sorted(self._probe_ip_index.keys())
-            self._probe_ip_index = {k: i + 1 for i, k in enumerate(ips)}
-
-        return f"{self._probe_ip_index[ip]}\u53f7"
+        if num is not None:
+            return f"{num}\u53f7" if lang != "en" else f"Probe {num}"
+        # 无编号时不回退成中文「探头」，避免英文界面变成 “探头 probe ...”
+        return ""
 
     def format_fault_operator_message(self, client_id: str, code: str) -> str:
-        """Build operator-facing fault text with correct probe number."""
+        """Build operator-facing fault text with correct probe number (no IP, keep short)."""
         from core.translation import _t
-        probe = self.get_probe_label(client_id)
-        # system-level: no probe prefix number
-        if not probe:
-            probe = ""
-        msg = _t(f"fault_op_{code}", probe=probe)
-        # If translation key missing, fall back
-        if msg == f"fault_op_{code}":
+        label = self.get_probe_label(client_id)
+        body = _t("fault_op_" + str(code))
+        # 兼容旧 translation：清掉未替换占位符（写成拼接，避免源码里出现整串占位符）
+        _ph = "{" + "probe" + "}"
+        if _ph in body:
+            body = body.replace(_ph, "").strip()
+        if body == ("fault_op_" + str(code)):
             from core.diagnostics import FaultCode
             _, _, _, op = FaultCode.get_info(code)
-            try:
-                msg = op.format(probe=probe or "\u63a2\u5934")
-            except Exception:
-                msg = op
-        # Ensure probe identity visible for other codes without {probe}
-        if probe and code not in ("E101", "E102") and probe not in msg:
-            msg = f"{probe}{msg}"
-        return msg
+            body = op.replace(_ph, "").strip() if op else body
+
+        if label:
+            return (label + " " + body).strip()
+        return body
     
     def update_client_selection_combo(self):
         """

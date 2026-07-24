@@ -24,7 +24,7 @@ class TranslationManager:
             "btn_login": "登录",
             
             # OverviewPage
-            "sys_title": "伽马能谱探测系统",
+            "sys_title": "伽玛能谱探测系统",
             "card_rad_title": "辐射水平",
             "card_rad_desc": "当前计数率",
             "card_status_title": "设备状态",
@@ -122,7 +122,7 @@ class TranslationManager:
             "header_message": "消息",
             
             # Login Dialog
-            "login_title": "登录 - 伽马能谱探测系统",
+            "login_title": "登录 - 伽玛能谱探测系统",
             "login_subtitle": "数据采集系统",
             "login_username": "用户名",
             "login_username_placeholder": "请输入用户名",
@@ -255,8 +255,8 @@ class TranslationManager:
             "msg_login_failed_title": "登录失败",
             "msg_login_failed_user_manager": "无法从用户管理器获取用户信息。",
             "msg_login_failed_dialog": "无法从登录对话框获取用户信息。",
-            "fault_op_E101": "{probe}探测器连接异常！请检查网线连接，或尝试断电重启设备。若仍异常，请联系维保人员。",
-            "fault_op_E102": "{probe}辐射探头通讯异常 → 请断电重启设备，仍异常联系维保人员。",
+            "fault_op_E101": "探测器连接异常！请检查网线连接，或尝试断电重启设备。若仍异常，请联系维保人员。",
+            "fault_op_E102": "辐射探头通讯异常 → 请断电重启设备，仍异常联系维保人员。",
             "fault_op_E201": "探测器高压异常！设备已自动停止采集，请暂停通道通行，并立即报修。",
             "fault_op_E202": "高压模块过压/欠压保护 → 设备自动停机，禁止通行，立即报修。",
             "fault_op_E203": "探测器高压异常！设备已自动停止采集，请暂停通道通行，并立即报修。",
@@ -550,8 +550,8 @@ class TranslationManager:
             "msg_login_failed_title": "Login Failed",
             "msg_login_failed_user_manager": "Failed to get user information from user manager.",
             "msg_login_failed_dialog": "Failed to get user information from login dialog.",
-            "fault_op_E101": "{probe} detector connection anomaly! Please check the network cable connection, or try power cycling the device. If it persists, contact maintenance.",
-            "fault_op_E102": "{probe} probe communication anomaly -> Please power cycle the device, if still anomalous contact maintenance.",
+            "fault_op_E101": "connection anomaly! Please check the network cable, or power-cycle the device. If it persists, contact maintenance.",
+            "fault_op_E102": "communication anomaly -> Please power cycle the device; if still abnormal, contact maintenance.",
             "fault_op_E201": "Detector high voltage anomaly! Acquisition stopped automatically, please suspend lane traffic and report immediately.",
             "fault_op_E202": "HV module over/under voltage protection -> Device stopped automatically, traffic prohibited, report immediately.",
             "fault_op_E203": "Detector high voltage anomaly! Acquisition stopped automatically, please suspend lane traffic and report immediately.",
@@ -618,11 +618,16 @@ class TranslationManager:
         """Translate key and format with kwargs if provided"""
         lang_dict = self.LANG_MAP.get(self.current_lang, self.LANG_MAP["zh"])
         text = lang_dict.get(key, key)
-        if kwargs:
+        # Always format known placeholders; missing values become empty
+        fmt = {"probe": "", **kwargs}
+        if "{" in text:
             try:
-                return text.format(**kwargs)
+                return text.format(**fmt)
             except Exception:
-                return text
+                out = text
+                for k, v in fmt.items():
+                    out = out.replace("{" + k + "}", str(v))
+                return out
         return text
 
 # Global translation helper function

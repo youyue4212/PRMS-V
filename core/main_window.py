@@ -51,15 +51,26 @@ from core.pages import OverviewPage, SpectrumPage, SettingsPage, ClientsPage
 _FAULT_DESC_MAX_LINES = 2
 
 
+def _strip_fault_placeholders(text: str) -> str:
+    """去掉旧文案残留的占位符，避免界面出现字面量 {probe}。"""
+    if not text:
+        return ""
+    ph = "{" + "probe" + "}"
+    return text.replace(ph, "").replace("  ", " ").strip()
+
+
 def _format_fault_description(messages: list, max_lines: int = _FAULT_DESC_MAX_LINES) -> tuple:
     """返回 (卡片内显示文本, 完整文本用于 tooltip)。"""
     if not messages:
         return "", ""
-    full_text = "\n".join(messages)
-    if len(messages) <= max_lines:
+    cleaned = [_strip_fault_placeholders(m) for m in messages if _strip_fault_placeholders(m)]
+    if not cleaned:
+        return "", ""
+    full_text = "\n".join(cleaned)
+    if len(cleaned) <= max_lines:
         return full_text, full_text
-    shown = "\n".join(messages[:max_lines])
-    shown += f"\n… (+{len(messages) - max_lines})"
+    shown = "\n".join(cleaned[:max_lines])
+    shown += f"\n… (+{len(cleaned) - max_lines})"
     return shown, full_text
 
 # 导入用户管理模块
@@ -556,7 +567,9 @@ class MainWindow(QMainWindow, UIBase):
                 if hasattr(self, "format_fault_operator_message"):
                     translated_msg = self.format_fault_operator_message(client_id, code)
                 else:
-                    translated_msg = _t(f"fault_op_{code}")
+                    # 勿直接 _t(fault_op_*)：旧文案含 {probe} 会原样显示成 “probe...”
+                    translated_msg = _t(f"fault_op_{code}", probe="")
+                    translated_msg = translated_msg.replace("{probe}", "").lstrip()
                 if translated_msg not in unique_op_msgs:
                     unique_op_msgs.append(translated_msg)
             

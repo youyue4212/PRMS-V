@@ -158,7 +158,7 @@ class SerialPacketWorker(QObject):
         
         # Timeout control
         self.last_packet_time = time.time()
-        self.timeout_threshold = 30.0  # 30 second timeout
+        self.timeout_threshold = 5.0  # seconds without data (align with E102)
         
         self.stats = {
             'cmd_packets': 0,

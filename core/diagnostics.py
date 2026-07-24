@@ -31,8 +31,8 @@ class FaultCode:
     E501 = "E501"  # 通道占用传感器异常 / 卡死
 
     MAP = {
-        E101: ("探测器无数据", "配置的探测器未上报数据，请检查网络、IP设置或探测器供电", "ERROR", "{probe}探测器连接异常！请检查网线连接，或尝试断电重启设备。若仍异常，请联系维保人员。"),
-        E102: ("通信中断", "探测器通信超时，已超过30秒未收到数据包", "ERROR", "{probe}辐射探头通讯异常 → 请断电重启设备，仍异常联系维保人员。"),
+        E101: ("探测器无数据", "配置的探测器未上报数据，请检查网络、IP设置或探测器供电", "ERROR", "探测器连接异常！请检查网线连接，或尝试断电重启设备。若仍异常，请联系维保人员。"),
+        E102: ("通信中断", "探测器通信超时，已超过5秒未收到数据包", "ERROR", "辐射探头通讯异常 → 请断电重启设备，仍异常联系维保人员。"),
         E201: ("高压未建立", "探测器高压接近0V，可能高压模块未供电或已损坏", "ERROR", "探测器高压异常！设备已自动停止采集，请暂停通道通行，并立即报修。"),
         E202: ("高压偏离设定", "检测到高压与设定值偏差过大（仅在用户主动设置高压且稳谱关闭时检测）", "WARNING", "高压模块过压/欠压保护 → 设备自动停机，禁止通行，立即报修。"),
         E203: ("高压突然跌落", "高压在短时间内大幅度下降，可能存在过流保护或硬件故障", "ERROR", "探测器高压异常！设备已自动停止采集，请暂停通道通行，并立即报修。"),
@@ -50,6 +50,11 @@ class FaultCode:
 
 
 class DiagnosticsManager:
+    # 通讯中断判定：无数据包超过该秒数即报 E102（原 30s 现场反馈过慢）
+    COMM_TIMEOUT_SEC = 5.0
+    # 开机后长时间完全无数据报 E101
+    NO_DATA_STARTUP_SEC = 8.0
+
     def __init__(self, config_manager):
         self.config = config_manager
         
@@ -71,6 +76,21 @@ class DiagnosticsManager:
         # Occupancy stuck detection
         self.occupancy_start_time: Dict[str, float] = {}
 
+        # 分探头高压设定：{probe_key(IP): voltage}；仅对该探头启用 E202
+        self.client_hv_setpoints: Dict[str, float] = {}
+        self._load_client_hv_setpoints_from_config()
+
+    def _load_client_hv_setpoints_from_config(self):
+        stored = getattr(self.config, "client_hv_setpoints", None) or {}
+        self.client_hv_setpoints = {str(k): float(v) for k, v in stored.items()}
+
+    def mark_client_hv_setpoint(self, client_id: str, voltage: float):
+        """Record per-probe HV setpoint after user clicks「设置高压」."""
+        key = self._extract_ip(client_id) or client_id
+        if not key or key == "system":
+            return
+        self.client_hv_setpoints[key] = float(voltage)
+
     def start_acquisition(self):
         self.acquisition_start_time = time.time()
         self.is_acquiring = True
@@ -80,6 +100,8 @@ class DiagnosticsManager:
         self.cps_history.clear()
         self.last_packet_time.clear()
         self.occupancy_start_time.clear()
+        # 保留分探头高压设定（不随开停采集清空）
+        self._load_client_hv_setpoints_from_config()
 
     def stop_acquisition(self):
         self.is_acquiring = False
@@ -115,6 +137,31 @@ class DiagnosticsManager:
         if client_id in self.active_faults and code in self.active_faults[client_id]:
             del self.active_faults[client_id][code]
 
+    @staticmethod
+    def _extract_ip(client_id: str) -> str:
+        if not client_id or client_id == "system":
+            return ""
+        if client_id == "serial_client":
+            return "serial"
+        if "_" in client_id:
+            tail = client_id.split("_")[-1]
+            if ":" in tail:
+                return tail.split(":")[0]
+            parts = tail.split(".")
+            if len(parts) == 4 and all(p.isdigit() for p in parts):
+                return tail
+        return client_id
+
+    def _clear_stale_sessions_for_ip(self, client_id: str):
+        ip = self._extract_ip(client_id)
+        if not ip:
+            return
+        for cid in list(self.active_faults.keys()) + list(self.last_packet_time.keys()):
+            if cid == client_id or cid == "system":
+                continue
+            if self._extract_ip(cid) == ip:
+                self.remove_client(cid)
+
     def process_packet(self, client_id: str, packet) -> List[str]:
         """
         Process a received spectrum packet and run diagnostics.
@@ -127,13 +174,27 @@ class DiagnosticsManager:
         # Clear connection faults since we received data
         self.remove_fault(client_id, FaultCode.E101)
         self.remove_fault(client_id, FaultCode.E102)
+        self._clear_stale_sessions_for_ip(client_id)
 
         # 1. High Voltage (高压) Diagnostics
         hv = float(packet.HV)
-        hv_set = float(self.config.hv)
         # device_status bit3: gain stabilizer on/off
         gain_stabilizer_on = ((int(packet.device_status) >> 3) & 0x1) == 1
-        hv_user_set = bool(getattr(self.config, 'hv_user_set', False))
+
+        # 分探头设定：两台探头可分别 1100/1200，互不影响
+        probe_key = self._extract_ip(client_id) or client_id
+        per_probe_set = self.client_hv_setpoints.get(probe_key)
+        if per_probe_set is not None:
+            hv_user_set = True
+            hv_set = float(per_probe_set)
+        elif client_id == "serial_client" and bool(getattr(self.config, "hv_user_set", False)):
+            # 串口单探头：沿用全局设定
+            hv_user_set = True
+            hv_set = float(self.config.hv)
+        else:
+            # 该探头从未单独「设置高压」：不判 E202
+            hv_user_set = False
+            hv_set = float(self.config.hv)
         
         # E201: No High Voltage (HV < 200V)
         if hv < 200.0:
@@ -143,10 +204,11 @@ class DiagnosticsManager:
         else:
             self.remove_fault(client_id, FaultCode.E201)
             
-            # E202: HV deviation from user setpoint (> 80V)
+            # E202: HV deviation from THIS probe's setpoint (> 80V)
             # 防误报：
-            # 1) 用户从未点击「设置高压」时，不与默认 1120V 比较
+            # 1) 该探头从未点击「设置高压」时不比较
             # 2) 稳谱开启时设备会主动调压，不报 E202（突降仍由 E203 覆盖）
+            # 3) 实际高压回到设定±80V 内自动消警（无需再点按钮）
             if (not hv_user_set) or gain_stabilizer_on:
                 self.remove_fault(client_id, FaultCode.E202)
             elif abs(hv - hv_set) > 80.0:
@@ -273,7 +335,7 @@ class DiagnosticsManager:
         if not connected_clients:
             # If we are in serial mode or TCP is enabled
             # Let's flag a general E101 on "system"
-            if time_since_start > 15.0:
+            if time_since_start > self.NO_DATA_STARTUP_SEC:
                 self.add_fault("system", FaultCode.E101)
         else:
             self.remove_fault("system", FaultCode.E101)
@@ -285,45 +347,41 @@ class DiagnosticsManager:
                 
                 if last_seen == 0.0:
                     # Connected but never sent a packet
-                    if time_since_start > 15.0:
+                    if time_since_start > self.NO_DATA_STARTUP_SEC:
                         self.add_fault(client_id, FaultCode.E101)
                 else:
                     self.remove_fault(client_id, FaultCode.E101)
                     
-                    # E102: Communication timeout (no packet for > 30 seconds)
-                    if now - last_seen > 30.0:
+                    # E102: Communication timeout (no packet for > COMM_TIMEOUT_SEC)
+                    if now - last_seen > self.COMM_TIMEOUT_SEC:
                         self.add_fault(client_id, FaultCode.E102)
                     else:
                         self.remove_fault(client_id, FaultCode.E102)
+        # Offline/reconnect by probe IP: keep E102 for dropped probe;
+        # clear old session when same IP reconnects under a new client_id.
+        connected_set = set(connected_clients)
+        connected_ips = {self._extract_ip(c) for c in connected_clients}
+        connected_ips.discard("")
 
-        # 收到过数据的客户端：process_packet 已清 E101/E102；
-        # 这里再保证“有新鲜数据”时通讯类故障不会因旧会话残留。
-        # Clean up faults for clients that are no longer connected.
-        # 旧逻辑会永久保留已断开客户端上的 E102，TCP 重连后 client_id 一变
-        # 就会出现“数据已正常但仍提示通讯异常”。现改为：会话不在连接列表则清理。
-        for client_id in list(self.active_faults.keys()):
-            if client_id == "system":
+        known_ids = set(self.active_faults.keys()) | set(self.last_packet_time.keys())
+        for client_id in list(known_ids):
+            if client_id == "system" or client_id in connected_set:
                 continue
-            if client_id not in connected_clients:
+            ip = self._extract_ip(client_id)
+            if ip and ip in connected_ips:
+                self.remove_client(client_id)
+                continue
+            if client_id in self.last_packet_time or FaultCode.E102 in self.active_faults.get(client_id, {}):
+                self.add_fault(client_id, FaultCode.E102)
+            else:
                 self.remove_client(client_id)
 
-        # 额外保险：只要当前仍有“近期有数据”的探头，清掉其余客户端残留的通讯类故障
         has_fresh_data = any(
-            (now - self.last_packet_time.get(cid, 0.0)) <= 30.0
+            (now - self.last_packet_time.get(cid, 0.0)) <= self.COMM_TIMEOUT_SEC
             for cid in connected_clients
         )
         if has_fresh_data:
-            for client_id in list(self.active_faults.keys()):
-                if client_id == "system":
-                    self.remove_fault("system", FaultCode.E101)
-                    continue
-                if client_id not in connected_clients:
-                    self.remove_client(client_id)
-                    continue
-                last_seen = self.last_packet_time.get(client_id, 0.0)
-                if last_seen > 0.0 and (now - last_seen) <= 30.0:
-                    self.remove_fault(client_id, FaultCode.E101)
-                    self.remove_fault(client_id, FaultCode.E102)
+            self.remove_fault("system", FaultCode.E101)
 
         return {cid: list(faults.keys()) for cid, faults in self.active_faults.items()}
 

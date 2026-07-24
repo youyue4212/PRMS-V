@@ -49,7 +49,7 @@ class OverviewPage(QWidget):
         layout.setSpacing(8)
         
         # Title - smaller font
-        self.title = QLabel("伽马能谱探测系统")
+        self.title = QLabel("伽玛能谱探测系统")
         self.title.setStyleSheet("""
             QLabel {
                 color: white;

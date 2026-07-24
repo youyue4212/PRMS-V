@@ -1,0 +1,25 @@
+# -*- coding: utf-8 -*-
+from pathlib import Path
+
+p = Path(r"d:\STM32\STM32CubeIDE\spec\PAD\daq_bablet-V17\daq_tablet\FAULT_CODES.md")
+t = p.read_text(encoding="gbk")
+start = t.find("#### E202")
+end = t.find("#### E203")
+if start < 0 or end < 0:
+    raise SystemExit("section not found")
+
+new_sec = (
+    "#### E202 "
+    + "\u9ad8\u538b\u504f\u79bb\u8bbe\u5b9a\u503c\n\n"
+    + "- **\u6280\u672f\u63cf\u8ff0**\uff1a\u68c0\u6d4b\u5230\u9ad8\u538b\u4e0e\u8bbe\u5b9a\u503c\u504f\u5dee\u8fc7\u5927\uff0c\u8bf7\u68c0\u67e5\u9ad8\u538b\u6a21\u5757\u6216\u7a33\u8c31\u8bbe\u7f6e\u3002\n"
+    + "- **\u89e6\u53d1\u6761\u4ef6**\uff1a\u9ad8\u538b \u2265 200 V\uff0c\u4e14 |\u5b9e\u9645\u9ad8\u538b - \u8be5\u63a2\u5934\u8bbe\u5b9a\u9ad8\u538b| > 80 V\u3002\n"
+    + "- **\u524d\u7f6e**\uff1a\u4ec5\u5728\u975e E201 \u72b6\u6001\u4e0b\u68c0\u6d4b\u3002\n"
+    + "- **\u9632\u8bef\u62a5 / \u591a\u63a2\u5934**\uff1a\n"
+    + "  - \u6309\u63a2\u5934\u5206\u522b\u8bb0\u5f55\u8bbe\u5b9a\u503c\uff08\u5982 A=1100 V\u3001B=1200 V\uff09\uff0c\u4e92\u4e0d\u5957\u7528\uff1b\n"
+    + "  - \u67d0\u63a2\u5934\u4ece\u672a\u5bf9\u5176\u70b9\u51fb\u300c\u8bbe\u7f6e\u9ad8\u538b\u300d\u65f6\uff0c\u8be5\u63a2\u5934\u4e0d\u62a5 E202\uff1b\n"
+    + "  - \u7a33\u8c31\u5f00\u542f\u65f6\u4e0d\u62a5 E202\uff1b\n"
+    + "  - \u5b9e\u9645\u9ad8\u538b\u56de\u5230\u8be5\u63a2\u5934\u8bbe\u5b9a\u503c \u00b180 V \u5185\u65f6\u81ea\u52a8\u6d88\u8b66\uff08\u4e0d\u5fc5\u518d\u70b9\u6309\u94ae\uff09\u3002\n\n"
+)
+t = t[:start] + new_sec + t[end:]
+p.write_text(t, encoding="gbk")
+print("FAULT_CODES updated")
