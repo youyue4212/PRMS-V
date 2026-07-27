@@ -1,0 +1,110 @@
+2026-02-24 16:58:50,844 - AutomationManager - WARNING - Could not load system configuration
+2026-02-24 16:58:50,844 - AutomationManager - INFO - Starting system check task...
+2026-02-24 16:58:50,844 - AutomationManager - INFO - System Check - Serial Devices: ERROR - Error checking serial devices: name 'search_serial_devices' is not defined
+2026-02-24 16:58:50,845 - AutomationManager - INFO - System Check - Disk Space: OK - 89.6 GB free
+2026-02-24 16:58:57,187 - AutomationManager - WARNING - Could not load system configuration
+2026-02-24 16:58:57,187 - AutomationManager - INFO - Starting data backup task...
+2026-02-24 16:58:57,218 - AutomationManager - INFO - Backing up 5 data files to ./data/backups/backup_20260224_165857.zip
+2026-02-24 16:58:57,219 - AutomationManager - INFO - Would create backup archive: ./data/backups/backup_20260224_165857.zip
+2026-02-24 16:59:10,954 - AutomationManager - WARNING - Could not load system configuration
+2026-02-24 16:59:10,955 - AutomationManager - INFO - Starting data transmission task...
+2026-02-24 16:59:10,955 - AutomationManager - INFO - Transmitting data via TCP to 127.0.0.1:5000
+2026-02-24 16:59:10,955 - AutomationManager - INFO - Would transmit data via TCP
+2026-02-24 16:59:10,955 - AutomationManager - INFO - Saving data to local file: ./data/backups/transmitted_data_20260224_165910.csv
+2026-02-24 16:59:10,955 - AutomationManager - INFO - Data saved to ./data/backups/transmitted_data_20260224_165910.csv
+2026-02-24 17:00:46,388 - AutomationManager - WARNING - Could not load system configuration
+2026-02-24 17:00:46,388 - AutomationManager - INFO - Starting data backup task...
+2026-02-24 17:00:46,406 - AutomationManager - INFO - Backing up 6 data files to ./data/backups/backup_20260224_170046.zip
+2026-02-24 17:00:46,407 - AutomationManager - INFO - Would create backup archive: ./data/backups/backup_20260224_170046.zip
+2026-02-24 17:00:46,462 - AutomationManager - WARNING - Could not load system configuration
+2026-02-24 17:00:46,462 - AutomationManager - INFO - Starting system check task...
+2026-02-24 17:00:46,462 - AutomationManager - INFO - System Check - Serial Devices: ERROR - Error checking serial devices: name 'search_serial_devices' is not defined
+2026-02-24 17:00:46,462 - AutomationManager - INFO - System Check - Disk Space: OK - 89.6 GB free
+2026-02-24 17:00:46,514 - AutomationManager - WARNING - Could not load system configuration
+2026-02-24 17:00:46,514 - AutomationManager - INFO - Starting data transmission task...
+2026-02-24 17:00:46,514 - AutomationManager - INFO - Transmitting data via TCP to 127.0.0.1:5000
+2026-02-24 17:00:46,514 - AutomationManager - INFO - Would transmit data via TCP
+2026-02-24 17:00:46,514 - AutomationManager - INFO - Saving data to local file: ./data/backups/transmitted_data_20260224_170046.csv
+2026-02-24 17:00:46,514 - AutomationManager - INFO - Data saved to ./data/backups/transmitted_data_20260224_170046.csv
+2026-02-24 17:03:26,437 - AutomationManager - WARNING - Could not load system configuration
+2026-02-24 17:03:26,437 - AutomationManager - INFO - Starting data backup task...
+2026-02-24 17:03:26,439 - AutomationManager - INFO - Backing up 8 data files to ./data/backups/backup_20260224_170326.zip
+2026-02-24 17:03:26,439 - AutomationManager - INFO - Would create backup archive: ./data/backups/backup_20260224_170326.zip
+2026-02-24 17:03:26,489 - AutomationManager - WARNING - Could not load system configuration
+2026-02-24 17:03:26,489 - AutomationManager - INFO - Starting system check task...
+2026-02-24 17:03:26,489 - AutomationManager - INFO - System Check - Serial Devices: ERROR - Error checking serial devices: name 'search_serial_devices' is not defined
+2026-02-24 17:03:26,489 - AutomationManager - INFO - System Check - Disk Space: OK - 89.6 GB free
+2026-02-24 17:03:26,543 - AutomationManager - WARNING - Could not load system configuration
+2026-02-24 17:03:26,543 - AutomationManager - INFO - Starting data transmission task...
+2026-02-24 17:03:26,543 - AutomationManager - INFO - Transmitting data via TCP to 127.0.0.1:5000
+2026-02-24 17:03:26,543 - AutomationManager - INFO - Would transmit data via TCP
+2026-02-24 17:03:26,543 - AutomationManager - INFO - Saving data to local file: ./data/backups/transmitted_data_20260224_170326.csv
+2026-02-24 17:03:26,543 - AutomationManager - INFO - Data saved to ./data/backups/transmitted_data_20260224_170326.csv
+2026-02-24 17:04:26,772 - AutomationManager - WARNING - Could not load system configuration
+2026-02-24 17:04:26,772 - AutomationManager - INFO - Starting data backup task...
+2026-02-24 17:04:26,774 - AutomationManager - INFO - Backing up 10 data files to ./data/backups/backup_20260224_170426.zip
+2026-02-24 17:04:26,774 - AutomationManager - INFO - Would create backup archive: ./data/backups/backup_20260224_170426.zip
+2026-02-24 17:04:26,842 - AutomationManager - WARNING - Could not load system configuration
+2026-02-24 17:04:26,842 - AutomationManager - INFO - Starting system check task...
+2026-02-24 17:04:26,843 - AutomationManager - INFO - System Check - Serial Devices: ERROR - Error checking serial devices: name 'search_serial_devices' is not defined
+2026-02-24 17:04:26,843 - AutomationManager - INFO - System Check - Disk Space: OK - 89.6 GB free
+2026-02-24 17:04:26,911 - AutomationManager - WARNING - Could not load system configuration
+2026-02-24 17:04:26,911 - AutomationManager - INFO - Starting data transmission task...
+2026-02-24 17:04:26,911 - AutomationManager - INFO - Transmitting data via TCP to 127.0.0.1:5000
+2026-02-24 17:04:26,911 - AutomationManager - INFO - Would transmit data via TCP
+2026-02-24 17:04:26,911 - AutomationManager - INFO - Saving data to local file: ./data/backups/transmitted_data_20260224_170426.csv
+2026-02-24 17:04:26,911 - AutomationManager - INFO - Data saved to ./data/backups/transmitted_data_20260224_170426.csv
+2026-02-24 17:07:17,602 - AutomationManager - WARNING - Could not load system configuration
+2026-02-24 17:07:17,602 - AutomationManager - INFO - Starting automation manager...
+2026-02-24 17:07:17,602 - AutomationManager - INFO - Updating system parameters...
+2026-02-24 17:07:17,602 - AutomationManager - WARNING - System configuration not available, skipping parameter update
+2026-02-24 17:07:17,602 - AutomationManager - INFO - Scheduled daily data backup at 02:00
+2026-02-24 17:07:17,602 - AutomationManager - INFO - Scheduled hourly system check
+2026-02-24 17:07:17,602 - AutomationManager - INFO - Scheduled data transmission every 6 hours
+2026-02-24 17:07:17,603 - AutomationManager - INFO - Starting automation scheduler...
+2026-02-24 17:07:17,603 - AutomationManager - INFO - Automation manager started successfully
+2026-02-24 17:07:59,029 - AutomationManager - WARNING - Could not load system configuration
+2026-02-24 17:07:59,029 - AutomationManager - INFO - Starting system check task...
+2026-02-24 17:07:59,029 - AutomationManager - INFO - System Check - Serial Devices: ERROR - Error checking serial devices: name 'search_serial_devices' is not defined
+2026-02-24 17:07:59,029 - AutomationManager - INFO - System Check - Disk Space: OK - 89.6 GB free
+2026-02-24 17:13:13,461 - AutomationManager - WARNING - Could not load system configuration
+2026-02-24 17:13:13,462 - AutomationManager - INFO - Starting system check task...
+2026-02-24 17:13:13,462 - AutomationManager - INFO - System Check - Serial Devices: ERROR - Error checking serial devices: name 'search_serial_devices' is not defined
+2026-02-24 17:13:13,462 - AutomationManager - INFO - System Check - Disk Space: OK - 89.6 GB free
+2026-02-24 17:13:25,670 - AutomationManager - WARNING - Could not load system configuration
+2026-02-24 17:13:25,670 - AutomationManager - INFO - Starting automation manager...
+2026-02-24 17:13:25,671 - AutomationManager - INFO - Updating system parameters...
+2026-02-24 17:13:25,671 - AutomationManager - WARNING - System configuration not available, skipping parameter update
+2026-02-24 17:13:25,671 - AutomationManager - INFO - Scheduled daily data backup at 02:00
+2026-02-24 17:13:25,671 - AutomationManager - INFO - Scheduled hourly system check
+2026-02-24 17:13:25,671 - AutomationManager - INFO - Scheduled data transmission every 6 hours
+2026-02-24 17:13:25,671 - AutomationManager - INFO - Starting automation scheduler...
+2026-02-24 17:13:25,671 - AutomationManager - INFO - Automation manager started successfully
+2026-02-24 17:23:38,410 - AutomationManager - WARNING - Could not load system configuration
+2026-02-24 17:23:38,410 - AutomationManager - INFO - Stopping automation manager...
+2026-02-24 17:23:38,410 - AutomationManager - INFO - Automation manager stopped
+2026-02-24 17:25:45,287 - AutomationManager - WARNING - Could not load system configuration
+2026-02-24 17:25:45,287 - AutomationManager - INFO - Starting automation manager...
+2026-02-24 17:25:45,287 - AutomationManager - INFO - Updating system parameters...
+2026-02-24 17:25:45,287 - AutomationManager - WARNING - System configuration not available, skipping parameter update
+2026-02-24 17:25:45,288 - AutomationManager - INFO - Scheduled daily data backup at 02:00
+2026-02-24 17:25:45,288 - AutomationManager - INFO - Scheduled hourly system check
+2026-02-24 17:25:45,288 - AutomationManager - INFO - Scheduled data transmission every 6 hours
+2026-02-24 17:25:45,288 - AutomationManager - INFO - Starting automation scheduler...
+2026-02-24 17:25:45,288 - AutomationManager - INFO - Automation manager started successfully
+2026-02-24 17:25:50,529 - AutomationManager - INFO - Stopping automation manager...
+2026-02-24 17:25:51,297 - AutomationManager - INFO - Automation manager stopped
+2026-02-24 17:27:49,120 - AutomationManager - WARNING - Could not load system configuration
+2026-02-24 17:27:49,120 - AutomationManager - INFO - Starting data backup task...
+2026-02-24 17:27:49,136 - AutomationManager - INFO - Backing up 14 data files to ./data/backups/backup_20260224_172749.zip
+2026-02-24 17:27:49,136 - AutomationManager - INFO - Would create backup archive: ./data/backups/backup_20260224_172749.zip
+2026-02-24 17:28:01,548 - AutomationManager - WARNING - Could not load system configuration
+2026-02-24 17:28:01,548 - AutomationManager - INFO - Starting system check task...
+2026-02-24 17:28:01,548 - AutomationManager - INFO - System Check - Serial Devices: ERROR - Error checking serial devices: name 'search_serial_devices' is not defined
+2026-02-24 17:28:01,548 - AutomationManager - INFO - System Check - Disk Space: OK - 89.6 GB free
+2026-02-24 17:28:16,711 - AutomationManager - WARNING - Could not load system configuration
+2026-02-24 17:28:16,711 - AutomationManager - INFO - Starting data transmission task...
+2026-02-24 17:28:16,711 - AutomationManager - INFO - Transmitting data via TCP to 127.0.0.1:5000
+2026-02-24 17:28:16,711 - AutomationManager - INFO - Would transmit data via TCP
+2026-02-24 17:28:16,711 - AutomationManager - INFO - Saving data to local file: ./data/backups/transmitted_data_20260224_172816.csv
+2026-02-24 17:28:16,712 - AutomationManager - INFO - Data saved to ./data/backups/transmitted_data_20260224_172816.csv

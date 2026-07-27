@@ -1,0 +1,49 @@
+2026-07-23 09:05:27,134 - root - INFO - TCP/IP mode enabled
+2026-07-23 09:05:28,330 - root - INFO - TCP not ready, attempting to reconnect...
+2026-07-23 09:05:28,331 - root - INFO - Listening on 192.168.0.201:8234 (attempt 1/3)
+2026-07-23 09:05:28,331 - root - INFO - TCP reconnection successful
+2026-07-23 09:05:28,331 - root - INFO - Connection detected (is_connected=True, is_acquiring=False), starting acquisition automatically
+2026-07-23 09:05:28,371 - root - INFO - Acquisition started successfully
+2026-07-23 09:05:28,391 - root - INFO - Current user is regular user, settings functions are disabled
+2026-07-23 09:05:28,574 - root - INFO - Acquisition started
+2026-07-23 09:05:28,644 - root - INFO - Accepted connection from ('192.168.0.7', 20108) as client_0_192.168.0.7:20108
+2026-07-23 09:05:28,644 - root - INFO - TCP client connected: client_0_192.168.0.7:20108
+2026-07-23 09:05:29,242 - root - INFO - Accepted connection from ('192.168.0.8', 20108) as client_1_192.168.0.8:20108
+2026-07-23 09:05:29,242 - root - INFO - TCP client connected: client_1_192.168.0.8:20108
+2026-07-23 09:05:29,323 - root - INFO - Gain stabilizer flag updated from 2 to 0
+2026-07-23 09:06:05,156 - root - ERROR - [FAULT DETECTED] Client: client_1_192.168.0.8:20108 | Code: E102 | 通信中断: 探测器通信超时，已超过30秒未收到数据包
+2026-07-23 09:06:16,080 - root - INFO - 管理员模式已启动，3分钟无操作将自动退出
+2026-07-23 09:06:17,072 - root - INFO - Logged in as administrator: admin
+2026-07-23 09:06:37,920 - root - ERROR - Socket error from client_1_192.168.0.8:20108: [Errno 104] 连接被对方重置
+2026-07-23 09:06:37,921 - root - INFO - Client client_1_192.168.0.8:20108 disconnected
+2026-07-23 09:06:37,921 - root - INFO - TCP client disconnected: client_1_192.168.0.8:20108
+2026-07-23 09:06:40,921 - root - INFO - Accepted connection from ('192.168.0.8', 20108) as client_2_192.168.0.8:20108
+2026-07-23 09:06:40,921 - root - INFO - TCP client connected: client_2_192.168.0.8:20108
+2026-07-23 09:06:41,156 - root - ERROR - [FAULT DETECTED] Client: client_2_192.168.0.8:20108 | Code: E101 | 探测器无数据: 配置的探测器未上报数据，请检查网络、IP设置或探测器供电
+2026-07-23 09:06:41,156 - root - INFO - [FAULT CLEARED] Client: client_1_192.168.0.8:20108 | Code: E102 | 通信中断 has been resolved
+2026-07-23 09:06:43,390 - root - ERROR - Socket error from client_2_192.168.0.8:20108: [Errno 104] 连接被对方重置
+2026-07-23 09:06:43,393 - root - INFO - Client client_2_192.168.0.8:20108 disconnected
+2026-07-23 09:06:43,393 - root - INFO - TCP client disconnected: client_2_192.168.0.8:20108
+2026-07-23 09:06:43,394 - root - ERROR - [FAULT DETECTED] Client: client_2_192.168.0.8:20108 | Code: E102 | 通信中断: 探测器通信超时，已超过30秒未收到数据包
+2026-07-23 09:06:45,949 - root - INFO - Accepted connection from ('192.168.0.8', 20108) as client_3_192.168.0.8:20108
+2026-07-23 09:06:45,949 - root - INFO - TCP client connected: client_3_192.168.0.8:20108
+2026-07-23 09:06:46,156 - root - ERROR - [FAULT DETECTED] Client: client_3_192.168.0.8:20108 | Code: E101 | 探测器无数据: 配置的探测器未上报数据，请检查网络、IP设置或探测器供电
+2026-07-23 09:06:46,156 - root - INFO - [FAULT CLEARED] Client: client_2_192.168.0.8:20108 | Code: E101 | 探测器无数据 has been resolved
+2026-07-23 09:06:46,157 - root - INFO - [FAULT CLEARED] Client: client_2_192.168.0.8:20108 | Code: E102 | 通信中断 has been resolved
+2026-07-23 09:06:47,156 - root - INFO - [FAULT CLEARED] Client: client_3_192.168.0.8:20108 | Code: E101 | 探测器无数据 has been resolved
+2026-07-23 09:09:20,271 - root - WARNING - Admin mode will auto logout in 30 seconds
+2026-07-23 09:09:40,256 - root - WARNING - Admin mode will auto logout in 10 seconds
+2026-07-23 09:09:50,309 - root - INFO - Admin mode inactive timeout, temporarily switched to normal view mode
+2026-07-23 09:10:26,805 - root - INFO - Auto-save triggered! Time since last save: 1784769026.8s
+2026-07-23 09:10:26,806 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_091026.xlsx
+2026-07-23 09:10:26,937 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_091026.xlsx (auto-save #0)
+2026-07-23 09:10:26,938 - root - INFO - Auto-save completed successfully! Counter: 1
+2026-07-23 09:13:04,156 - root - ERROR - [FAULT DETECTED] Client: client_3_192.168.0.8:20108 | Code: E102 | 通信中断: 探测器通信超时，已超过30秒未收到数据包
+2026-07-23 09:16:57,025 - root - ERROR - Socket error from client_3_192.168.0.8:20108: [Errno 104] 连接被对方重置
+2026-07-23 09:16:57,028 - root - INFO - Client client_3_192.168.0.8:20108 disconnected
+2026-07-23 09:16:57,029 - root - INFO - TCP client disconnected: client_3_192.168.0.8:20108
+2026-07-23 09:17:00,027 - root - INFO - Accepted connection from ('192.168.0.8', 20108) as client_4_192.168.0.8:20108
+2026-07-23 09:17:00,027 - root - INFO - TCP client connected: client_4_192.168.0.8:20108
+2026-07-23 09:17:00,156 - root - ERROR - [FAULT DETECTED] Client: client_4_192.168.0.8:20108 | Code: E101 | 探测器无数据: 配置的探测器未上报数据，请检查网络、IP设置或探测器供电
+2026-07-23 09:17:00,156 - root - INFO - [FAULT CLEARED] Client: client_3_192.168.0.8:20108 | Code: E102 | 通信中断 has been resolved
+2026-07-23 09:17:00,742 - root - INFO - [FAULT CLEARED] Client: client_4_192.168.0.8:20108 | Code: E101 | 探测器无数据 has been resolved

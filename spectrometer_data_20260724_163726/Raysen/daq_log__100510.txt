@@ -1,0 +1,257 @@
+2026-07-17 10:05:10,952 - root - INFO - TCP/IP mode enabled
+2026-07-17 10:05:12,334 - root - INFO - TCP not ready, attempting to reconnect...
+2026-07-17 10:05:12,334 - root - INFO - Listening on 192.168.0.201:8234 (attempt 1/3)
+2026-07-17 10:05:12,335 - root - INFO - TCP reconnection successful
+2026-07-17 10:05:12,335 - root - INFO - Connection detected (is_connected=True, is_acquiring=False), starting acquisition automatically
+2026-07-17 10:05:12,398 - root - INFO - Acquisition started successfully
+2026-07-17 10:05:12,402 - root - INFO - Current user is regular user, settings functions are disabled
+2026-07-17 10:05:12,552 - root - INFO - Acquisition started
+2026-07-17 10:05:14,367 - root - INFO - Accepted connection from ('192.168.0.8', 20108) as client_0_192.168.0.8:20108
+2026-07-17 10:05:14,368 - root - INFO - TCP client connected: client_0_192.168.0.8:20108
+2026-07-17 10:05:15,183 - root - INFO - Gain stabilizer flag updated from 2 to 0
+2026-07-17 10:10:11,067 - root - INFO - Auto-save triggered! Time since last save: 1784254211.1s
+2026-07-17 10:10:11,083 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260717_101011.xlsx
+2026-07-17 10:10:11,217 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260717_101011.xlsx (auto-save #0)
+2026-07-17 10:10:11,218 - root - INFO - Auto-save completed successfully! Counter: 1
+2026-07-17 10:15:11,067 - root - INFO - Auto-save triggered! Time since last save: 300.0s
+2026-07-17 10:15:11,067 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260717_101511.xlsx
+2026-07-17 10:15:11,212 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260717_101511.xlsx (auto-save #1)
+2026-07-17 10:15:11,212 - root - INFO - Auto-save completed successfully! Counter: 2
+2026-07-17 10:25:11,215 - root - INFO - Auto-save triggered! Time since last save: 600.1s
+2026-07-17 10:25:11,216 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260717_102511.xlsx
+2026-07-17 10:25:11,430 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260717_102511.xlsx (auto-save #2)
+2026-07-17 10:25:11,430 - root - INFO - Auto-save completed successfully! Counter: 3
+2026-07-17 10:35:11,066 - root - INFO - Auto-save triggered! Time since last save: 599.9s
+2026-07-17 10:35:11,067 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260717_103511.xlsx
+2026-07-17 10:35:11,239 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260717_103511.xlsx (auto-save #3)
+2026-07-17 10:35:11,240 - root - INFO - Auto-save completed successfully! Counter: 4
+2026-07-17 10:35:42,744 - root - INFO - 管理员模式已启动，3分钟无操作将自动退出
+2026-07-17 10:35:43,674 - root - INFO - Logged in as administrator: admin
+2026-07-17 10:35:45,308 - root - INFO - Auto-save disabled
+2026-07-17 10:38:17,067 - root - WARNING - Admin mode will auto logout in 30 seconds
+2026-07-17 10:38:37,067 - root - WARNING - Admin mode will auto logout in 10 seconds
+2026-07-17 10:38:46,308 - root - INFO - Admin mode inactive timeout, temporarily switched to normal view mode
+2026-07-17 13:01:04,003 - root - INFO - Accepted connection from ('192.168.0.7', 20108) as client_1_192.168.0.7:20108
+2026-07-17 13:01:04,003 - root - INFO - TCP client connected: client_1_192.168.0.7:20108
+2026-07-17 13:02:10,426 - root - INFO - Switched spectrum display to client client_1_192.168.0.7:20108
+2026-07-17 13:02:10,426 - root - INFO - Switched primary client from client_0_192.168.0.8:20108 to client_1_192.168.0.7:20108
+2026-07-17 13:02:10,710 - root - INFO - Manually selected client: client_1_192.168.0.7:20108
+2026-07-20 03:48:19,537 - root - INFO - 管理员模式已启动，3分钟无操作将自动退出
+2026-07-20 03:48:20,565 - root - INFO - Logged in as administrator: admin
+2026-07-20 03:48:39,066 - root - INFO - Set sensitivity coefficient command sent to client client_1_192.168.0.7:20108: 5
+2026-07-20 03:48:39,159 - root - INFO - [0001] CMD Feedback - ID: 0x4346, Timestamp: 225921396, Control: 0x0C (灵敏度系数设置), Value: 0x05 (5), Status: Success
+2026-07-20 03:48:39,160 - root - WARNING - 警告：参数设置命令 0x0C (灵敏度系数设置) 已发送成功，但Flash写入需要时间。
+2026-07-20 03:48:39,160 - root - WARNING - 建议：等待至少100ms后再断电，确保参数已保存到EEPROM。
+2026-07-20 03:48:39,160 - root - WARNING - 注意：MODBUS参数保存正常，但串口命令反馈可能发送太快，Flash还未写入完成。
+2026-07-20 03:52:34,711 - root - WARNING - Admin mode will auto logout in 10 seconds
+2026-07-20 03:52:44,712 - root - INFO - Admin mode inactive timeout, temporarily switched to normal view mode
+2026-07-20 04:24:46,279 - root - INFO - 管理员模式已启动，3分钟无操作将自动退出
+2026-07-20 04:24:48,285 - root - INFO - Logged in as administrator: admin
+2026-07-20 04:25:12,126 - root - INFO - Set HV command sent to client client_1_192.168.0.7:20108: 1160.0V
+2026-07-20 04:25:12,489 - root - INFO - [0002] CMD Feedback - ID: 0x4346, Timestamp: 228113400, Control: 0x07 (高压设置), Value: 0x488 (1160), Status: Success
+2026-07-20 04:25:12,489 - root - WARNING - 警告：参数设置命令 0x07 (高压设置) 已发送成功，但Flash写入需要时间。
+2026-07-20 04:25:12,489 - root - WARNING - 建议：等待至少100ms后再断电，确保参数已保存到EEPROM。
+2026-07-20 04:25:12,489 - root - WARNING - 注意：MODBUS参数保存正常，但串口命令反馈可能发送太快，Flash还未写入完成。
+2026-07-20 04:27:56,569 - root - WARNING - Admin mode will auto logout in 30 seconds
+2026-07-20 04:28:16,568 - root - WARNING - Admin mode will auto logout in 10 seconds
+2026-07-20 04:28:26,272 - root - INFO - Admin mode inactive timeout, temporarily switched to normal view mode
+2026-07-20 05:06:00,965 - root - INFO - 管理员模式已启动，3分钟无操作将自动退出
+2026-07-20 05:06:01,824 - root - INFO - Logged in as administrator: admin
+2026-07-20 05:06:11,890 - root - INFO - Set HV command sent to client client_1_192.168.0.7:20108: 1120.0V
+2026-07-20 05:06:11,964 - root - INFO - [0003] CMD Feedback - ID: 0x4346, Timestamp: 230571401, Control: 0x07 (高压设置), Value: 0x460 (1120), Status: Success
+2026-07-20 05:06:11,964 - root - WARNING - 警告：参数设置命令 0x07 (高压设置) 已发送成功，但Flash写入需要时间。
+2026-07-20 05:06:11,964 - root - WARNING - 建议：等待至少100ms后再断电，确保参数已保存到EEPROM。
+2026-07-20 05:06:11,964 - root - WARNING - 注意：MODBUS参数保存正常，但串口命令反馈可能发送太快，Flash还未写入完成。
+2026-07-20 05:08:43,760 - root - WARNING - Admin mode will auto logout in 30 seconds
+2026-07-20 05:09:03,758 - root - WARNING - Admin mode will auto logout in 10 seconds
+2026-07-20 05:09:13,034 - root - INFO - Admin mode inactive timeout, temporarily switched to normal view mode
+2026-07-20 05:36:33,774 - root - INFO - 管理员模式已启动，3分钟无操作将自动退出
+2026-07-20 05:36:34,773 - root - INFO - Logged in as administrator: admin
+2026-07-20 05:36:35,912 - root - INFO - Set threshold command sent to client client_1_192.168.0.7:20108: 40mV
+2026-07-20 05:36:36,055 - root - INFO - [0004] CMD Feedback - ID: 0x4346, Timestamp: 232394396, Control: 0x08 (阈值设置), Value: 0xFA0 (4000), Status: Success
+2026-07-20 05:36:36,056 - root - WARNING - 警告：参数设置命令 0x08 (阈值设置) 已发送成功，但Flash写入需要时间。
+2026-07-20 05:36:36,056 - root - WARNING - 建议：等待至少100ms后再断电，确保参数已保存到EEPROM。
+2026-07-20 05:36:36,056 - root - WARNING - 注意：MODBUS参数保存正常，但串口命令反馈可能发送太快，Flash还未写入完成。
+2026-07-20 05:39:08,569 - root - WARNING - Admin mode will auto logout in 30 seconds
+2026-07-20 05:39:28,569 - root - WARNING - Admin mode will auto logout in 10 seconds
+2026-07-20 05:39:37,864 - root - INFO - Admin mode inactive timeout, temporarily switched to normal view mode
+2026-07-20 06:15:16,276 - root - INFO - 管理员模式已启动，3分钟无操作将自动退出
+2026-07-20 06:15:17,185 - root - INFO - Logged in as administrator: admin
+2026-07-20 06:18:31,567 - root - WARNING - Admin mode will auto logout in 30 seconds
+2026-07-20 06:18:51,567 - root - WARNING - Admin mode will auto logout in 10 seconds
+2026-07-20 06:19:01,471 - root - INFO - Admin mode inactive timeout, temporarily switched to normal view mode
+2026-07-20 06:25:31,468 - root - INFO - 管理员模式已启动，3分钟无操作将自动退出
+2026-07-20 06:25:32,467 - root - INFO - Logged in as administrator: admin
+2026-07-20 06:25:40,702 - root - INFO - Set sensitivity coefficient command sent to client client_1_192.168.0.7:20108: 6
+2026-07-20 06:25:40,815 - root - INFO - [0005] CMD Feedback - ID: 0x4346, Timestamp: 235337396, Control: 0x0C (灵敏度系数设置), Value: 0x06 (6), Status: Success
+2026-07-20 06:25:40,816 - root - WARNING - 警告：参数设置命令 0x0C (灵敏度系数设置) 已发送成功，但Flash写入需要时间。
+2026-07-20 06:25:40,816 - root - WARNING - 建议：等待至少100ms后再断电，确保参数已保存到EEPROM。
+2026-07-20 06:25:40,816 - root - WARNING - 注意：MODBUS参数保存正常，但串口命令反馈可能发送太快，Flash还未写入完成。
+2026-07-20 06:25:49,775 - root - INFO - Set threshold command sent to client client_1_192.168.0.7:20108: 35mV
+2026-07-20 06:25:49,828 - root - INFO - [0006] CMD Feedback - ID: 0x4346, Timestamp: 235346397, Control: 0x08 (阈值设置), Value: 0xDAC (3500), Status: Success
+2026-07-20 06:25:49,829 - root - WARNING - 警告：参数设置命令 0x08 (阈值设置) 已发送成功，但Flash写入需要时间。
+2026-07-20 06:25:49,829 - root - WARNING - 建议：等待至少100ms后再断电，确保参数已保存到EEPROM。
+2026-07-20 06:25:49,829 - root - WARNING - 注意：MODBUS参数保存正常，但串口命令反馈可能发送太快，Flash还未写入完成。
+2026-07-20 06:25:50,500 - root - INFO - Set HV command sent to client client_1_192.168.0.7:20108: 1120.0V
+2026-07-20 06:25:50,743 - root - INFO - [0007] CMD Feedback - ID: 0x4346, Timestamp: 235347319, Control: 0x07 (高压设置), Value: 0x460 (1120), Status: Success
+2026-07-20 06:25:50,743 - root - WARNING - 警告：参数设置命令 0x07 (高压设置) 已发送成功，但Flash写入需要时间。
+2026-07-20 06:25:50,744 - root - WARNING - 建议：等待至少100ms后再断电，确保参数已保存到EEPROM。
+2026-07-20 06:25:50,744 - root - WARNING - 注意：MODBUS参数保存正常，但串口命令反馈可能发送太快，Flash还未写入完成。
+2026-07-20 06:25:53,732 - root - INFO - Set HV command sent to client client_1_192.168.0.7:20108: 1120.0V
+2026-07-20 06:25:53,756 - root - INFO - [0008] CMD Feedback - ID: 0x4346, Timestamp: 235350319, Control: 0x07 (高压设置), Value: 0x460 (1120), Status: Success
+2026-07-20 06:25:53,757 - root - WARNING - 警告：参数设置命令 0x07 (高压设置) 已发送成功，但Flash写入需要时间。
+2026-07-20 06:25:53,757 - root - WARNING - 建议：等待至少100ms后再断电，确保参数已保存到EEPROM。
+2026-07-20 06:25:53,757 - root - WARNING - 注意：MODBUS参数保存正常，但串口命令反馈可能发送太快，Flash还未写入完成。
+2026-07-20 06:25:59,061 - root - INFO - Set HV command sent to client client_1_192.168.0.7:20108: 1140.0V
+2026-07-20 06:25:59,835 - root - INFO - [0009] CMD Feedback - ID: 0x4346, Timestamp: 235356396, Control: 0x07 (高压设置), Value: 0x474 (1140), Status: Success
+2026-07-20 06:25:59,835 - root - WARNING - 警告：参数设置命令 0x07 (高压设置) 已发送成功，但Flash写入需要时间。
+2026-07-20 06:25:59,836 - root - WARNING - 建议：等待至少100ms后再断电，确保参数已保存到EEPROM。
+2026-07-20 06:25:59,836 - root - WARNING - 注意：MODBUS参数保存正常，但串口命令反馈可能发送太快，Flash还未写入完成。
+2026-07-20 06:26:00,422 - root - INFO - Set HV command sent to client client_1_192.168.0.7:20108: 1140.0V
+2026-07-20 06:26:00,887 - root - INFO - Set threshold command sent to client client_1_192.168.0.7:20108: 35mV
+2026-07-20 06:26:00,890 - root - INFO - [0010] CMD Feedback - ID: 0x4346, Timestamp: 235357319, Control: 0x07 (高压设置), Value: 0x474 (1140), Status: Success
+2026-07-20 06:26:00,891 - root - WARNING - 警告：参数设置命令 0x07 (高压设置) 已发送成功，但Flash写入需要时间。
+2026-07-20 06:26:00,891 - root - WARNING - 建议：等待至少100ms后再断电，确保参数已保存到EEPROM。
+2026-07-20 06:26:00,891 - root - WARNING - 注意：MODBUS参数保存正常，但串口命令反馈可能发送太快，Flash还未写入完成。
+2026-07-20 06:26:01,752 - root - INFO - [0011] CMD Feedback - ID: 0x4346, Timestamp: 235358319, Control: 0x08 (阈值设置), Value: 0xDAC (3500), Status: Success
+2026-07-20 06:26:01,753 - root - WARNING - 警告：参数设置命令 0x08 (阈值设置) 已发送成功，但Flash写入需要时间。
+2026-07-20 06:26:01,753 - root - WARNING - 建议：等待至少100ms后再断电，确保参数已保存到EEPROM。
+2026-07-20 06:26:01,753 - root - WARNING - 注意：MODBUS参数保存正常，但串口命令反馈可能发送太快，Flash还未写入完成。
+2026-07-20 06:27:46,617 - root - ERROR - Socket error from client_1_192.168.0.7:20108: [Errno 104] 连接被对方重置
+2026-07-20 06:27:46,617 - root - INFO - Client client_1_192.168.0.7:20108 disconnected
+2026-07-20 06:27:46,618 - root - INFO - TCP client disconnected: client_1_192.168.0.7:20108
+2026-07-20 06:27:49,624 - root - INFO - Accepted connection from ('192.168.0.7', 20108) as client_2_192.168.0.7:20108
+2026-07-20 06:27:49,625 - root - INFO - TCP client connected: client_2_192.168.0.7:20108
+2026-07-20 06:29:38,711 - root - INFO - Switched spectrum display to client client_2_192.168.0.7:20108
+2026-07-20 06:29:38,712 - root - INFO - Switched primary client from client_0_192.168.0.8:20108 to client_2_192.168.0.7:20108
+2026-07-20 06:29:38,996 - root - INFO - Manually selected client: client_2_192.168.0.7:20108
+2026-07-20 06:32:10,630 - root - WARNING - Admin mode will auto logout in 30 seconds
+2026-07-20 06:32:30,569 - root - WARNING - Admin mode will auto logout in 10 seconds
+2026-07-20 06:32:40,124 - root - INFO - Admin mode inactive timeout, temporarily switched to normal view mode
+2026-07-20 06:51:41,505 - root - ERROR - Socket error from client_2_192.168.0.7:20108: [Errno 104] 连接被对方重置
+2026-07-20 06:51:41,506 - root - INFO - Client client_2_192.168.0.7:20108 disconnected
+2026-07-20 06:51:41,506 - root - INFO - TCP client disconnected: client_2_192.168.0.7:20108
+2026-07-20 06:51:44,521 - root - INFO - Accepted connection from ('192.168.0.7', 20108) as client_3_192.168.0.7:20108
+2026-07-20 06:51:44,522 - root - INFO - TCP client connected: client_3_192.168.0.7:20108
+2026-07-20 07:04:56,491 - root - INFO - 管理员模式已启动，3分钟无操作将自动退出
+2026-07-20 07:04:57,745 - root - INFO - Logged in as administrator: admin
+2026-07-20 07:05:12,484 - root - INFO - Set sensitivity coefficient command sent to client client_0_192.168.0.8:20108: 6
+2026-07-20 07:05:13,431 - root - INFO - [0012] CMD Feedback - ID: 0x4346, Timestamp: 503414131, Control: 0x0C (灵敏度系数设置), Value: 0x06 (6), Status: Success
+2026-07-20 07:05:13,431 - root - WARNING - 警告：参数设置命令 0x0C (灵敏度系数设置) 已发送成功，但Flash写入需要时间。
+2026-07-20 07:05:13,431 - root - WARNING - 建议：等待至少100ms后再断电，确保参数已保存到EEPROM。
+2026-07-20 07:05:13,431 - root - WARNING - 注意：MODBUS参数保存正常，但串口命令反馈可能发送太快，Flash还未写入完成。
+2026-07-20 07:05:28,504 - root - INFO - Set sensitivity coefficient command sent to client client_0_192.168.0.8:20108: 4
+2026-07-20 07:05:29,443 - root - INFO - [0013] CMD Feedback - ID: 0x4346, Timestamp: 503430132, Control: 0x0C (灵敏度系数设置), Value: 0x04 (4), Status: Success
+2026-07-20 07:05:29,443 - root - WARNING - 警告：参数设置命令 0x0C (灵敏度系数设置) 已发送成功，但Flash写入需要时间。
+2026-07-20 07:05:29,443 - root - WARNING - 建议：等待至少100ms后再断电，确保参数已保存到EEPROM。
+2026-07-20 07:05:29,443 - root - WARNING - 注意：MODBUS参数保存正常，但串口命令反馈可能发送太快，Flash还未写入完成。
+2026-07-20 07:05:36,401 - root - INFO - Switched spectrum display to client client_3_192.168.0.7:20108
+2026-07-20 07:05:36,401 - root - INFO - Switched primary client from client_0_192.168.0.8:20108 to client_3_192.168.0.7:20108
+2026-07-20 07:05:36,664 - root - INFO - Manually selected client: client_3_192.168.0.7:20108
+2026-07-20 07:05:40,440 - root - INFO - Read sensitivity coefficient command sent
+2026-07-20 07:05:40,886 - root - INFO - [0014] CMD Feedback - ID: 0x4346, Timestamp: 842315, Control: 0x0F (获取灵敏度系数), Value: 0x06 (6), Status: Success
+2026-07-20 07:05:41,335 - root - INFO - [0015] CMD Feedback - ID: 0x4346, Timestamp: 503442016, Control: 0x0F (获取灵敏度系数), Value: 0x04 (4), Status: Success
+2026-07-20 07:05:42,484 - root - INFO - Read sensitivity coefficient command sent
+2026-07-20 07:05:42,629 - root - INFO - Read sensitivity coefficient command sent
+2026-07-20 07:05:42,904 - root - INFO - [0016] CMD Feedback - ID: 0x4346, Timestamp: 844315, Control: 0x0F (获取灵敏度系数), Value: 0x06 (6), Status: Success
+2026-07-20 07:05:43,335 - root - INFO - [0017] CMD Feedback - ID: 0x4346, Timestamp: 503444016, Control: 0x0F (获取灵敏度系数), Value: 0x04 (4), Status: Success
+2026-07-20 07:05:53,029 - root - INFO - Set sensitivity coefficient command sent to client client_3_192.168.0.7:20108: 6
+2026-07-20 07:05:53,896 - root - INFO - [0018] CMD Feedback - ID: 0x4346, Timestamp: 855315, Control: 0x0C (灵敏度系数设置), Value: 0x06 (6), Status: Success
+2026-07-20 07:05:53,896 - root - WARNING - 警告：参数设置命令 0x0C (灵敏度系数设置) 已发送成功，但Flash写入需要时间。
+2026-07-20 07:05:53,896 - root - WARNING - 建议：等待至少100ms后再断电，确保参数已保存到EEPROM。
+2026-07-20 07:05:53,896 - root - WARNING - 注意：MODBUS参数保存正常，但串口命令反馈可能发送太快，Flash还未写入完成。
+2026-07-20 07:05:54,047 - root - INFO - Set sensitivity coefficient command sent to client client_3_192.168.0.7:20108: 6
+2026-07-20 07:05:54,874 - root - INFO - Set sensitivity coefficient command sent to client client_3_192.168.0.7:20108: 6
+2026-07-20 07:05:54,897 - root - INFO - [0019] CMD Feedback - ID: 0x4346, Timestamp: 856315, Control: 0x0C (灵敏度系数设置), Value: 0x06 (6), Status: Success
+2026-07-20 07:05:54,898 - root - WARNING - 警告：参数设置命令 0x0C (灵敏度系数设置) 已发送成功，但Flash写入需要时间。
+2026-07-20 07:05:54,898 - root - WARNING - 建议：等待至少100ms后再断电，确保参数已保存到EEPROM。
+2026-07-20 07:05:54,898 - root - WARNING - 注意：MODBUS参数保存正常，但串口命令反馈可能发送太快，Flash还未写入完成。
+2026-07-20 07:05:55,115 - root - INFO - Set sensitivity coefficient command sent to client client_3_192.168.0.7:20108: 6
+2026-07-20 07:05:55,478 - root - INFO - Set sensitivity coefficient command sent to client client_3_192.168.0.7:20108: 6
+2026-07-20 07:05:55,900 - root - INFO - [0020] CMD Feedback - ID: 0x4346, Timestamp: 857315, Control: 0x0C (灵敏度系数设置), Value: 0x06 (6), Status: Success
+2026-07-20 07:05:55,900 - root - WARNING - 警告：参数设置命令 0x0C (灵敏度系数设置) 已发送成功，但Flash写入需要时间。
+2026-07-20 07:05:55,900 - root - WARNING - 建议：等待至少100ms后再断电，确保参数已保存到EEPROM。
+2026-07-20 07:05:55,900 - root - WARNING - 注意：MODBUS参数保存正常，但串口命令反馈可能发送太快，Flash还未写入完成。
+2026-07-20 07:08:43,568 - root - WARNING - Admin mode will auto logout in 30 seconds
+2026-07-20 07:09:03,567 - root - WARNING - Admin mode will auto logout in 10 seconds
+2026-07-20 07:09:12,863 - root - INFO - Admin mode inactive timeout, temporarily switched to normal view mode
+2026-07-20 07:13:35,115 - root - ERROR - Socket error from client_3_192.168.0.7:20108: [Errno 104] 连接被对方重置
+2026-07-20 07:13:35,115 - root - INFO - Client client_3_192.168.0.7:20108 disconnected
+2026-07-20 07:13:35,116 - root - INFO - TCP client disconnected: client_3_192.168.0.7:20108
+2026-07-20 07:13:38,134 - root - INFO - Accepted connection from ('192.168.0.7', 20108) as client_4_192.168.0.7:20108
+2026-07-20 07:13:38,134 - root - INFO - TCP client connected: client_4_192.168.0.7:20108
+2026-07-20 07:15:51,528 - root - INFO - Switched spectrum display to client client_4_192.168.0.7:20108
+2026-07-20 07:15:51,528 - root - INFO - Switched primary client from client_0_192.168.0.8:20108 to client_4_192.168.0.7:20108
+2026-07-20 07:15:51,803 - root - INFO - Manually selected client: client_4_192.168.0.7:20108
+2026-07-20 07:16:36,181 - root - INFO - 管理员模式已启动，3分钟无操作将自动退出
+2026-07-20 07:16:37,243 - root - INFO - Logged in as administrator: admin
+2026-07-20 07:16:54,466 - root - INFO - Set sensitivity coefficient command sent to client client_4_192.168.0.7:20108: 4
+2026-07-20 07:16:55,228 - root - INFO - [0021] CMD Feedback - ID: 0x4346, Timestamp: 203392, Control: 0x0C (灵敏度系数设置), Value: 0x04 (4), Status: Success
+2026-07-20 07:16:55,228 - root - WARNING - 警告：参数设置命令 0x0C (灵敏度系数设置) 已发送成功，但Flash写入需要时间。
+2026-07-20 07:16:55,228 - root - WARNING - 建议：等待至少100ms后再断电，确保参数已保存到EEPROM。
+2026-07-20 07:16:55,228 - root - WARNING - 注意：MODBUS参数保存正常，但串口命令反馈可能发送太快，Flash还未写入完成。
+2026-07-20 07:17:00,746 - root - INFO - Set sensitivity coefficient command sent to client client_4_192.168.0.7:20108: 5
+2026-07-20 07:17:01,235 - root - INFO - [0022] CMD Feedback - ID: 0x4346, Timestamp: 209395, Control: 0x0C (灵敏度系数设置), Value: 0x05 (5), Status: Success
+2026-07-20 07:17:01,235 - root - WARNING - 警告：参数设置命令 0x0C (灵敏度系数设置) 已发送成功，但Flash写入需要时间。
+2026-07-20 07:17:01,235 - root - WARNING - 建议：等待至少100ms后再断电，确保参数已保存到EEPROM。
+2026-07-20 07:17:01,235 - root - WARNING - 注意：MODBUS参数保存正常，但串口命令反馈可能发送太快，Flash还未写入完成。
+2026-07-20 07:17:11,912 - root - INFO - Set threshold command sent to client client_4_192.168.0.7:20108: 30mV
+2026-07-20 07:17:12,288 - root - INFO - [0023] CMD Feedback - ID: 0x4346, Timestamp: 220393, Control: 0x08 (阈值设置), Value: 0xBB8 (3000), Status: Success
+2026-07-20 07:17:12,288 - root - WARNING - 警告：参数设置命令 0x08 (阈值设置) 已发送成功，但Flash写入需要时间。
+2026-07-20 07:17:12,288 - root - WARNING - 建议：等待至少100ms后再断电，确保参数已保存到EEPROM。
+2026-07-20 07:17:12,288 - root - WARNING - 注意：MODBUS参数保存正常，但串口命令反馈可能发送太快，Flash还未写入完成。
+2026-07-20 07:19:51,709 - root - WARNING - Admin mode will auto logout in 30 seconds
+2026-07-20 07:19:52,640 - root - WARNING - Admin mode will auto logout in 30 seconds
+2026-07-20 07:20:11,708 - root - WARNING - Admin mode will auto logout in 10 seconds
+2026-07-20 07:20:21,728 - root - INFO - Admin mode inactive timeout, temporarily switched to normal view mode
+2026-07-20 08:44:14,372 - root - INFO - 管理员模式已启动，3分钟无操作将自动退出
+2026-07-20 08:44:15,333 - root - INFO - Logged in as administrator: admin
+2026-07-20 08:44:33,508 - root - INFO - Set sensitivity coefficient command sent to client client_4_192.168.0.7:20108: 4
+2026-07-20 08:44:34,358 - root - INFO - [0024] CMD Feedback - ID: 0x4346, Timestamp: 5459392, Control: 0x0C (灵敏度系数设置), Value: 0x04 (4), Status: Success
+2026-07-20 08:44:34,358 - root - WARNING - 警告：参数设置命令 0x0C (灵敏度系数设置) 已发送成功，但Flash写入需要时间。
+2026-07-20 08:44:34,359 - root - WARNING - 建议：等待至少100ms后再断电，确保参数已保存到EEPROM。
+2026-07-20 08:44:34,359 - root - WARNING - 注意：MODBUS参数保存正常，但串口命令反馈可能发送太快，Flash还未写入完成。
+2026-07-20 08:45:49,899 - root - INFO - Set HV command sent to client client_4_192.168.0.7:20108: 1140.0V
+2026-07-20 08:45:50,355 - root - INFO - [0025] CMD Feedback - ID: 0x4346, Timestamp: 5535316, Control: 0x07 (高压设置), Value: 0x474 (1140), Status: Success
+2026-07-20 08:45:50,355 - root - WARNING - 警告：参数设置命令 0x07 (高压设置) 已发送成功，但Flash写入需要时间。
+2026-07-20 08:45:50,355 - root - WARNING - 建议：等待至少100ms后再断电，确保参数已保存到EEPROM。
+2026-07-20 08:45:50,355 - root - WARNING - 注意：MODBUS参数保存正常，但串口命令反馈可能发送太快，Flash还未写入完成。
+2026-07-20 08:47:04,240 - root - INFO - Set HV command sent to client client_4_192.168.0.7:20108: 1200.0V
+2026-07-20 08:47:04,610 - root - INFO - [0026] CMD Feedback - ID: 0x4346, Timestamp: 5609395, Control: 0x07 (高压设置), Value: 0x4B0 (1200), Status: Success
+2026-07-20 08:47:04,610 - root - WARNING - 警告：参数设置命令 0x07 (高压设置) 已发送成功，但Flash写入需要时间。
+2026-07-20 08:47:04,610 - root - WARNING - 建议：等待至少100ms后再断电，确保参数已保存到EEPROM。
+2026-07-20 08:47:04,610 - root - WARNING - 注意：MODBUS参数保存正常，但串口命令反馈可能发送太快，Flash还未写入完成。
+2026-07-20 08:47:14,983 - root - INFO - Stop.
+2026-07-20 08:47:14,987 - root - INFO - Acquisition stopped for data clearing (TCP connection remains)
+2026-07-20 08:47:15,567 - root - INFO - Connection detected (is_connected=True, is_acquiring=False), starting acquisition automatically
+2026-07-20 08:47:15,620 - root - INFO - Acquisition started successfully
+2026-07-20 08:47:15,719 - root - INFO - Acquisition started
+2026-07-20 08:47:15,731 - root - INFO - Set client_0_192.168.0.8:20108 as primary client for chart display
+2026-07-20 08:47:16,925 - root - INFO - All data cleared
+2026-07-20 08:47:17,112 - root - INFO - Set client_0_192.168.0.8:20108 as primary client for chart display
+2026-07-20 08:47:22,566 - root - INFO - Switched spectrum display to client client_4_192.168.0.7:20108
+2026-07-20 08:47:22,567 - root - INFO - Switched primary client from client_0_192.168.0.8:20108 to client_4_192.168.0.7:20108
+2026-07-20 08:47:22,863 - root - INFO - Manually selected client: client_4_192.168.0.7:20108
+2026-07-20 08:49:53,567 - root - WARNING - Admin mode will auto logout in 30 seconds
+2026-07-20 08:50:13,568 - root - WARNING - Admin mode will auto logout in 10 seconds
+2026-07-20 08:50:23,567 - root - INFO - Admin mode inactive timeout, temporarily switched to normal view mode
+2026-07-20 08:52:56,704 - root - ERROR - Socket error from client_4_192.168.0.7:20108: [Errno 104] 连接被对方重置
+2026-07-20 08:52:56,705 - root - INFO - Client client_4_192.168.0.7:20108 disconnected
+2026-07-20 08:52:56,705 - root - INFO - TCP client disconnected: client_4_192.168.0.7:20108
+2026-07-20 08:52:59,726 - root - INFO - Accepted connection from ('192.168.0.7', 20108) as client_5_192.168.0.7:20108
+2026-07-20 08:52:59,726 - root - INFO - TCP client connected: client_5_192.168.0.7:20108
+2026-07-20 08:54:32,749 - root - INFO - 管理员模式已启动，3分钟无操作将自动退出
+2026-07-20 08:54:34,456 - root - INFO - Logged in as administrator: admin
+2026-07-20 08:54:38,161 - root - INFO - Switched spectrum display to client client_5_192.168.0.7:20108
+2026-07-20 08:54:38,161 - root - INFO - Switched primary client from client_0_192.168.0.8:20108 to client_5_192.168.0.7:20108
+2026-07-20 08:54:38,445 - root - INFO - Manually selected client: client_5_192.168.0.7:20108
+2026-07-20 09:03:37,567 - root - WARNING - Admin mode will auto logout in 30 seconds
+2026-07-20 09:03:57,568 - root - WARNING - Admin mode will auto logout in 10 seconds
+2026-07-20 09:04:07,042 - root - INFO - Admin mode inactive timeout, temporarily switched to normal view mode
+2026-07-20 12:39:02,766 - root - INFO - 管理员模式已启动，3分钟无操作将自动退出
+2026-07-20 12:39:03,771 - root - INFO - Logged in as administrator: admin
+2026-07-20 12:39:59,015 - root - INFO - Set sensitivity coefficient command sent to client client_5_192.168.0.7:20108: 5
+2026-07-20 12:39:59,847 - root - INFO - [0027] CMD Feedback - ID: 0x4346, Timestamp: 0, Control: 0x00 (未知命令 (0x00)), Value: 0x00 (0), Status: Failed
+2026-07-20 12:42:32,569 - root - WARNING - Admin mode will auto logout in 30 seconds
+2026-07-20 12:42:52,569 - root - WARNING - Admin mode will auto logout in 10 seconds
+2026-07-20 12:43:02,309 - root - INFO - Admin mode inactive timeout, temporarily switched to normal view mode

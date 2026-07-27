@@ -1,0 +1,26 @@
+2026-07-23 09:20:32,059 - root - INFO - TCP/IP mode enabled
+2026-07-23 09:20:33,275 - root - INFO - TCP not ready, attempting to reconnect...
+2026-07-23 09:20:33,276 - root - INFO - Listening on 192.168.0.201:8234 (attempt 1/3)
+2026-07-23 09:20:33,276 - root - INFO - TCP reconnection successful
+2026-07-23 09:20:33,276 - root - INFO - Connection detected (is_connected=True, is_acquiring=False), starting acquisition automatically
+2026-07-23 09:20:33,316 - root - INFO - Acquisition started successfully
+2026-07-23 09:20:33,344 - root - INFO - Current user is regular user, settings functions are disabled
+2026-07-23 09:20:33,554 - root - INFO - Acquisition started
+2026-07-23 09:20:33,910 - root - INFO - Accepted connection from ('192.168.0.7', 20108) as client_0_192.168.0.7:20108
+2026-07-23 09:20:33,911 - root - INFO - TCP client connected: client_0_192.168.0.7:20108
+2026-07-23 09:20:34,296 - root - INFO - Accepted connection from ('192.168.0.8', 20108) as client_1_192.168.0.8:20108
+2026-07-23 09:20:34,296 - root - INFO - TCP client connected: client_1_192.168.0.8:20108
+2026-07-23 09:20:34,557 - root - INFO - Gain stabilizer flag updated from 2 to 0
+2026-07-23 09:21:26,150 - root - ERROR - [FAULT DETECTED] Client: client_1_192.168.0.8:20108 | Code: E102 | 通信中断: 探测器通信超时，已超过30秒未收到数据包
+2026-07-23 09:21:41,983 - root - ERROR - Socket error from client_1_192.168.0.8:20108: [Errno 104] 连接被对方重置
+2026-07-23 09:21:41,984 - root - INFO - Client client_1_192.168.0.8:20108 disconnected
+2026-07-23 09:21:41,984 - root - INFO - TCP client disconnected: client_1_192.168.0.8:20108
+2026-07-23 09:21:43,945 - root - INFO - Accepted connection from ('192.168.0.8', 20108) as client_2_192.168.0.8:20108
+2026-07-23 09:21:43,946 - root - INFO - TCP client connected: client_2_192.168.0.8:20108
+2026-07-23 09:21:44,151 - root - ERROR - [FAULT DETECTED] Client: client_2_192.168.0.8:20108 | Code: E101 | 探测器无数据: 配置的探测器未上报数据，请检查网络、IP设置或探测器供电
+2026-07-23 09:21:44,151 - root - INFO - [FAULT CLEARED] Client: client_1_192.168.0.8:20108 | Code: E102 | 通信中断 has been resolved
+2026-07-23 09:21:45,151 - root - INFO - [FAULT CLEARED] Client: client_2_192.168.0.8:20108 | Code: E101 | 探测器无数据 has been resolved
+2026-07-23 09:25:31,651 - root - INFO - Auto-save triggered! Time since last save: 1784769931.7s
+2026-07-23 09:25:31,654 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_092531.xlsx
+2026-07-23 09:25:31,787 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_092531.xlsx (auto-save #0)
+2026-07-23 09:25:31,787 - root - INFO - Auto-save completed successfully! Counter: 1

@@ -76,9 +76,13 @@ class AlarmLogger:
             'AlarmStatus', 'PeakCountRate', 'TriggerCountRate', 'Temperature', 'HV',
             'ProductID', 'Sensitivity', 'Duration', 'Message'
         ])
-        df.to_excel(self.current_excel_file, index=False)
-
-        print(f"Created new alarm log file: {self.current_excel_file}")
+        try:
+            from core.excel_io import dataframe_to_excel_atomic
+            size = dataframe_to_excel_atomic(df, self.current_excel_file)
+            print(f"Created new alarm log file: {self.current_excel_file} ({size} bytes)")
+        except Exception as e:
+            print(f"Failed to create alarm log file: {e}")
+            self.current_excel_file = None
 
     def log_alarm_event(self,
                        client_id: str,
@@ -176,14 +180,20 @@ class AlarmLogger:
 
     def _save_to_excel(self, event: AlarmEvent):
         try:
-            if self.current_excel_file.exists():
+            if self.current_excel_file is None:
+                self._create_new_excel_file()
+            if self.current_excel_file is None:
+                return
+
+            cols = [
+                'Timestamp', 'DateTime', 'ClientID', 'AlarmType',
+                'AlarmStatus', 'PeakCountRate', 'TriggerCountRate', 'Temperature', 'HV',
+                'ProductID', 'Sensitivity', 'Duration', 'Message'
+            ]
+            if self.current_excel_file.exists() and self.current_excel_file.stat().st_size > 0:
                 df = pd.read_excel(self.current_excel_file)
             else:
-                df = pd.DataFrame(columns=[
-                    'Timestamp', 'DateTime', 'ClientID', 'AlarmType',
-                    'AlarmStatus', 'PeakCountRate', 'TriggerCountRate', 'Temperature', 'HV',
-                    'ProductID', 'Sensitivity', 'Duration', 'Message'
-                ])
+                df = pd.DataFrame(columns=cols)
 
             new_row = {
                 'Timestamp': event.timestamp,
@@ -202,16 +212,19 @@ class AlarmLogger:
             }
 
             df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
-            df.to_excel(self.current_excel_file, index=False)
+            from core.excel_io import dataframe_to_excel_atomic
+            dataframe_to_excel_atomic(df, self.current_excel_file)
 
         except Exception as e:
             print(f"Failed to save alarm event to EXCEL: {e}")
 
     def _check_and_rotate_file(self):
-        if self.current_excel_file:
-            file_date = datetime.fromtimestamp(os.path.getctime(self.current_excel_file)).date()
+        if self.current_excel_file and self.current_excel_file.exists():
+            try:
+                file_date = datetime.fromtimestamp(os.path.getctime(self.current_excel_file)).date()
+            except OSError:
+                return
             current_date = datetime.now().date()
-
             if file_date != current_date:
                 self._create_new_excel_file()
 
@@ -251,9 +264,9 @@ class AlarmLogger:
                 })
 
             df = pd.DataFrame(data)
-            df.to_excel(filepath, index=False)
-
-            print(f"Saved {len(self.alarm_events)} alarm events to: {filepath}")
+            from core.excel_io import dataframe_to_excel_atomic
+            size = dataframe_to_excel_atomic(df, filepath)
+            print(f"Saved {len(self.alarm_events)} alarm events to: {filepath} ({size} bytes)")
 
         except Exception as e:
             print(f"Failed to save alarm events: {e}")

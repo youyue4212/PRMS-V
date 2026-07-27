@@ -1,0 +1,35 @@
+2026-07-23 09:29:41,666 - root - INFO - TCP/IP mode enabled
+2026-07-23 09:29:42,992 - root - INFO - TCP not ready, attempting to reconnect...
+2026-07-23 09:29:42,993 - root - INFO - Listening on 192.168.0.201:8234 (attempt 1/3)
+2026-07-23 09:29:42,993 - root - INFO - TCP reconnection successful
+2026-07-23 09:29:42,993 - root - INFO - Connection detected (is_connected=True, is_acquiring=False), starting acquisition automatically
+2026-07-23 09:29:43,066 - root - INFO - Acquisition started successfully
+2026-07-23 09:29:43,090 - root - INFO - Current user is regular user, settings functions are disabled
+2026-07-23 09:29:43,314 - root - INFO - Acquisition started
+2026-07-23 09:29:43,382 - root - INFO - Accepted connection from ('192.168.0.7', 20108) as client_0_192.168.0.7:20108
+2026-07-23 09:29:43,382 - root - INFO - TCP client connected: client_0_192.168.0.7:20108
+2026-07-23 09:29:43,601 - root - INFO - Gain stabilizer flag updated from 2 to 0
+2026-07-23 09:29:43,959 - root - INFO - Accepted connection from ('192.168.0.8', 20108) as client_1_192.168.0.8:20108
+2026-07-23 09:29:43,959 - root - INFO - TCP client connected: client_1_192.168.0.8:20108
+2026-07-23 09:29:58,147 - root - ERROR - [FAULT DETECTED] Client: client_1_192.168.0.8:20108 | Code: E102 | 通信中断: 探测器通信超时，已超过5秒未收到数据包
+2026-07-23 09:30:16,622 - root - INFO - [FAULT CLEARED] Client: client_1_192.168.0.8:20108 | Code: E102 | 通信中断 has been resolved
+2026-07-23 09:30:55,147 - root - ERROR - [FAULT DETECTED] Client: client_1_192.168.0.8:20108 | Code: E102 | 通信中断: 探测器通信超时，已超过5秒未收到数据包
+2026-07-23 09:31:11,074 - root - INFO - 管理员模式已启动，3分钟无操作将自动退出
+2026-07-23 09:31:12,011 - root - INFO - Logged in as administrator: admin
+2026-07-23 09:31:49,287 - root - ERROR - Socket error from client_1_192.168.0.8:20108: [Errno 104] 连接被对方重置
+2026-07-23 09:31:49,287 - root - INFO - Client client_1_192.168.0.8:20108 disconnected
+2026-07-23 09:31:49,287 - root - INFO - TCP client disconnected: client_1_192.168.0.8:20108
+2026-07-23 09:31:52,294 - root - INFO - Accepted connection from ('192.168.0.8', 20108) as client_2_192.168.0.8:20108
+2026-07-23 09:31:52,294 - root - INFO - TCP client connected: client_2_192.168.0.8:20108
+2026-07-23 09:31:53,410 - root - INFO - [FAULT CLEARED] Client: client_1_192.168.0.8:20108 | Code: E102 | 通信中断 has been resolved
+2026-07-23 09:34:29,647 - root - WARNING - Admin mode will auto logout in 30 seconds
+2026-07-23 09:34:41,646 - root - INFO - Auto-save triggered! Time since last save: 1784770481.6s
+2026-07-23 09:34:41,646 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_093441.xlsx
+2026-07-23 09:34:41,793 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_093441.xlsx (auto-save #0)
+2026-07-23 09:34:41,793 - root - INFO - Auto-save completed successfully! Counter: 1
+2026-07-23 09:34:49,647 - root - WARNING - Admin mode will auto logout in 10 seconds
+2026-07-23 09:34:58,776 - root - INFO - Admin mode inactive timeout, temporarily switched to normal view mode
+2026-07-23 09:39:41,724 - root - INFO - Auto-save triggered! Time since last save: 300.1s
+2026-07-23 09:39:41,724 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_093941.xlsx
+2026-07-23 09:39:41,866 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_093941.xlsx (auto-save #1)
+2026-07-23 09:39:41,866 - root - INFO - Auto-save completed successfully! Counter: 2

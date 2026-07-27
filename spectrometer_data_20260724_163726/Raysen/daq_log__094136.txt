@@ -1,0 +1,840 @@
+2026-07-23 09:41:36,944 - root - INFO - TCP/IP mode enabled
+2026-07-23 09:41:38,267 - root - INFO - TCP not ready, attempting to reconnect...
+2026-07-23 09:41:38,268 - root - INFO - Listening on 192.168.0.201:8234 (attempt 1/3)
+2026-07-23 09:41:38,268 - root - INFO - TCP reconnection successful
+2026-07-23 09:41:38,268 - root - INFO - Connection detected (is_connected=True, is_acquiring=False), starting acquisition automatically
+2026-07-23 09:41:38,322 - root - INFO - Acquisition started successfully
+2026-07-23 09:41:38,348 - root - INFO - Current user is regular user, settings functions are disabled
+2026-07-23 09:41:38,560 - root - INFO - Acquisition started
+2026-07-23 09:41:38,627 - root - INFO - Accepted connection from ('192.168.0.7', 20108) as client_0_192.168.0.7:20108
+2026-07-23 09:41:38,627 - root - INFO - TCP client connected: client_0_192.168.0.7:20108
+2026-07-23 09:41:39,428 - root - INFO - Gain stabilizer flag updated from 2 to 0
+2026-07-23 09:41:42,796 - root - INFO - Accepted connection from ('192.168.0.8', 20108) as client_1_192.168.0.8:20108
+2026-07-23 09:41:42,796 - root - INFO - TCP client connected: client_1_192.168.0.8:20108
+2026-07-23 09:42:41,170 - root - ERROR - [FAULT DETECTED] Client: client_1_192.168.0.8:20108 | Code: E102 | 通信中断: 探测器通信超时，已超过5秒未收到数据包
+2026-07-23 09:42:59,170 - root - INFO - [FAULT CLEARED] Client: client_1_192.168.0.8:20108 | Code: E102 | 通信中断 has been resolved
+2026-07-23 09:46:36,929 - root - INFO - Auto-save triggered! Time since last save: 1784771196.9s
+2026-07-23 09:46:36,929 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_094636.xlsx
+2026-07-23 09:46:37,058 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_094636.xlsx (auto-save #0)
+2026-07-23 09:46:37,058 - root - INFO - Auto-save completed successfully! Counter: 1
+2026-07-23 09:56:36,753 - root - INFO - Auto-save triggered! Time since last save: 599.8s
+2026-07-23 09:56:36,754 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_095636.xlsx
+2026-07-23 09:56:36,916 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_095636.xlsx (auto-save #1)
+2026-07-23 09:56:36,916 - root - INFO - Auto-save completed successfully! Counter: 2
+2026-07-23 10:06:36,669 - root - INFO - Auto-save triggered! Time since last save: 599.9s
+2026-07-23 10:06:36,670 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_100636.xlsx
+2026-07-23 10:06:36,843 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_100636.xlsx (auto-save #2)
+2026-07-23 10:06:36,843 - root - INFO - Auto-save completed successfully! Counter: 3
+2026-07-23 10:11:36,773 - root - INFO - Auto-save triggered! Time since last save: 300.1s
+2026-07-23 10:11:36,774 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_101136.xlsx
+2026-07-23 10:11:36,945 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_101136.xlsx (auto-save #3)
+2026-07-23 10:11:36,946 - root - INFO - Auto-save completed successfully! Counter: 4
+2026-07-23 10:21:36,670 - root - INFO - Auto-save triggered! Time since last save: 599.9s
+2026-07-23 10:21:36,670 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_102136.xlsx
+2026-07-23 10:21:36,884 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_102136.xlsx (auto-save #4)
+2026-07-23 10:21:36,884 - root - INFO - Auto-save completed successfully! Counter: 5
+2026-07-23 10:26:36,770 - root - INFO - Auto-save triggered! Time since last save: 300.1s
+2026-07-23 10:26:36,770 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_102636.xlsx
+2026-07-23 10:26:36,933 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_102636.xlsx (auto-save #5)
+2026-07-23 10:26:36,933 - root - INFO - Auto-save completed successfully! Counter: 6
+2026-07-23 10:36:36,670 - root - INFO - Auto-save triggered! Time since last save: 599.9s
+2026-07-23 10:36:36,670 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_103636.xlsx
+2026-07-23 10:36:36,834 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_103636.xlsx (auto-save #6)
+2026-07-23 10:36:36,834 - root - INFO - Auto-save completed successfully! Counter: 7
+2026-07-23 10:46:36,670 - root - INFO - Auto-save triggered! Time since last save: 600.0s
+2026-07-23 10:46:36,670 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_104636.xlsx
+2026-07-23 10:46:36,841 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_104636.xlsx (auto-save #7)
+2026-07-23 10:46:36,841 - root - INFO - Auto-save completed successfully! Counter: 8
+2026-07-23 10:51:36,703 - root - INFO - Auto-save triggered! Time since last save: 300.0s
+2026-07-23 10:51:36,703 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_105136.xlsx
+2026-07-23 10:51:36,902 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_105136.xlsx (auto-save #8)
+2026-07-23 10:51:36,903 - root - INFO - Auto-save completed successfully! Counter: 9
+2026-07-23 10:56:36,911 - root - INFO - Auto-save triggered! Time since last save: 300.2s
+2026-07-23 10:56:36,911 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_105636.xlsx
+2026-07-23 10:56:37,083 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_105636.xlsx (auto-save #9)
+2026-07-23 10:56:37,084 - root - INFO - Auto-save completed successfully! Counter: 10
+2026-07-23 11:06:36,819 - root - INFO - Auto-save triggered! Time since last save: 599.9s
+2026-07-23 11:06:36,819 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_110636.xlsx
+2026-07-23 11:06:36,990 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_110636.xlsx (auto-save #10)
+2026-07-23 11:06:36,990 - root - INFO - Auto-save completed successfully! Counter: 11
+2026-07-23 11:16:36,669 - root - INFO - Auto-save triggered! Time since last save: 599.9s
+2026-07-23 11:16:36,670 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_111636.xlsx
+2026-07-23 11:16:36,926 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_111636.xlsx (auto-save #11)
+2026-07-23 11:16:36,926 - root - INFO - Auto-save completed successfully! Counter: 12
+2026-07-23 11:21:36,754 - root - INFO - Auto-save triggered! Time since last save: 300.1s
+2026-07-23 11:21:36,754 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_112136.xlsx
+2026-07-23 11:21:37,165 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_112136.xlsx (auto-save #12)
+2026-07-23 11:21:37,165 - root - INFO - Auto-save completed successfully! Counter: 13
+2026-07-23 11:31:36,718 - root - INFO - Auto-save triggered! Time since last save: 600.0s
+2026-07-23 11:31:36,719 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_113136.xlsx
+2026-07-23 11:31:36,892 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_113136.xlsx (auto-save #13)
+2026-07-23 11:31:36,892 - root - INFO - Auto-save completed successfully! Counter: 14
+2026-07-23 11:36:36,836 - root - INFO - Auto-save triggered! Time since last save: 300.1s
+2026-07-23 11:36:36,837 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_113636.xlsx
+2026-07-23 11:36:37,008 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_113636.xlsx (auto-save #14)
+2026-07-23 11:36:37,008 - root - INFO - Auto-save completed successfully! Counter: 15
+2026-07-23 11:46:36,670 - root - INFO - Auto-save triggered! Time since last save: 599.8s
+2026-07-23 11:46:36,670 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_114636.xlsx
+2026-07-23 11:46:36,843 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_114636.xlsx (auto-save #15)
+2026-07-23 11:46:36,844 - root - INFO - Auto-save completed successfully! Counter: 16
+2026-07-23 11:51:36,908 - root - INFO - Auto-save triggered! Time since last save: 300.2s
+2026-07-23 11:51:36,909 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_115136.xlsx
+2026-07-23 11:51:37,127 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_115136.xlsx (auto-save #16)
+2026-07-23 11:51:37,127 - root - INFO - Auto-save completed successfully! Counter: 17
+2026-07-23 11:52:25,462 - root - INFO - Switched spectrum display to client client_1_192.168.0.8:20108
+2026-07-23 11:52:25,462 - root - INFO - Switched primary client from client_0_192.168.0.7:20108 to client_1_192.168.0.8:20108
+2026-07-23 11:52:25,719 - root - INFO - Manually selected client: client_1_192.168.0.8:20108
+2026-07-23 11:52:33,893 - root - INFO - Switched spectrum display to client client_0_192.168.0.7:20108
+2026-07-23 11:52:33,894 - root - INFO - Switched primary client from client_1_192.168.0.8:20108 to client_0_192.168.0.7:20108
+2026-07-23 11:52:34,150 - root - INFO - Manually selected client: client_0_192.168.0.7:20108
+2026-07-23 12:01:36,742 - root - INFO - Auto-save triggered! Time since last save: 599.8s
+2026-07-23 12:01:36,742 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_120136.xlsx
+2026-07-23 12:01:36,955 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_120136.xlsx (auto-save #17)
+2026-07-23 12:01:36,955 - root - INFO - Auto-save completed successfully! Counter: 18
+2026-07-23 12:11:36,670 - root - INFO - Auto-save triggered! Time since last save: 599.9s
+2026-07-23 12:11:36,670 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_121136.xlsx
+2026-07-23 12:11:36,842 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_121136.xlsx (auto-save #18)
+2026-07-23 12:11:36,842 - root - INFO - Auto-save completed successfully! Counter: 19
+2026-07-23 12:16:36,768 - root - INFO - Auto-save triggered! Time since last save: 300.1s
+2026-07-23 12:16:36,768 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_121636.xlsx
+2026-07-23 12:16:36,940 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_121636.xlsx (auto-save #19)
+2026-07-23 12:16:36,941 - root - INFO - Auto-save completed successfully! Counter: 20
+2026-07-23 12:26:36,669 - root - INFO - Auto-save triggered! Time since last save: 599.9s
+2026-07-23 12:26:36,670 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_122636.xlsx
+2026-07-23 12:26:36,839 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_122636.xlsx (auto-save #20)
+2026-07-23 12:26:36,839 - root - INFO - Auto-save completed successfully! Counter: 21
+2026-07-23 12:31:36,814 - root - INFO - Auto-save triggered! Time since last save: 300.1s
+2026-07-23 12:31:36,815 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_123136.xlsx
+2026-07-23 12:31:36,987 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_123136.xlsx (auto-save #21)
+2026-07-23 12:31:36,987 - root - INFO - Auto-save completed successfully! Counter: 22
+2026-07-23 12:41:36,669 - root - INFO - Auto-save triggered! Time since last save: 599.9s
+2026-07-23 12:41:36,670 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_124136.xlsx
+2026-07-23 12:41:36,838 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_124136.xlsx (auto-save #22)
+2026-07-23 12:41:36,839 - root - INFO - Auto-save completed successfully! Counter: 23
+2026-07-23 12:46:36,800 - root - INFO - Auto-save triggered! Time since last save: 300.1s
+2026-07-23 12:46:36,801 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_124636.xlsx
+2026-07-23 12:46:36,972 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_124636.xlsx (auto-save #23)
+2026-07-23 12:46:36,972 - root - INFO - Auto-save completed successfully! Counter: 24
+2026-07-23 12:56:36,717 - root - INFO - Auto-save triggered! Time since last save: 599.9s
+2026-07-23 12:56:36,717 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_125636.xlsx
+2026-07-23 12:56:36,890 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_125636.xlsx (auto-save #24)
+2026-07-23 12:56:36,890 - root - INFO - Auto-save completed successfully! Counter: 25
+2026-07-23 13:06:36,669 - root - INFO - Auto-save triggered! Time since last save: 600.0s
+2026-07-23 13:06:36,670 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_130636.xlsx
+2026-07-23 13:06:36,845 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_130636.xlsx (auto-save #25)
+2026-07-23 13:06:36,845 - root - INFO - Auto-save completed successfully! Counter: 26
+2026-07-23 13:11:36,671 - root - INFO - Auto-save triggered! Time since last save: 300.0s
+2026-07-23 13:11:36,672 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_131136.xlsx
+2026-07-23 13:11:36,839 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_131136.xlsx (auto-save #26)
+2026-07-23 13:11:36,840 - root - INFO - Auto-save completed successfully! Counter: 27
+2026-07-23 13:21:36,669 - root - INFO - Auto-save triggered! Time since last save: 600.0s
+2026-07-23 13:21:36,670 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_132136.xlsx
+2026-07-23 13:21:36,840 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_132136.xlsx (auto-save #27)
+2026-07-23 13:21:36,841 - root - INFO - Auto-save completed successfully! Counter: 28
+2026-07-23 13:26:36,818 - root - INFO - Auto-save triggered! Time since last save: 300.1s
+2026-07-23 13:26:36,818 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_132636.xlsx
+2026-07-23 13:26:36,985 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_132636.xlsx (auto-save #28)
+2026-07-23 13:26:36,985 - root - INFO - Auto-save completed successfully! Counter: 29
+2026-07-23 13:36:36,669 - root - INFO - Auto-save triggered! Time since last save: 599.9s
+2026-07-23 13:36:36,670 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_133636.xlsx
+2026-07-23 13:36:36,842 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_133636.xlsx (auto-save #29)
+2026-07-23 13:36:36,843 - root - INFO - Auto-save completed successfully! Counter: 30
+2026-07-23 13:41:36,808 - root - INFO - Auto-save triggered! Time since last save: 300.1s
+2026-07-23 13:41:36,808 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_134136.xlsx
+2026-07-23 13:41:36,976 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_134136.xlsx (auto-save #30)
+2026-07-23 13:41:36,976 - root - INFO - Auto-save completed successfully! Counter: 31
+2026-07-23 13:51:36,717 - root - INFO - Auto-save triggered! Time since last save: 599.9s
+2026-07-23 13:51:36,718 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_135136.xlsx
+2026-07-23 13:51:36,885 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_135136.xlsx (auto-save #31)
+2026-07-23 13:51:36,886 - root - INFO - Auto-save completed successfully! Counter: 32
+2026-07-23 13:56:36,892 - root - INFO - Auto-save triggered! Time since last save: 300.2s
+2026-07-23 13:56:36,892 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_135636.xlsx
+2026-07-23 13:56:37,096 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_135636.xlsx (auto-save #32)
+2026-07-23 13:56:37,097 - root - INFO - Auto-save completed successfully! Counter: 33
+2026-07-23 14:06:36,698 - root - INFO - Auto-save triggered! Time since last save: 599.8s
+2026-07-23 14:06:36,699 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_140636.xlsx
+2026-07-23 14:06:36,877 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_140636.xlsx (auto-save #33)
+2026-07-23 14:06:36,878 - root - INFO - Auto-save completed successfully! Counter: 34
+2026-07-23 14:11:36,913 - root - INFO - Auto-save triggered! Time since last save: 300.2s
+2026-07-23 14:11:36,913 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_141136.xlsx
+2026-07-23 14:11:37,136 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_141136.xlsx (auto-save #34)
+2026-07-23 14:11:37,137 - root - INFO - Auto-save completed successfully! Counter: 35
+2026-07-23 14:21:36,817 - root - INFO - Auto-save triggered! Time since last save: 599.9s
+2026-07-23 14:21:36,818 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_142136.xlsx
+2026-07-23 14:21:37,029 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_142136.xlsx (auto-save #35)
+2026-07-23 14:21:37,029 - root - INFO - Auto-save completed successfully! Counter: 36
+2026-07-23 14:31:36,669 - root - INFO - Auto-save triggered! Time since last save: 599.9s
+2026-07-23 14:31:36,670 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_143136.xlsx
+2026-07-23 14:31:36,891 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_143136.xlsx (auto-save #36)
+2026-07-23 14:31:36,892 - root - INFO - Auto-save completed successfully! Counter: 37
+2026-07-23 14:36:36,767 - root - INFO - Auto-save triggered! Time since last save: 300.1s
+2026-07-23 14:36:36,768 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_143636.xlsx
+2026-07-23 14:36:36,995 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_143636.xlsx (auto-save #37)
+2026-07-23 14:36:36,995 - root - INFO - Auto-save completed successfully! Counter: 38
+2026-07-23 14:46:36,716 - root - INFO - Auto-save triggered! Time since last save: 599.9s
+2026-07-23 14:46:36,716 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_144636.xlsx
+2026-07-23 14:46:36,943 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_144636.xlsx (auto-save #38)
+2026-07-23 14:46:36,943 - root - INFO - Auto-save completed successfully! Counter: 39
+2026-07-23 14:56:36,670 - root - INFO - Auto-save triggered! Time since last save: 600.0s
+2026-07-23 14:56:36,670 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_145636.xlsx
+2026-07-23 14:56:36,841 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_145636.xlsx (auto-save #39)
+2026-07-23 14:56:36,841 - root - INFO - Auto-save completed successfully! Counter: 40
+2026-07-23 15:01:36,697 - root - INFO - Auto-save triggered! Time since last save: 300.0s
+2026-07-23 15:01:36,697 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_150136.xlsx
+2026-07-23 15:01:36,928 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_150136.xlsx (auto-save #40)
+2026-07-23 15:01:36,929 - root - INFO - Auto-save completed successfully! Counter: 41
+2026-07-23 15:06:36,842 - root - INFO - Auto-save triggered! Time since last save: 300.1s
+2026-07-23 15:06:36,842 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_150636.xlsx
+2026-07-23 15:06:37,012 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_150636.xlsx (auto-save #41)
+2026-07-23 15:06:37,013 - root - INFO - Auto-save completed successfully! Counter: 42
+2026-07-23 15:16:36,818 - root - INFO - Auto-save triggered! Time since last save: 600.0s
+2026-07-23 15:16:36,818 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_151636.xlsx
+2026-07-23 15:16:37,047 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_151636.xlsx (auto-save #42)
+2026-07-23 15:16:37,048 - root - INFO - Auto-save completed successfully! Counter: 43
+2026-07-23 15:26:36,670 - root - INFO - Auto-save triggered! Time since last save: 599.9s
+2026-07-23 15:26:36,670 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_152636.xlsx
+2026-07-23 15:26:36,902 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_152636.xlsx (auto-save #43)
+2026-07-23 15:26:36,902 - root - INFO - Auto-save completed successfully! Counter: 44
+2026-07-23 15:31:36,789 - root - INFO - Auto-save triggered! Time since last save: 300.1s
+2026-07-23 15:31:36,789 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_153136.xlsx
+2026-07-23 15:31:36,957 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_153136.xlsx (auto-save #44)
+2026-07-23 15:31:36,957 - root - INFO - Auto-save completed successfully! Counter: 45
+2026-07-23 15:41:36,717 - root - INFO - Auto-save triggered! Time since last save: 599.9s
+2026-07-23 15:41:36,717 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_154136.xlsx
+2026-07-23 15:41:36,945 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_154136.xlsx (auto-save #45)
+2026-07-23 15:41:36,945 - root - INFO - Auto-save completed successfully! Counter: 46
+2026-07-23 15:46:36,835 - root - INFO - Auto-save triggered! Time since last save: 300.1s
+2026-07-23 15:46:36,835 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_154636.xlsx
+2026-07-23 15:46:37,069 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_154636.xlsx (auto-save #46)
+2026-07-23 15:46:37,070 - root - INFO - Auto-save completed successfully! Counter: 47
+2026-07-23 15:56:36,670 - root - INFO - Auto-save triggered! Time since last save: 599.8s
+2026-07-23 15:56:36,670 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_155636.xlsx
+2026-07-23 15:56:36,840 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_155636.xlsx (auto-save #47)
+2026-07-23 15:56:36,840 - root - INFO - Auto-save completed successfully! Counter: 48
+2026-07-23 16:01:36,804 - root - INFO - Auto-save triggered! Time since last save: 300.1s
+2026-07-23 16:01:36,804 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_160136.xlsx
+2026-07-23 16:01:37,028 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_160136.xlsx (auto-save #48)
+2026-07-23 16:01:37,028 - root - INFO - Auto-save completed successfully! Counter: 49
+2026-07-23 16:11:36,728 - root - INFO - Auto-save triggered! Time since last save: 599.9s
+2026-07-23 16:11:36,729 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_161136.xlsx
+2026-07-23 16:11:36,896 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_161136.xlsx (auto-save #49)
+2026-07-23 16:11:36,896 - root - INFO - Auto-save completed successfully! Counter: 50
+2026-07-23 16:21:36,670 - root - INFO - Auto-save triggered! Time since last save: 599.9s
+2026-07-23 16:21:36,670 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_162136.xlsx
+2026-07-23 16:21:36,899 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_162136.xlsx (auto-save #50)
+2026-07-23 16:21:36,899 - root - INFO - Auto-save completed successfully! Counter: 51
+2026-07-23 16:26:36,760 - root - INFO - Auto-save triggered! Time since last save: 300.1s
+2026-07-23 16:26:36,761 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_162636.xlsx
+2026-07-23 16:26:36,990 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_162636.xlsx (auto-save #51)
+2026-07-23 16:26:36,991 - root - INFO - Auto-save completed successfully! Counter: 52
+2026-07-23 16:31:36,863 - root - INFO - Auto-save triggered! Time since last save: 300.1s
+2026-07-23 16:31:36,864 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_163136.xlsx
+2026-07-23 16:31:37,034 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_163136.xlsx (auto-save #52)
+2026-07-23 16:31:37,034 - root - INFO - Auto-save completed successfully! Counter: 53
+2026-07-23 16:41:36,811 - root - INFO - Auto-save triggered! Time since last save: 599.9s
+2026-07-23 16:41:36,811 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_164136.xlsx
+2026-07-23 16:41:37,037 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_164136.xlsx (auto-save #53)
+2026-07-23 16:41:37,038 - root - INFO - Auto-save completed successfully! Counter: 54
+2026-07-23 16:51:36,670 - root - INFO - Auto-save triggered! Time since last save: 599.9s
+2026-07-23 16:51:36,670 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_165136.xlsx
+2026-07-23 16:51:36,840 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_165136.xlsx (auto-save #54)
+2026-07-23 16:51:36,841 - root - INFO - Auto-save completed successfully! Counter: 55
+2026-07-23 16:56:36,809 - root - INFO - Auto-save triggered! Time since last save: 300.1s
+2026-07-23 16:56:36,810 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_165636.xlsx
+2026-07-23 16:56:37,068 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_165636.xlsx (auto-save #55)
+2026-07-23 16:56:37,069 - root - INFO - Auto-save completed successfully! Counter: 56
+2026-07-23 17:06:36,711 - root - INFO - Auto-save triggered! Time since last save: 599.9s
+2026-07-23 17:06:36,712 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_170636.xlsx
+2026-07-23 17:06:36,990 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_170636.xlsx (auto-save #56)
+2026-07-23 17:06:36,990 - root - INFO - Auto-save completed successfully! Counter: 57
+2026-07-23 17:16:36,670 - root - INFO - Auto-save triggered! Time since last save: 600.0s
+2026-07-23 17:16:36,670 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_171636.xlsx
+2026-07-23 17:16:36,900 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_171636.xlsx (auto-save #57)
+2026-07-23 17:16:36,901 - root - INFO - Auto-save completed successfully! Counter: 58
+2026-07-23 17:21:36,670 - root - INFO - Auto-save triggered! Time since last save: 300.0s
+2026-07-23 17:21:36,670 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_172136.xlsx
+2026-07-23 17:21:36,897 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_172136.xlsx (auto-save #58)
+2026-07-23 17:21:36,898 - root - INFO - Auto-save completed successfully! Counter: 59
+2026-07-23 17:26:36,918 - root - INFO - Auto-save triggered! Time since last save: 300.2s
+2026-07-23 17:26:36,918 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_172636.xlsx
+2026-07-23 17:26:37,088 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_172636.xlsx (auto-save #59)
+2026-07-23 17:26:37,088 - root - INFO - Auto-save completed successfully! Counter: 60
+2026-07-23 17:36:36,814 - root - INFO - Auto-save triggered! Time since last save: 599.9s
+2026-07-23 17:36:36,814 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_173636.xlsx
+2026-07-23 17:36:37,042 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_173636.xlsx (auto-save #60)
+2026-07-23 17:36:37,042 - root - INFO - Auto-save completed successfully! Counter: 61
+2026-07-23 17:46:36,669 - root - INFO - Auto-save triggered! Time since last save: 599.9s
+2026-07-23 17:46:36,669 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_174636.xlsx
+2026-07-23 17:46:36,839 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_174636.xlsx (auto-save #61)
+2026-07-23 17:46:36,839 - root - INFO - Auto-save completed successfully! Counter: 62
+2026-07-23 17:51:36,797 - root - INFO - Auto-save triggered! Time since last save: 300.1s
+2026-07-23 17:51:36,798 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_175136.xlsx
+2026-07-23 17:51:37,027 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_175136.xlsx (auto-save #62)
+2026-07-23 17:51:37,028 - root - INFO - Auto-save completed successfully! Counter: 63
+2026-07-23 17:56:36,923 - root - INFO - Auto-save triggered! Time since last save: 300.1s
+2026-07-23 17:56:36,923 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_175636.xlsx
+2026-07-23 17:56:37,088 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_175636.xlsx (auto-save #63)
+2026-07-23 17:56:37,088 - root - INFO - Auto-save completed successfully! Counter: 64
+2026-07-23 18:06:36,670 - root - INFO - Auto-save triggered! Time since last save: 599.7s
+2026-07-23 18:06:36,670 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_180636.xlsx
+2026-07-23 18:06:36,912 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_180636.xlsx (auto-save #64)
+2026-07-23 18:06:36,912 - root - INFO - Auto-save completed successfully! Counter: 65
+2026-07-23 18:11:36,670 - root - INFO - Auto-save triggered! Time since last save: 300.0s
+2026-07-23 18:11:36,670 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_181136.xlsx
+2026-07-23 18:11:36,898 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_181136.xlsx (auto-save #65)
+2026-07-23 18:11:36,899 - root - INFO - Auto-save completed successfully! Counter: 66
+2026-07-23 18:16:36,696 - root - INFO - Auto-save triggered! Time since last save: 300.0s
+2026-07-23 18:16:36,697 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_181636.xlsx
+2026-07-23 18:16:36,903 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_181636.xlsx (auto-save #66)
+2026-07-23 18:16:36,904 - root - INFO - Auto-save completed successfully! Counter: 67
+2026-07-23 18:21:36,899 - root - INFO - Auto-save triggered! Time since last save: 300.2s
+2026-07-23 18:21:36,900 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_182136.xlsx
+2026-07-23 18:21:37,129 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_182136.xlsx (auto-save #67)
+2026-07-23 18:21:37,129 - root - INFO - Auto-save completed successfully! Counter: 68
+2026-07-23 18:31:36,813 - root - INFO - Auto-save triggered! Time since last save: 599.9s
+2026-07-23 18:31:36,814 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_183136.xlsx
+2026-07-23 18:31:37,020 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_183136.xlsx (auto-save #68)
+2026-07-23 18:31:37,020 - root - INFO - Auto-save completed successfully! Counter: 69
+2026-07-23 18:41:36,669 - root - INFO - Auto-save triggered! Time since last save: 599.9s
+2026-07-23 18:41:36,670 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_184136.xlsx
+2026-07-23 18:41:36,903 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_184136.xlsx (auto-save #69)
+2026-07-23 18:41:36,904 - root - INFO - Auto-save completed successfully! Counter: 70
+2026-07-23 18:46:36,756 - root - INFO - Auto-save triggered! Time since last save: 300.1s
+2026-07-23 18:46:36,756 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_184636.xlsx
+2026-07-23 18:46:36,982 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_184636.xlsx (auto-save #70)
+2026-07-23 18:46:36,983 - root - INFO - Auto-save completed successfully! Counter: 71
+2026-07-23 18:56:36,712 - root - INFO - Auto-save triggered! Time since last save: 600.0s
+2026-07-23 18:56:36,712 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_185636.xlsx
+2026-07-23 18:56:36,884 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_185636.xlsx (auto-save #71)
+2026-07-23 18:56:36,884 - root - INFO - Auto-save completed successfully! Counter: 72
+2026-07-23 19:01:36,897 - root - INFO - Auto-save triggered! Time since last save: 300.2s
+2026-07-23 19:01:36,898 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_190136.xlsx
+2026-07-23 19:01:37,124 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_190136.xlsx (auto-save #72)
+2026-07-23 19:01:37,125 - root - INFO - Auto-save completed successfully! Counter: 73
+2026-07-23 19:11:36,670 - root - INFO - Auto-save triggered! Time since last save: 599.8s
+2026-07-23 19:11:36,670 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_191136.xlsx
+2026-07-23 19:11:36,841 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_191136.xlsx (auto-save #73)
+2026-07-23 19:11:36,841 - root - INFO - Auto-save completed successfully! Counter: 74
+2026-07-23 19:16:36,788 - root - INFO - Auto-save triggered! Time since last save: 300.1s
+2026-07-23 19:16:36,788 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_191636.xlsx
+2026-07-23 19:16:37,016 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_191636.xlsx (auto-save #74)
+2026-07-23 19:16:37,016 - root - INFO - Auto-save completed successfully! Counter: 75
+2026-07-23 19:26:36,747 - root - INFO - Auto-save triggered! Time since last save: 600.0s
+2026-07-23 19:26:36,748 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_192636.xlsx
+2026-07-23 19:26:36,921 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_192636.xlsx (auto-save #75)
+2026-07-23 19:26:36,922 - root - INFO - Auto-save completed successfully! Counter: 76
+2026-07-23 19:36:36,669 - root - INFO - Auto-save triggered! Time since last save: 599.9s
+2026-07-23 19:36:36,670 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_193636.xlsx
+2026-07-23 19:36:36,844 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_193636.xlsx (auto-save #76)
+2026-07-23 19:36:36,844 - root - INFO - Auto-save completed successfully! Counter: 77
+2026-07-23 19:41:36,762 - root - INFO - Auto-save triggered! Time since last save: 300.1s
+2026-07-23 19:41:36,763 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_194136.xlsx
+2026-07-23 19:41:36,988 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_194136.xlsx (auto-save #77)
+2026-07-23 19:41:36,988 - root - INFO - Auto-save completed successfully! Counter: 78
+2026-07-23 19:46:36,860 - root - INFO - Auto-save triggered! Time since last save: 300.1s
+2026-07-23 19:46:36,861 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_194636.xlsx
+2026-07-23 19:46:37,085 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_194636.xlsx (auto-save #78)
+2026-07-23 19:46:37,085 - root - INFO - Auto-save completed successfully! Counter: 79
+2026-07-23 19:56:36,839 - root - INFO - Auto-save triggered! Time since last save: 600.0s
+2026-07-23 19:56:36,840 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_195636.xlsx
+2026-07-23 19:56:37,069 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_195636.xlsx (auto-save #79)
+2026-07-23 19:56:37,070 - root - INFO - Auto-save completed successfully! Counter: 80
+2026-07-23 20:06:36,670 - root - INFO - Auto-save triggered! Time since last save: 599.8s
+2026-07-23 20:06:36,670 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_200636.xlsx
+2026-07-23 20:06:36,840 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_200636.xlsx (auto-save #80)
+2026-07-23 20:06:36,841 - root - INFO - Auto-save completed successfully! Counter: 81
+2026-07-23 20:11:36,789 - root - INFO - Auto-save triggered! Time since last save: 300.1s
+2026-07-23 20:11:36,790 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_201136.xlsx
+2026-07-23 20:11:37,017 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_201136.xlsx (auto-save #81)
+2026-07-23 20:11:37,018 - root - INFO - Auto-save completed successfully! Counter: 82
+2026-07-23 20:21:36,735 - root - INFO - Auto-save triggered! Time since last save: 599.9s
+2026-07-23 20:21:36,736 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_202136.xlsx
+2026-07-23 20:21:37,009 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_202136.xlsx (auto-save #82)
+2026-07-23 20:21:37,009 - root - INFO - Auto-save completed successfully! Counter: 83
+2026-07-23 20:26:36,905 - root - INFO - Auto-save triggered! Time since last save: 300.2s
+2026-07-23 20:26:36,906 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_202636.xlsx
+2026-07-23 20:26:37,075 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_202636.xlsx (auto-save #83)
+2026-07-23 20:26:37,076 - root - INFO - Auto-save completed successfully! Counter: 84
+2026-07-23 20:36:36,669 - root - INFO - Auto-save triggered! Time since last save: 599.8s
+2026-07-23 20:36:36,670 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_203636.xlsx
+2026-07-23 20:36:36,970 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_203636.xlsx (auto-save #84)
+2026-07-23 20:36:36,971 - root - INFO - Auto-save completed successfully! Counter: 85
+2026-07-23 20:41:36,855 - root - INFO - Auto-save triggered! Time since last save: 300.2s
+2026-07-23 20:41:36,856 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_204136.xlsx
+2026-07-23 20:41:37,023 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_204136.xlsx (auto-save #85)
+2026-07-23 20:41:37,024 - root - INFO - Auto-save completed successfully! Counter: 86
+2026-07-23 20:51:36,811 - root - INFO - Auto-save triggered! Time since last save: 600.0s
+2026-07-23 20:51:36,812 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_205136.xlsx
+2026-07-23 20:51:37,046 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_205136.xlsx (auto-save #86)
+2026-07-23 20:51:37,046 - root - INFO - Auto-save completed successfully! Counter: 87
+2026-07-23 21:01:36,670 - root - INFO - Auto-save triggered! Time since last save: 599.9s
+2026-07-23 21:01:36,670 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_210136.xlsx
+2026-07-23 21:01:36,903 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_210136.xlsx (auto-save #87)
+2026-07-23 21:01:36,903 - root - INFO - Auto-save completed successfully! Counter: 88
+2026-07-23 21:06:36,817 - root - INFO - Auto-save triggered! Time since last save: 300.1s
+2026-07-23 21:06:36,818 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_210636.xlsx
+2026-07-23 21:06:37,090 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_210636.xlsx (auto-save #88)
+2026-07-23 21:06:37,090 - root - INFO - Auto-save completed successfully! Counter: 89
+2026-07-23 21:16:36,714 - root - INFO - Auto-save triggered! Time since last save: 599.9s
+2026-07-23 21:16:36,714 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_211636.xlsx
+2026-07-23 21:16:37,027 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_211636.xlsx (auto-save #89)
+2026-07-23 21:16:37,027 - root - INFO - Auto-save completed successfully! Counter: 90
+2026-07-23 21:26:36,670 - root - INFO - Auto-save triggered! Time since last save: 600.0s
+2026-07-23 21:26:36,670 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_212636.xlsx
+2026-07-23 21:26:36,928 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_212636.xlsx (auto-save #90)
+2026-07-23 21:26:36,929 - root - INFO - Auto-save completed successfully! Counter: 91
+2026-07-23 21:36:36,914 - root - INFO - Auto-save triggered! Time since last save: 600.2s
+2026-07-23 21:36:36,914 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_213636.xlsx
+2026-07-23 21:36:37,113 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_213636.xlsx (auto-save #91)
+2026-07-23 21:36:37,113 - root - INFO - Auto-save completed successfully! Counter: 92
+2026-07-23 21:46:36,813 - root - INFO - Auto-save triggered! Time since last save: 599.9s
+2026-07-23 21:46:36,813 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_214636.xlsx
+2026-07-23 21:46:37,075 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_214636.xlsx (auto-save #92)
+2026-07-23 21:46:37,075 - root - INFO - Auto-save completed successfully! Counter: 93
+2026-07-23 21:56:36,670 - root - INFO - Auto-save triggered! Time since last save: 599.9s
+2026-07-23 21:56:36,670 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_215636.xlsx
+2026-07-23 21:56:36,901 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_215636.xlsx (auto-save #93)
+2026-07-23 21:56:36,901 - root - INFO - Auto-save completed successfully! Counter: 94
+2026-07-23 22:01:36,795 - root - INFO - Auto-save triggered! Time since last save: 300.1s
+2026-07-23 22:01:36,796 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_220136.xlsx
+2026-07-23 22:01:36,967 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_220136.xlsx (auto-save #94)
+2026-07-23 22:01:36,968 - root - INFO - Auto-save completed successfully! Counter: 95
+2026-07-23 22:11:36,713 - root - INFO - Auto-save triggered! Time since last save: 599.9s
+2026-07-23 22:11:36,713 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_221136.xlsx
+2026-07-23 22:11:36,941 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_221136.xlsx (auto-save #95)
+2026-07-23 22:11:36,941 - root - INFO - Auto-save completed successfully! Counter: 96
+2026-07-23 22:21:36,669 - root - INFO - Auto-save triggered! Time since last save: 600.0s
+2026-07-23 22:21:36,670 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_222136.xlsx
+2026-07-23 22:21:36,846 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_222136.xlsx (auto-save #96)
+2026-07-23 22:21:36,846 - root - INFO - Auto-save completed successfully! Counter: 97
+2026-07-23 22:26:36,695 - root - INFO - Auto-save triggered! Time since last save: 300.0s
+2026-07-23 22:26:36,695 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_222636.xlsx
+2026-07-23 22:26:36,923 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_222636.xlsx (auto-save #97)
+2026-07-23 22:26:36,924 - root - INFO - Auto-save completed successfully! Counter: 98
+2026-07-23 22:31:36,894 - root - INFO - Auto-save triggered! Time since last save: 300.2s
+2026-07-23 22:31:36,894 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_223136.xlsx
+2026-07-23 22:31:37,116 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_223136.xlsx (auto-save #98)
+2026-07-23 22:31:37,116 - root - INFO - Auto-save completed successfully! Counter: 99
+2026-07-23 22:41:36,811 - root - INFO - Auto-save triggered! Time since last save: 599.9s
+2026-07-23 22:41:36,812 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_224136.xlsx
+2026-07-23 22:41:36,980 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_224136.xlsx (auto-save #99)
+2026-07-23 22:41:36,980 - root - INFO - Auto-save completed successfully! Counter: 100
+2026-07-23 22:51:36,670 - root - INFO - Auto-save triggered! Time since last save: 599.9s
+2026-07-23 22:51:36,670 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_225136.xlsx
+2026-07-23 22:51:36,900 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_225136.xlsx (auto-save #100)
+2026-07-23 22:51:36,900 - root - INFO - Auto-save completed successfully! Counter: 101
+2026-07-23 22:56:36,753 - root - INFO - Auto-save triggered! Time since last save: 300.1s
+2026-07-23 22:56:36,753 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_225636.xlsx
+2026-07-23 22:56:36,927 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_225636.xlsx (auto-save #101)
+2026-07-23 22:56:36,927 - root - INFO - Auto-save completed successfully! Counter: 102
+2026-07-23 23:06:36,711 - root - INFO - Auto-save triggered! Time since last save: 600.0s
+2026-07-23 23:06:36,712 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_230636.xlsx
+2026-07-23 23:06:36,935 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_230636.xlsx (auto-save #102)
+2026-07-23 23:06:36,936 - root - INFO - Auto-save completed successfully! Counter: 103
+2026-07-23 23:16:36,670 - root - INFO - Auto-save triggered! Time since last save: 600.0s
+2026-07-23 23:16:36,670 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_231636.xlsx
+2026-07-23 23:16:36,901 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_231636.xlsx (auto-save #103)
+2026-07-23 23:16:36,901 - root - INFO - Auto-save completed successfully! Counter: 104
+2026-07-23 23:21:36,692 - root - INFO - Auto-save triggered! Time since last save: 300.0s
+2026-07-23 23:21:36,693 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_232136.xlsx
+2026-07-23 23:21:36,859 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_232136.xlsx (auto-save #104)
+2026-07-23 23:21:36,859 - root - INFO - Auto-save completed successfully! Counter: 105
+2026-07-23 23:26:36,893 - root - INFO - Auto-save triggered! Time since last save: 300.2s
+2026-07-23 23:26:36,893 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_232636.xlsx
+2026-07-23 23:26:37,058 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_232636.xlsx (auto-save #105)
+2026-07-23 23:26:37,058 - root - INFO - Auto-save completed successfully! Counter: 106
+2026-07-23 23:36:36,812 - root - INFO - Auto-save triggered! Time since last save: 599.9s
+2026-07-23 23:36:36,813 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_233636.xlsx
+2026-07-23 23:36:37,043 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_233636.xlsx (auto-save #106)
+2026-07-23 23:36:37,043 - root - INFO - Auto-save completed successfully! Counter: 107
+2026-07-23 23:46:36,670 - root - INFO - Auto-save triggered! Time since last save: 599.9s
+2026-07-23 23:46:36,670 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_234636.xlsx
+2026-07-23 23:46:36,892 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_234636.xlsx (auto-save #107)
+2026-07-23 23:46:36,893 - root - INFO - Auto-save completed successfully! Counter: 108
+2026-07-23 23:51:36,756 - root - INFO - Auto-save triggered! Time since last save: 300.1s
+2026-07-23 23:51:36,756 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260723_235136.xlsx
+2026-07-23 23:51:36,985 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260723_235136.xlsx (auto-save #108)
+2026-07-23 23:51:36,985 - root - INFO - Auto-save completed successfully! Counter: 109
+2026-07-24 00:01:36,710 - root - INFO - Auto-save triggered! Time since last save: 600.0s
+2026-07-24 00:01:36,711 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260724_000136.xlsx
+2026-07-24 00:01:36,883 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260724_000136.xlsx (auto-save #109)
+2026-07-24 00:01:36,884 - root - INFO - Auto-save completed successfully! Counter: 110
+2026-07-24 00:06:36,840 - root - INFO - Auto-save triggered! Time since last save: 300.1s
+2026-07-24 00:06:36,840 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260724_000636.xlsx
+2026-07-24 00:06:37,064 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260724_000636.xlsx (auto-save #110)
+2026-07-24 00:06:37,064 - root - INFO - Auto-save completed successfully! Counter: 111
+2026-07-24 00:16:36,670 - root - INFO - Auto-save triggered! Time since last save: 599.8s
+2026-07-24 00:16:36,670 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260724_001636.xlsx
+2026-07-24 00:16:36,875 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260724_001636.xlsx (auto-save #111)
+2026-07-24 00:16:36,875 - root - INFO - Auto-save completed successfully! Counter: 112
+2026-07-24 00:21:36,792 - root - INFO - Auto-save triggered! Time since last save: 300.1s
+2026-07-24 00:21:36,793 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260724_002136.xlsx
+2026-07-24 00:21:37,020 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260724_002136.xlsx (auto-save #112)
+2026-07-24 00:21:37,021 - root - INFO - Auto-save completed successfully! Counter: 113
+2026-07-24 00:31:36,813 - root - INFO - Auto-save triggered! Time since last save: 600.0s
+2026-07-24 00:31:36,814 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260724_003136.xlsx
+2026-07-24 00:31:36,979 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260724_003136.xlsx (auto-save #113)
+2026-07-24 00:31:36,980 - root - INFO - Auto-save completed successfully! Counter: 114
+2026-07-24 00:41:36,669 - root - INFO - Auto-save triggered! Time since last save: 599.9s
+2026-07-24 00:41:36,670 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260724_004136.xlsx
+2026-07-24 00:41:36,896 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260724_004136.xlsx (auto-save #114)
+2026-07-24 00:41:36,896 - root - INFO - Auto-save completed successfully! Counter: 115
+2026-07-24 00:46:36,758 - root - INFO - Auto-save triggered! Time since last save: 300.1s
+2026-07-24 00:46:36,759 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260724_004636.xlsx
+2026-07-24 00:46:36,932 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260724_004636.xlsx (auto-save #115)
+2026-07-24 00:46:36,933 - root - INFO - Auto-save completed successfully! Counter: 116
+2026-07-24 00:51:36,863 - root - INFO - Auto-save triggered! Time since last save: 300.1s
+2026-07-24 00:51:36,864 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260724_005136.xlsx
+2026-07-24 00:51:37,088 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260724_005136.xlsx (auto-save #116)
+2026-07-24 00:51:37,089 - root - INFO - Auto-save completed successfully! Counter: 117
+2026-07-24 01:01:36,833 - root - INFO - Auto-save triggered! Time since last save: 600.0s
+2026-07-24 01:01:36,834 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260724_010136.xlsx
+2026-07-24 01:01:37,057 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260724_010136.xlsx (auto-save #117)
+2026-07-24 01:01:37,058 - root - INFO - Auto-save completed successfully! Counter: 118
+2026-07-24 01:11:36,669 - root - INFO - Auto-save triggered! Time since last save: 599.8s
+2026-07-24 01:11:36,669 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260724_011136.xlsx
+2026-07-24 01:11:36,843 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260724_011136.xlsx (auto-save #118)
+2026-07-24 01:11:36,843 - root - INFO - Auto-save completed successfully! Counter: 119
+2026-07-24 01:16:36,789 - root - INFO - Auto-save triggered! Time since last save: 300.1s
+2026-07-24 01:16:36,790 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260724_011636.xlsx
+2026-07-24 01:16:37,021 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260724_011636.xlsx (auto-save #119)
+2026-07-24 01:16:37,021 - root - INFO - Auto-save completed successfully! Counter: 120
+2026-07-24 01:26:36,740 - root - INFO - Auto-save triggered! Time since last save: 600.0s
+2026-07-24 01:26:36,741 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260724_012636.xlsx
+2026-07-24 01:26:36,919 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260724_012636.xlsx (auto-save #120)
+2026-07-24 01:26:36,920 - root - INFO - Auto-save completed successfully! Counter: 121
+2026-07-24 01:31:36,906 - root - INFO - Auto-save triggered! Time since last save: 300.2s
+2026-07-24 01:31:36,907 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260724_013136.xlsx
+2026-07-24 01:31:37,139 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260724_013136.xlsx (auto-save #121)
+2026-07-24 01:31:37,139 - root - INFO - Auto-save completed successfully! Counter: 122
+2026-07-24 01:41:36,724 - root - INFO - Auto-save triggered! Time since last save: 599.8s
+2026-07-24 01:41:36,725 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260724_014136.xlsx
+2026-07-24 01:41:36,894 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260724_014136.xlsx (auto-save #122)
+2026-07-24 01:41:36,895 - root - INFO - Auto-save completed successfully! Counter: 123
+2026-07-24 01:46:36,863 - root - INFO - Auto-save triggered! Time since last save: 300.1s
+2026-07-24 01:46:36,864 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260724_014636.xlsx
+2026-07-24 01:46:37,089 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260724_014636.xlsx (auto-save #123)
+2026-07-24 01:46:37,089 - root - INFO - Auto-save completed successfully! Counter: 124
+2026-07-24 01:56:36,817 - root - INFO - Auto-save triggered! Time since last save: 600.0s
+2026-07-24 01:56:36,818 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260724_015636.xlsx
+2026-07-24 01:56:36,988 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260724_015636.xlsx (auto-save #124)
+2026-07-24 01:56:36,989 - root - INFO - Auto-save completed successfully! Counter: 125
+2026-07-24 02:06:36,669 - root - INFO - Auto-save triggered! Time since last save: 599.9s
+2026-07-24 02:06:36,670 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260724_020636.xlsx
+2026-07-24 02:06:36,897 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260724_020636.xlsx (auto-save #125)
+2026-07-24 02:06:36,897 - root - INFO - Auto-save completed successfully! Counter: 126
+2026-07-24 02:11:36,792 - root - INFO - Auto-save triggered! Time since last save: 300.1s
+2026-07-24 02:11:36,792 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260724_021136.xlsx
+2026-07-24 02:11:37,004 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260724_021136.xlsx (auto-save #126)
+2026-07-24 02:11:37,004 - root - INFO - Auto-save completed successfully! Counter: 127
+2026-07-24 02:21:36,733 - root - INFO - Auto-save triggered! Time since last save: 599.9s
+2026-07-24 02:21:36,734 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260724_022136.xlsx
+2026-07-24 02:21:36,959 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260724_022136.xlsx (auto-save #127)
+2026-07-24 02:21:36,960 - root - INFO - Auto-save completed successfully! Counter: 128
+2026-07-24 02:26:36,905 - root - INFO - Auto-save triggered! Time since last save: 300.2s
+2026-07-24 02:26:36,905 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260724_022636.xlsx
+2026-07-24 02:26:37,071 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260724_022636.xlsx (auto-save #128)
+2026-07-24 02:26:37,072 - root - INFO - Auto-save completed successfully! Counter: 129
+2026-07-24 02:36:36,670 - root - INFO - Auto-save triggered! Time since last save: 599.8s
+2026-07-24 02:36:36,670 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260724_023636.xlsx
+2026-07-24 02:36:36,896 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260724_023636.xlsx (auto-save #129)
+2026-07-24 02:36:36,896 - root - INFO - Auto-save completed successfully! Counter: 130
+2026-07-24 02:41:36,863 - root - INFO - Auto-save triggered! Time since last save: 300.2s
+2026-07-24 02:41:36,864 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260724_024136.xlsx
+2026-07-24 02:41:37,067 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260724_024136.xlsx (auto-save #130)
+2026-07-24 02:41:37,067 - root - INFO - Auto-save completed successfully! Counter: 131
+2026-07-24 02:51:36,810 - root - INFO - Auto-save triggered! Time since last save: 599.9s
+2026-07-24 02:51:36,810 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260724_025136.xlsx
+2026-07-24 02:51:37,040 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260724_025136.xlsx (auto-save #131)
+2026-07-24 02:51:37,040 - root - INFO - Auto-save completed successfully! Counter: 132
+2026-07-24 03:01:36,669 - root - INFO - Auto-save triggered! Time since last save: 599.9s
+2026-07-24 03:01:36,670 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260724_030136.xlsx
+2026-07-24 03:01:36,841 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260724_030136.xlsx (auto-save #132)
+2026-07-24 03:01:36,842 - root - INFO - Auto-save completed successfully! Counter: 133
+2026-07-24 03:06:36,791 - root - INFO - Auto-save triggered! Time since last save: 300.1s
+2026-07-24 03:06:36,791 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260724_030636.xlsx
+2026-07-24 03:06:36,960 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260724_030636.xlsx (auto-save #133)
+2026-07-24 03:06:36,960 - root - INFO - Auto-save completed successfully! Counter: 134
+2026-07-24 03:16:36,711 - root - INFO - Auto-save triggered! Time since last save: 599.9s
+2026-07-24 03:16:36,712 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260724_031636.xlsx
+2026-07-24 03:16:36,881 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260724_031636.xlsx (auto-save #134)
+2026-07-24 03:16:36,882 - root - INFO - Auto-save completed successfully! Counter: 135
+2026-07-24 03:26:36,670 - root - INFO - Auto-save triggered! Time since last save: 600.0s
+2026-07-24 03:26:36,670 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260724_032636.xlsx
+2026-07-24 03:26:36,899 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260724_032636.xlsx (auto-save #135)
+2026-07-24 03:26:36,900 - root - INFO - Auto-save completed successfully! Counter: 136
+2026-07-24 03:36:36,813 - root - INFO - Auto-save triggered! Time since last save: 600.1s
+2026-07-24 03:36:36,814 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260724_033636.xlsx
+2026-07-24 03:36:36,983 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260724_033636.xlsx (auto-save #136)
+2026-07-24 03:36:36,983 - root - INFO - Auto-save completed successfully! Counter: 137
+2026-07-24 03:46:36,812 - root - INFO - Auto-save triggered! Time since last save: 600.0s
+2026-07-24 03:46:36,812 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260724_034636.xlsx
+2026-07-24 03:46:37,076 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260724_034636.xlsx (auto-save #137)
+2026-07-24 03:46:37,076 - root - INFO - Auto-save completed successfully! Counter: 138
+2026-07-24 03:56:36,669 - root - INFO - Auto-save triggered! Time since last save: 599.9s
+2026-07-24 03:56:36,670 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260724_035636.xlsx
+2026-07-24 03:56:36,837 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260724_035636.xlsx (auto-save #138)
+2026-07-24 03:56:36,838 - root - INFO - Auto-save completed successfully! Counter: 139
+2026-07-24 04:01:36,790 - root - INFO - Auto-save triggered! Time since last save: 300.1s
+2026-07-24 04:01:36,790 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260724_040136.xlsx
+2026-07-24 04:01:36,961 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260724_040136.xlsx (auto-save #139)
+2026-07-24 04:01:36,962 - root - INFO - Auto-save completed successfully! Counter: 140
+2026-07-24 04:11:36,711 - root - INFO - Auto-save triggered! Time since last save: 599.9s
+2026-07-24 04:11:36,711 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260724_041136.xlsx
+2026-07-24 04:11:36,943 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260724_041136.xlsx (auto-save #140)
+2026-07-24 04:11:36,943 - root - INFO - Auto-save completed successfully! Counter: 141
+2026-07-24 04:21:36,670 - root - INFO - Auto-save triggered! Time since last save: 600.0s
+2026-07-24 04:21:36,670 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260724_042136.xlsx
+2026-07-24 04:21:36,842 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260724_042136.xlsx (auto-save #141)
+2026-07-24 04:21:36,842 - root - INFO - Auto-save completed successfully! Counter: 142
+2026-07-24 04:31:36,912 - root - INFO - Auto-save triggered! Time since last save: 600.2s
+2026-07-24 04:31:36,912 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260724_043136.xlsx
+2026-07-24 04:31:37,182 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260724_043136.xlsx (auto-save #142)
+2026-07-24 04:31:37,183 - root - INFO - Auto-save completed successfully! Counter: 143
+2026-07-24 04:41:36,813 - root - INFO - Auto-save triggered! Time since last save: 599.9s
+2026-07-24 04:41:36,814 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260724_044136.xlsx
+2026-07-24 04:41:36,982 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260724_044136.xlsx (auto-save #143)
+2026-07-24 04:41:36,982 - root - INFO - Auto-save completed successfully! Counter: 144
+2026-07-24 04:51:36,670 - root - INFO - Auto-save triggered! Time since last save: 599.9s
+2026-07-24 04:51:36,670 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260724_045136.xlsx
+2026-07-24 04:51:36,842 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260724_045136.xlsx (auto-save #144)
+2026-07-24 04:51:36,842 - root - INFO - Auto-save completed successfully! Counter: 145
+2026-07-24 04:56:36,799 - root - INFO - Auto-save triggered! Time since last save: 300.1s
+2026-07-24 04:56:36,800 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260724_045636.xlsx
+2026-07-24 04:56:37,056 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260724_045636.xlsx (auto-save #145)
+2026-07-24 04:56:37,056 - root - INFO - Auto-save completed successfully! Counter: 146
+2026-07-24 05:06:36,711 - root - INFO - Auto-save triggered! Time since last save: 599.9s
+2026-07-24 05:06:36,711 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260724_050636.xlsx
+2026-07-24 05:06:36,894 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260724_050636.xlsx (auto-save #146)
+2026-07-24 05:06:36,894 - root - INFO - Auto-save completed successfully! Counter: 147
+2026-07-24 05:16:36,670 - root - INFO - Auto-save triggered! Time since last save: 600.0s
+2026-07-24 05:16:36,670 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260724_051636.xlsx
+2026-07-24 05:16:36,897 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260724_051636.xlsx (auto-save #147)
+2026-07-24 05:16:36,897 - root - INFO - Auto-save completed successfully! Counter: 148
+2026-07-24 05:21:36,717 - root - INFO - Auto-save triggered! Time since last save: 300.0s
+2026-07-24 05:21:36,717 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260724_052136.xlsx
+2026-07-24 05:21:36,887 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260724_052136.xlsx (auto-save #148)
+2026-07-24 05:21:36,887 - root - INFO - Auto-save completed successfully! Counter: 149
+2026-07-24 05:26:36,906 - root - INFO - Auto-save triggered! Time since last save: 300.2s
+2026-07-24 05:26:36,907 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260724_052636.xlsx
+2026-07-24 05:26:37,135 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260724_052636.xlsx (auto-save #149)
+2026-07-24 05:26:37,136 - root - INFO - Auto-save completed successfully! Counter: 150
+2026-07-24 05:36:36,811 - root - INFO - Auto-save triggered! Time since last save: 599.9s
+2026-07-24 05:36:36,811 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260724_053636.xlsx
+2026-07-24 05:36:36,980 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260724_053636.xlsx (auto-save #150)
+2026-07-24 05:36:36,980 - root - INFO - Auto-save completed successfully! Counter: 151
+2026-07-24 05:46:36,670 - root - INFO - Auto-save triggered! Time since last save: 599.9s
+2026-07-24 05:46:36,670 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260724_054636.xlsx
+2026-07-24 05:46:36,843 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260724_054636.xlsx (auto-save #151)
+2026-07-24 05:46:36,843 - root - INFO - Auto-save completed successfully! Counter: 152
+2026-07-24 05:51:36,798 - root - INFO - Auto-save triggered! Time since last save: 300.1s
+2026-07-24 05:51:36,798 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260724_055136.xlsx
+2026-07-24 05:51:37,026 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260724_055136.xlsx (auto-save #152)
+2026-07-24 05:51:37,027 - root - INFO - Auto-save completed successfully! Counter: 153
+2026-07-24 06:01:36,710 - root - INFO - Auto-save triggered! Time since last save: 599.9s
+2026-07-24 06:01:36,710 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260724_060136.xlsx
+2026-07-24 06:01:36,881 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260724_060136.xlsx (auto-save #153)
+2026-07-24 06:01:36,881 - root - INFO - Auto-save completed successfully! Counter: 154
+2026-07-24 06:11:36,669 - root - INFO - Auto-save triggered! Time since last save: 600.0s
+2026-07-24 06:11:36,670 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260724_061136.xlsx
+2026-07-24 06:11:36,840 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260724_061136.xlsx (auto-save #154)
+2026-07-24 06:11:36,840 - root - INFO - Auto-save completed successfully! Counter: 155
+2026-07-24 06:16:36,693 - root - INFO - Auto-save triggered! Time since last save: 300.0s
+2026-07-24 06:16:36,693 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260724_061636.xlsx
+2026-07-24 06:16:36,918 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260724_061636.xlsx (auto-save #155)
+2026-07-24 06:16:36,918 - root - INFO - Auto-save completed successfully! Counter: 156
+2026-07-24 06:21:36,795 - root - INFO - Auto-save triggered! Time since last save: 300.1s
+2026-07-24 06:21:36,796 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260724_062136.xlsx
+2026-07-24 06:21:36,963 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260724_062136.xlsx (auto-save #156)
+2026-07-24 06:21:36,964 - root - INFO - Auto-save completed successfully! Counter: 157
+2026-07-24 06:31:36,780 - root - INFO - Auto-save triggered! Time since last save: 600.0s
+2026-07-24 06:31:36,781 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260724_063136.xlsx
+2026-07-24 06:31:36,954 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260724_063136.xlsx (auto-save #157)
+2026-07-24 06:31:36,954 - root - INFO - Auto-save completed successfully! Counter: 158
+2026-07-24 06:41:36,669 - root - INFO - Auto-save triggered! Time since last save: 599.9s
+2026-07-24 06:41:36,670 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260724_064136.xlsx
+2026-07-24 06:41:36,910 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260724_064136.xlsx (auto-save #158)
+2026-07-24 06:41:36,910 - root - INFO - Auto-save completed successfully! Counter: 159
+2026-07-24 06:46:36,754 - root - INFO - Auto-save triggered! Time since last save: 300.1s
+2026-07-24 06:46:36,754 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260724_064636.xlsx
+2026-07-24 06:46:36,923 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260724_064636.xlsx (auto-save #159)
+2026-07-24 06:46:36,924 - root - INFO - Auto-save completed successfully! Counter: 160
+2026-07-24 06:56:36,711 - root - INFO - Auto-save triggered! Time since last save: 600.0s
+2026-07-24 06:56:36,711 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260724_065636.xlsx
+2026-07-24 06:56:36,922 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260724_065636.xlsx (auto-save #160)
+2026-07-24 06:56:36,923 - root - INFO - Auto-save completed successfully! Counter: 161
+2026-07-24 07:06:36,670 - root - INFO - Auto-save triggered! Time since last save: 600.0s
+2026-07-24 07:06:36,670 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260724_070636.xlsx
+2026-07-24 07:06:36,898 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260724_070636.xlsx (auto-save #161)
+2026-07-24 07:06:36,899 - root - INFO - Auto-save completed successfully! Counter: 162
+2026-07-24 07:11:36,687 - root - INFO - Auto-save triggered! Time since last save: 300.0s
+2026-07-24 07:11:36,687 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260724_071136.xlsx
+2026-07-24 07:11:36,856 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260724_071136.xlsx (auto-save #162)
+2026-07-24 07:11:36,856 - root - INFO - Auto-save completed successfully! Counter: 163
+2026-07-24 07:16:36,786 - root - INFO - Auto-save triggered! Time since last save: 300.1s
+2026-07-24 07:16:36,786 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260724_071636.xlsx
+2026-07-24 07:16:37,052 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260724_071636.xlsx (auto-save #163)
+2026-07-24 07:16:37,052 - root - INFO - Auto-save completed successfully! Counter: 164
+2026-07-24 07:26:36,810 - root - INFO - Auto-save triggered! Time since last save: 600.0s
+2026-07-24 07:26:36,811 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260724_072636.xlsx
+2026-07-24 07:26:36,983 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260724_072636.xlsx (auto-save #164)
+2026-07-24 07:26:36,983 - root - INFO - Auto-save completed successfully! Counter: 165
+2026-07-24 07:36:36,670 - root - INFO - Auto-save triggered! Time since last save: 599.9s
+2026-07-24 07:36:36,671 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260724_073636.xlsx
+2026-07-24 07:36:36,898 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260724_073636.xlsx (auto-save #165)
+2026-07-24 07:36:36,898 - root - INFO - Auto-save completed successfully! Counter: 166
+2026-07-24 07:41:36,754 - root - INFO - Auto-save triggered! Time since last save: 300.1s
+2026-07-24 07:41:36,755 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260724_074136.xlsx
+2026-07-24 07:41:36,989 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260724_074136.xlsx (auto-save #166)
+2026-07-24 07:41:36,989 - root - INFO - Auto-save completed successfully! Counter: 167
+2026-07-24 07:46:36,885 - root - INFO - Auto-save triggered! Time since last save: 300.1s
+2026-07-24 07:46:36,885 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260724_074636.xlsx
+2026-07-24 07:46:37,111 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260724_074636.xlsx (auto-save #167)
+2026-07-24 07:46:37,112 - root - INFO - Auto-save completed successfully! Counter: 168
+2026-07-24 07:56:36,670 - root - INFO - Auto-save triggered! Time since last save: 599.8s
+2026-07-24 07:56:36,670 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260724_075636.xlsx
+2026-07-24 07:56:36,847 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260724_075636.xlsx (auto-save #168)
+2026-07-24 07:56:36,847 - root - INFO - Auto-save completed successfully! Counter: 169
+2026-07-24 08:06:36,669 - root - INFO - Auto-save triggered! Time since last save: 600.0s
+2026-07-24 08:06:36,670 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260724_080636.xlsx
+2026-07-24 08:06:36,844 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260724_080636.xlsx (auto-save #169)
+2026-07-24 08:06:36,844 - root - INFO - Auto-save completed successfully! Counter: 170
+2026-07-24 08:11:36,780 - root - INFO - Auto-save triggered! Time since last save: 300.1s
+2026-07-24 08:11:36,780 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260724_081136.xlsx
+2026-07-24 08:11:37,004 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260724_081136.xlsx (auto-save #170)
+2026-07-24 08:11:37,005 - root - INFO - Auto-save completed successfully! Counter: 171
+2026-07-24 08:21:36,810 - root - INFO - Auto-save triggered! Time since last save: 600.0s
+2026-07-24 08:21:36,811 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260724_082136.xlsx
+2026-07-24 08:21:36,984 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260724_082136.xlsx (auto-save #171)
+2026-07-24 08:21:36,985 - root - INFO - Auto-save completed successfully! Counter: 172
+2026-07-24 08:30:30,103 - root - INFO - 管理员模式已启动，3分钟无操作将自动退出
+2026-07-24 08:30:31,161 - root - INFO - Logged in as administrator: admin
+2026-07-24 08:31:16,207 - root - INFO - Switched spectrum display to client client_1_192.168.0.8:20108
+2026-07-24 08:31:16,207 - root - INFO - Switched primary client from client_0_192.168.0.7:20108 to client_1_192.168.0.8:20108
+2026-07-24 08:31:16,458 - root - INFO - Manually selected client: client_1_192.168.0.8:20108
+2026-07-24 08:31:26,454 - root - INFO - Set threshold command sent to client client_1_192.168.0.8:20108: 30mV
+2026-07-24 08:31:27,136 - root - INFO - [0001] CMD Feedback - ID: 0x4346, Timestamp: 84993284, Control: 0x08 (阈值设置), Value: 0xBB8 (3000), Status: Success
+2026-07-24 08:31:27,136 - root - WARNING - 警告：参数设置命令 0x08 (阈值设置) 已发送成功，但Flash写入需要时间。
+2026-07-24 08:31:27,136 - root - WARNING - 建议：等待至少100ms后再断电，确保参数已保存到EEPROM。
+2026-07-24 08:31:27,136 - root - WARNING - 注意：MODBUS参数保存正常，但串口命令反馈可能发送太快，Flash还未写入完成。
+2026-07-24 08:31:36,669 - root - INFO - Auto-save triggered! Time since last save: 599.9s
+2026-07-24 08:31:36,670 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260724_083136.xlsx
+2026-07-24 08:31:36,845 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260724_083136.xlsx (auto-save #172)
+2026-07-24 08:31:36,845 - root - INFO - Auto-save completed successfully! Counter: 173
+2026-07-24 08:31:53,733 - root - INFO - Switched spectrum display to client client_0_192.168.0.7:20108
+2026-07-24 08:31:53,734 - root - INFO - Switched primary client from client_1_192.168.0.8:20108 to client_0_192.168.0.7:20108
+2026-07-24 08:31:53,984 - root - INFO - Manually selected client: client_0_192.168.0.7:20108
+2026-07-24 08:31:58,558 - root - INFO - Manually switched from admin mode to normal user mode
+2026-07-24 08:36:36,751 - root - INFO - Auto-save triggered! Time since last save: 300.1s
+2026-07-24 08:36:36,751 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260724_083636.xlsx
+2026-07-24 08:36:36,978 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260724_083636.xlsx (auto-save #173)
+2026-07-24 08:36:36,979 - root - INFO - Auto-save completed successfully! Counter: 174
+2026-07-24 08:46:36,709 - root - INFO - Auto-save triggered! Time since last save: 600.0s
+2026-07-24 08:46:36,710 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260724_084636.xlsx
+2026-07-24 08:46:36,939 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260724_084636.xlsx (auto-save #174)
+2026-07-24 08:46:36,939 - root - INFO - Auto-save completed successfully! Counter: 175
+2026-07-24 08:48:46,487 - root - INFO - 管理员模式已启动，3分钟无操作将自动退出
+2026-07-24 08:48:47,399 - root - INFO - Logged in as administrator: admin
+2026-07-24 08:51:07,328 - root - INFO - Manually switched from admin mode to normal user mode
+2026-07-24 08:51:09,287 - root - INFO - 管理员模式已启动，3分钟无操作将自动退出
+2026-07-24 08:51:10,319 - root - INFO - Logged in as administrator: admin
+2026-07-24 08:51:14,832 - root - INFO - Switched spectrum display to client client_1_192.168.0.8:20108
+2026-07-24 08:51:14,833 - root - INFO - Switched primary client from client_0_192.168.0.7:20108 to client_1_192.168.0.8:20108
+2026-07-24 08:51:15,084 - root - INFO - Manually selected client: client_1_192.168.0.8:20108
+2026-07-24 08:51:20,323 - root - INFO - Switched spectrum display to client client_0_192.168.0.7:20108
+2026-07-24 08:51:20,323 - root - INFO - Switched primary client from client_1_192.168.0.8:20108 to client_0_192.168.0.7:20108
+2026-07-24 08:51:20,577 - root - INFO - Manually selected client: client_0_192.168.0.7:20108
+2026-07-24 08:51:22,336 - root - INFO - Switched spectrum display to client client_1_192.168.0.8:20108
+2026-07-24 08:51:22,336 - root - INFO - Switched primary client from client_0_192.168.0.7:20108 to client_1_192.168.0.8:20108
+2026-07-24 08:51:22,590 - root - INFO - Manually selected client: client_1_192.168.0.8:20108
+2026-07-24 08:51:35,479 - root - INFO - Switched spectrum display to client client_0_192.168.0.7:20108
+2026-07-24 08:51:35,480 - root - INFO - Switched primary client from client_1_192.168.0.8:20108 to client_0_192.168.0.7:20108
+2026-07-24 08:51:35,734 - root - INFO - Manually selected client: client_0_192.168.0.7:20108
+2026-07-24 08:51:36,886 - root - INFO - Auto-save triggered! Time since last save: 300.2s
+2026-07-24 08:51:36,887 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260724_085136.xlsx
+2026-07-24 08:51:37,073 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260724_085136.xlsx (auto-save #175)
+2026-07-24 08:51:37,074 - root - INFO - Auto-save completed successfully! Counter: 176
+2026-07-24 08:51:37,905 - root - INFO - Switched spectrum display to client client_1_192.168.0.8:20108
+2026-07-24 08:51:37,906 - root - INFO - Switched primary client from client_0_192.168.0.7:20108 to client_1_192.168.0.8:20108
+2026-07-24 08:51:38,158 - root - INFO - Manually selected client: client_1_192.168.0.8:20108
+2026-07-24 08:53:12,379 - root - INFO - Set HV command sent to client client_1_192.168.0.8:20108: 1080.0V
+2026-07-24 08:53:13,062 - root - INFO - [0002] CMD Feedback - ID: 0x4346, Timestamp: 3475046400, Control: 0x24 (未知命令 (0x24)), Value: 0x00 (0), Status: Success
+2026-07-24 08:53:13,171 - root - WARNING - [FAULT DETECTED] Client: client_0_192.168.0.7:20108 | Code: E202 | 高压偏离设定: 检测到高压与设定值偏差过大（仅在用户主动设置高压且稳谱关闭时检测）
+2026-07-24 08:53:17,016 - root - INFO - [FAULT CLEARED] Client: client_0_192.168.0.7:20108 | Code: E202 | 高压偏离设定 has been resolved
+2026-07-24 08:53:17,269 - root - WARNING - [FAULT DETECTED] Client: client_1_192.168.0.8:20108 | Code: E202 | 高压偏离设定: 检测到高压与设定值偏差过大（仅在用户主动设置高压且稳谱关闭时检测）
+2026-07-24 08:53:53,170 - root - INFO - [FAULT CLEARED] Client: client_1_192.168.0.8:20108 | Code: E202 | 高压偏离设定 has been resolved
+2026-07-24 08:53:54,205 - root - INFO - Set HV command sent to client client_1_192.168.0.8:20108: 1090.0V
+2026-07-24 08:53:54,209 - root - WARNING - [FAULT DETECTED] Client: client_0_192.168.0.7:20108 | Code: E202 | 高压偏离设定: 检测到高压与设定值偏差过大（仅在用户主动设置高压且稳谱关闭时检测）
+2026-07-24 08:53:55,052 - root - INFO - [0003] CMD Feedback - ID: 0x4346, Timestamp: 1932656640, Control: 0x25 (未知命令 (0x25)), Value: 0x00 (0), Status: Success
+2026-07-24 08:54:54,147 - root - INFO - Stop.
+2026-07-24 08:54:54,150 - root - INFO - Acquisition stopped for data clearing (TCP connection remains)
+2026-07-24 08:54:54,676 - root - INFO - Connection detected (is_connected=True, is_acquiring=False), starting acquisition automatically
+2026-07-24 08:54:54,711 - root - INFO - Acquisition started successfully
+2026-07-24 08:54:54,712 - root - INFO - [FAULT CLEARED] Client: client_0_192.168.0.7:20108 | Code: E202 | 高压偏离设定 has been resolved
+2026-07-24 08:54:54,810 - root - INFO - Acquisition started
+2026-07-24 08:54:54,820 - root - INFO - Set client_0_192.168.0.7:20108 as primary client for chart display
+2026-07-24 08:54:55,175 - root - WARNING - [FAULT DETECTED] Client: client_0_192.168.0.7:20108 | Code: E202 | 高压偏离设定: 检测到高压与设定值偏差过大（仅在用户主动设置高压且稳谱关闭时检测）
+2026-07-24 08:54:55,760 - root - INFO - All data cleared
+2026-07-24 08:54:56,087 - root - INFO - Set client_1_192.168.0.8:20108 as primary client for chart display
+2026-07-24 08:55:18,858 - root - INFO - Set HV command sent to client client_1_192.168.0.8:20108: 1090.0V
+2026-07-24 08:55:19,262 - root - INFO - [0004] CMD Feedback - ID: 0x4346, Timestamp: 86424284, Control: 0x07 (高压设置), Value: 0x442 (1090), Status: Success
+2026-07-24 08:55:19,262 - root - WARNING - 警告：参数设置命令 0x07 (高压设置) 已发送成功，但Flash写入需要时间。
+2026-07-24 08:55:19,262 - root - WARNING - 建议：等待至少100ms后再断电，确保参数已保存到EEPROM。
+2026-07-24 08:55:19,262 - root - WARNING - 注意：MODBUS参数保存正常，但串口命令反馈可能发送太快，Flash还未写入完成。
+2026-07-24 08:55:31,449 - root - INFO - Switched spectrum display to client client_0_192.168.0.7:20108
+2026-07-24 08:55:31,449 - root - INFO - Switched primary client from client_1_192.168.0.8:20108 to client_0_192.168.0.7:20108
+2026-07-24 08:55:31,746 - root - INFO - Manually selected client: client_0_192.168.0.7:20108
+2026-07-24 08:55:37,736 - root - WARNING - [FAULT DETECTED] Client: client_1_192.168.0.8:20108 | Code: E202 | 高压偏离设定: 检测到高压与设定值偏差过大（仅在用户主动设置高压且稳谱关闭时检测）
+2026-07-24 08:55:38,425 - root - INFO - [FAULT CLEARED] Client: client_0_192.168.0.7:20108 | Code: E202 | 高压偏离设定 has been resolved
+2026-07-24 08:55:56,615 - root - INFO - Switched spectrum display to client client_1_192.168.0.8:20108
+2026-07-24 08:55:56,615 - root - INFO - Switched primary client from client_0_192.168.0.7:20108 to client_1_192.168.0.8:20108
+2026-07-24 08:55:56,903 - root - INFO - Manually selected client: client_1_192.168.0.8:20108
+2026-07-24 08:56:30,135 - root - WARNING - [FAULT DETECTED] Client: client_0_192.168.0.7:20108 | Code: E202 | 高压偏离设定: 检测到高压与设定值偏差过大（仅在用户主动设置高压且稳谱关闭时检测）
+2026-07-24 08:56:30,136 - root - INFO - [FAULT CLEARED] Client: client_1_192.168.0.8:20108 | Code: E202 | 高压偏离设定 has been resolved
+2026-07-24 08:56:31,220 - root - INFO - Set HV command sent to client client_1_192.168.0.8:20108: 1090.0V
+2026-07-24 08:56:32,059 - root - INFO - [0005] CMD Feedback - ID: 0x4346, Timestamp: 3624140800, Control: 0x27 (未知命令 (0x27)), Value: 0x00 (0), Status: Success
+2026-07-24 08:59:11,235 - root - INFO - Switched spectrum display to client client_0_192.168.0.7:20108
+2026-07-24 08:59:11,235 - root - INFO - Switched primary client from client_1_192.168.0.8:20108 to client_0_192.168.0.7:20108
+2026-07-24 08:59:11,512 - root - INFO - Manually selected client: client_0_192.168.0.7:20108
+2026-07-24 08:59:15,868 - root - WARNING - [FAULT DETECTED] Client: client_1_192.168.0.8:20108 | Code: E202 | 高压偏离设定: 检测到高压与设定值偏差过大（仅在用户主动设置高压且稳谱关闭时检测）
+2026-07-24 08:59:16,235 - root - INFO - [FAULT CLEARED] Client: client_0_192.168.0.7:20108 | Code: E202 | 高压偏离设定 has been resolved
+2026-07-24 08:59:27,772 - root - INFO - Switched spectrum display to client client_1_192.168.0.8:20108
+2026-07-24 08:59:27,773 - root - INFO - Switched primary client from client_0_192.168.0.7:20108 to client_1_192.168.0.8:20108
+2026-07-24 08:59:28,046 - root - INFO - Manually selected client: client_1_192.168.0.8:20108
+2026-07-24 08:59:38,232 - root - WARNING - [FAULT DETECTED] Client: client_0_192.168.0.7:20108 | Code: E202 | 高压偏离设定: 检测到高压与设定值偏差过大（仅在用户主动设置高压且稳谱关闭时检测）
+2026-07-24 08:59:38,233 - root - INFO - [FAULT CLEARED] Client: client_1_192.168.0.8:20108 | Code: E202 | 高压偏离设定 has been resolved
+2026-07-24 09:01:36,670 - root - INFO - Auto-save triggered! Time since last save: 599.8s
+2026-07-24 09:01:36,670 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260724_090136.xlsx
+2026-07-24 09:01:36,806 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260724_090136.xlsx (auto-save #176)
+2026-07-24 09:01:36,806 - root - INFO - Auto-save completed successfully! Counter: 177
+2026-07-24 09:02:12,264 - root - WARNING - Admin mode will auto logout in 30 seconds
+2026-07-24 09:02:32,337 - root - WARNING - Admin mode will auto logout in 10 seconds
+2026-07-24 09:02:42,339 - root - INFO - Admin mode inactive timeout, temporarily switched to normal view mode
+2026-07-24 09:06:36,817 - root - INFO - Auto-save triggered! Time since last save: 300.1s
+2026-07-24 09:06:36,818 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260724_090636.xlsx
+2026-07-24 09:06:36,969 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260724_090636.xlsx (auto-save #177)
+2026-07-24 09:06:36,969 - root - INFO - Auto-save completed successfully! Counter: 178
+2026-07-24 09:16:36,833 - root - INFO - Auto-save triggered! Time since last save: 600.0s
+2026-07-24 09:16:36,834 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260724_091636.xlsx
+2026-07-24 09:16:37,063 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260724_091636.xlsx (auto-save #178)
+2026-07-24 09:16:37,064 - root - INFO - Auto-save completed successfully! Counter: 179
+2026-07-24 09:26:36,670 - root - INFO - Auto-save triggered! Time since last save: 599.8s
+2026-07-24 09:26:36,670 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260724_092636.xlsx
+2026-07-24 09:26:36,898 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260724_092636.xlsx (auto-save #179)
+2026-07-24 09:26:36,899 - root - INFO - Auto-save completed successfully! Counter: 180
+2026-07-24 09:31:36,691 - root - INFO - Auto-save triggered! Time since last save: 300.0s
+2026-07-24 09:31:36,691 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260724_093136.xlsx
+2026-07-24 09:31:36,860 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260724_093136.xlsx (auto-save #180)
+2026-07-24 09:31:36,861 - root - INFO - Auto-save completed successfully! Counter: 181
+2026-07-24 09:36:36,885 - root - INFO - Auto-save triggered! Time since last save: 300.2s
+2026-07-24 09:36:36,886 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260724_093636.xlsx
+2026-07-24 09:36:37,142 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260724_093636.xlsx (auto-save #181)
+2026-07-24 09:36:37,142 - root - INFO - Auto-save completed successfully! Counter: 182
+2026-07-24 09:46:36,842 - root - INFO - Auto-save triggered! Time since last save: 600.0s
+2026-07-24 09:46:36,842 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260724_094636.xlsx
+2026-07-24 09:46:37,127 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260724_094636.xlsx (auto-save #182)
+2026-07-24 09:46:37,127 - root - INFO - Auto-save completed successfully! Counter: 183
+2026-07-24 09:56:36,670 - root - INFO - Auto-save triggered! Time since last save: 599.8s
+2026-07-24 09:56:36,670 - root - INFO - Auto-save filename: /home/raysen/Raysen/AutoSave/data_auto_20260724_095636.xlsx
+2026-07-24 09:56:36,840 - root - INFO - Data auto-saved to /home/raysen/Raysen/AutoSave/data_auto_20260724_095636.xlsx (auto-save #183)
+2026-07-24 09:56:36,840 - root - INFO - Auto-save completed successfully! Counter: 184

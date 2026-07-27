@@ -117,9 +117,19 @@ copy_dir() {
 }
 
 # 导出日志、数据和用户 Raysen 目录
+# 有效采集 Excel 通常在: $HOME/Raysen/AutoSave/data_auto_*.xlsx
+# 报警日志通常在: $HOME/Raysen/AlarmLogs/
 copy_dir "$PROGRAM_DIR/logs" "$EXPORT_DIR/"
 copy_dir "$PROGRAM_DIR/data" "$EXPORT_DIR/"
 copy_dir "$HOME/Raysen" "$EXPORT_DIR/"
+
+# 若 AutoSave 为空，写说明，避免误以为“导出坏了”
+AUTO_SAVE_DIR="$HOME/Raysen/AutoSave"
+if [ ! -d "$AUTO_SAVE_DIR" ] || [ -z "$(ls -A "$AUTO_SAVE_DIR" 2>/dev/null)" ]; then
+    echo "说明: 未找到有效自动保存 Excel。" > "$EXPORT_DIR/README_EMPTY_AUTOSAVE.txt"
+    echo "请先在软件中开始采集并等待自动保存(默认5分钟)，或手动点击保存。" >> "$EXPORT_DIR/README_EMPTY_AUTOSAVE.txt"
+    echo "路径通常为: $HOME/Raysen/AutoSave/" >> "$EXPORT_DIR/README_EMPTY_AUTOSAVE.txt"
+fi
 
 # 创建导出完成标记文件
 echo "数据导出完成于 $(date)" > "$EXPORT_DIR/export_complete.txt"

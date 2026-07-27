@@ -1419,6 +1419,13 @@ class UIBase():
     
     def stop_acquisition(self):
         if self.is_acquiring:
+            # 停止前先落盘一次，避免随后清内存导致只能导出空文件
+            try:
+                if self.auto_save_enabled:
+                    self._auto_save_all_clients(force=True)
+            except Exception as e:
+                self.log(f"Final auto-save before stop failed: {e}", 'WARNING')
+
             self.worker.stop_reading()
             self.read_timer.stop()
             self.is_acquiring = False
@@ -1590,72 +1597,159 @@ class UIBase():
                     'Last_Update': [time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(client_info.get('last_update', time.time())))]
                 })
                 
-                with pd.ExcelWriter(filename) as writer:
-                    df_spectrum.to_excel(writer, sheet_name='Spectrum', index=False)
-                    df_time_series.to_excel(writer, sheet_name='TimeSeries', index=False)
-                    df_client_info.to_excel(writer, sheet_name='DeviceInfo', index=False)
-                
+                from core.excel_io import write_excel_atomic
+
+                def _write(tmp: str):
+                    with pd.ExcelWriter(tmp, engine="openpyxl") as writer:
+                        df_spectrum.to_excel(writer, sheet_name='Spectrum', index=False)
+                        df_time_series.to_excel(writer, sheet_name='TimeSeries', index=False)
+                        df_client_info.to_excel(writer, sheet_name='DeviceInfo', index=False)
+
+                size = write_excel_atomic(filename, _write, min_bytes=200)
+
                 if auto_save:
-                    self.log(f"Data auto-saved to {filename} (auto-save #{self.auto_save_counter})", 'INFO')
+                    self.log(
+                        f"Data auto-saved to {filename} (auto-save #{self.auto_save_counter}, bytes={size})",
+                        'INFO'
+                    )
                     self.auto_save_counter += 1
                 else:
                     if is_tcp_mode:
-                        self.log(f"Data saved to {filename} for client {client_id_to_save}", 'INFO')
+                        self.log(f"Data saved to {filename} for client {client_id_to_save} (bytes={size})", 'INFO')
                         self.log_output.append(f"<span style='color: green;'>Data saved to {filename} for client {client_id_to_save}</span>")
                     else:
-                        self.log(f"Data saved to {filename}", 'INFO')
+                        self.log(f"Data saved to {filename} (bytes={size})", 'INFO')
                         self.log_output.append(f"<span style='color: green;'>Data saved to {filename}</span>")
             except Exception as e:
                 self.log(f"Save error: {str(e)}", 'ERROR')
                 if not auto_save:
                     self.log_output.append(f"<span style='color: red;'>Save error: {str(e)}</span>")
     
+    def _clients_with_saveable_data(self):
+        """Return client_ids that have non-empty time series or non-zero spectrum."""
+        ids = set(self.client_time_series.keys()) | set(self.client_spectrum_data.keys())
+        result = []
+        for cid in ids:
+            ts = self.client_time_series.get(cid) or []
+            spec = self.client_spectrum_data.get(cid)
+            has_ts = len(ts) > 0
+            has_spec = spec is not None and np.sum(spec) > 0
+            if has_ts or has_spec:
+                result.append(cid)
+        return result
+
+    def _write_client_excel(self, filename, client_id_to_save, is_tcp_mode):
+        """Write one client's spectrum/time-series/device info to an xlsx file."""
+        spectrum_data_to_save = self.client_spectrum_data.get(
+            client_id_to_save, np.zeros(self.config.adc_channels)
+        )
+        time_series_data = list(self.client_time_series.get(client_id_to_save, []))
+        client_info = self.client_data.get(client_id_to_save, {})
+
+        df_spectrum = pd.DataFrame({'Spectrum': spectrum_data_to_save})
+        if time_series_data:
+            timestamps, counters, temperatures, hvs, spec_counts = zip(*time_series_data)
+            df_time_series = pd.DataFrame({
+                'Timestamp': timestamps,
+                'Counter': counters,
+                'Temperature': temperatures,
+                'HV': hvs,
+                'Spectrum_Counts': spec_counts
+            })
+        else:
+            df_time_series = pd.DataFrame(
+                columns=['Timestamp', 'Counter', 'Temperature', 'HV', 'Spectrum_Counts']
+            )
+
+        df_client_info = pd.DataFrame({
+            'Mode': ['TCP' if is_tcp_mode else 'Serial'],
+            'Client_ID': [client_id_to_save],
+            'Product_ID': [client_info.get('product_id', '--')],
+            'Sensitivity': [client_info.get('sensitivity', '--')],
+            'Save_Time': [time.strftime("%Y-%m-%d %H:%M:%S")],
+            'TimeSeries_Points': [len(time_series_data)],
+            'Spectrum_Sum': [float(np.sum(spectrum_data_to_save))],
+        })
+
+        from core.excel_io import write_excel_atomic
+
+        def _write(tmp: str):
+            with pd.ExcelWriter(tmp, engine="openpyxl") as writer:
+                df_spectrum.to_excel(writer, sheet_name='Spectrum', index=False)
+                df_time_series.to_excel(writer, sheet_name='TimeSeries', index=False)
+                df_client_info.to_excel(writer, sheet_name='DeviceInfo', index=False)
+
+        size = write_excel_atomic(filename, _write, min_bytes=200)
+        return len(time_series_data), float(np.sum(spectrum_data_to_save)), size
+
+    def _auto_save_all_clients(self, force=False):
+        """Save every client that has real data. Skip empty snapshots."""
+        clients = self._clients_with_saveable_data()
+        if not clients:
+            self.log("Auto-save skipped: no spectrum/time-series data in memory", 'INFO')
+            return 0
+
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        if self.auto_save_path:
+            save_dir = self.auto_save_path
+        else:
+            home_dir = os.path.expanduser("~")
+            save_dir = os.path.join(home_dir, "Raysen", "AutoSave")
+        os.makedirs(save_dir, exist_ok=True)
+
+        is_tcp_mode = bool(self.config.tcp_enabled)
+        saved = 0
+        for client_id in clients:
+            client_identifier = client_id
+            if "_" in client_id:
+                parts = client_id.split("_")
+                if len(parts) >= 3:
+                    client_identifier = f"client_{parts[-1].replace(':', '_')}"
+            filename = os.path.join(
+                save_dir, f"data_auto_{client_identifier}_{timestamp}.xlsx"
+            )
+            try:
+                n_ts, spec_sum, size = self._write_client_excel(filename, client_id, is_tcp_mode)
+                self.log(
+                    f"Auto-saved {filename} (points={n_ts}, spectrum_sum={spec_sum:.1f}, bytes={size})",
+                    'INFO'
+                )
+                saved += 1
+                self.auto_save_counter += 1
+            except Exception as e:
+                self.log(f"Auto-save failed for {client_id}: {e}", 'ERROR')
+        if saved:
+            self.update_auto_save_counter_label()
+            self.last_auto_save_time = time.time()
+        return saved
+
     def auto_save_data(self):
         """自动保存数据"""
         if not self.auto_save_enabled:
             self.log("Auto-save is disabled, skipping", 'DEBUG')
             return
-        
+
+        # 未在采集时不写空文件（停止采集前会单独 force 保存）
+        if not getattr(self, 'is_acquiring', False):
+            self.log("Auto-save skipped: acquisition not running", 'DEBUG')
+            return
+
         current_time = time.time()
         time_since_last_save = current_time - self.last_auto_save_time
-        
-        self.log(f"Auto-save check: current_time={current_time}, last_auto_save_time={self.last_auto_save_time}, "
-                f"interval={self.auto_save_interval}, time_since_last_save={time_since_last_save:.1f}s", 'DEBUG')
-        
-        if time_since_last_save >= self.auto_save_interval:
-            try:
-                self.log(f"Auto-save triggered! Time since last save: {time_since_last_save:.1f}s", 'INFO')
-                
-                # 生成自动保存文件名
-                timestamp = time.strftime("%Y%m%d_%H%M%S")
-                if self.auto_save_path:
-                    save_dir = self.auto_save_path
-                    self.log(f"Using custom save path: {save_dir}", 'DEBUG')
-                else:
-                    # 默认保存到用户目录下的Raysen/AutoSave目录
-                    home_dir = os.path.expanduser("~")
-                    save_dir = os.path.join(home_dir, "Raysen", "AutoSave")
-                    self.log(f"Using default save path: {save_dir}", 'DEBUG')
-                    os.makedirs(save_dir, exist_ok=True)
-                
-                auto_save_filename = os.path.join(save_dir, f"data_auto_{timestamp}.xlsx")
-                self.log(f"Auto-save filename: {auto_save_filename}", 'INFO')
-                
-                # 调用保存方法（自动保存模式）
-                self.save_data(auto_save=True, auto_save_path=auto_save_filename)
-                self.last_auto_save_time = current_time
-                
-                # 更新计数器标签
-                self.update_auto_save_counter_label()
-                
-                self.log(f"Auto-save completed successfully! Counter: {self.auto_save_counter}", 'INFO')
-                
-            except Exception as e:
-                self.log(f"Auto-save failed: {e}", 'ERROR')
-                import traceback
-                self.log(f"Auto-save traceback: {traceback.format_exc()}", 'ERROR')
-        else:
-            self.log(f"Auto-save not triggered yet. Need {self.auto_save_interval - time_since_last_save:.1f} more seconds", 'DEBUG')
+        if time_since_last_save < self.auto_save_interval:
+            self.log(
+                f"Auto-save not triggered yet. Need {self.auto_save_interval - time_since_last_save:.1f} more seconds",
+                'DEBUG'
+            )
+            return
+
+        try:
+            self.log(f"Auto-save triggered after {time_since_last_save:.1f}s", 'INFO')
+            self._auto_save_all_clients(force=False)
+        except Exception as e:
+            self.log(f"Auto-save error: {str(e)}", 'ERROR')
+            import traceback
+            self.log(f"Auto-save traceback: {traceback.format_exc()}", 'ERROR')
     
     def toggle_virtual_keyboard(self, state):
         """切换虚拟键盘自动触发开关"""
@@ -2015,12 +2109,11 @@ class UIBase():
         # 并清理记录器内部状态，避免“报警结束”边沿丢失导致下次报警被漏记。
         self.finalize_client_alarm_on_disconnect(client_id)
 
-        self.client_time_series.pop(client_id, None)
-        self.client_spectrum_data.pop(client_id, None)
+        # 保留 time_series / spectrum，供自动保存与 U 盘导出；仅清实时状态
         self.client_latest_packets.pop(client_id, None)
         self.client_data.pop(client_id, None)
 
-        if not self.client_time_series and not self.client_spectrum_data:
+        if not self.client_data:
             self.spectrum_data = np.zeros(self.config.adc_channels)
             self.curve_cps.setData([], [])
             if len(self.channels) != len(self.spectrum_data) + 1:
