@@ -64,69 +64,80 @@ class FocusEventFilter(QObject):
             except Exception:
                 pass
 
+    def _resolve_keyboard_target(self, obj):
+        """若聚焦在 SpinBox 内部 lineEdit，绑定到父 SpinBox。"""
+        target_obj = obj
+        if isinstance(obj, QLineEdit):
+            parent = obj.parent()
+            while parent is not None:
+                if isinstance(parent, (QSpinBox, QDoubleSpinBox)):
+                    return parent
+                parent = parent.parent()
+        return target_obj
+
+    def _show_internal_software_keyboard(self, obj):
+        """弹出内置工业软键盘；关后短时抑制，避免回焦再弹。"""
+        current_time = time.time()
+        if current_time - self.last_trigger_time < 0.5:
+            return False
+        try:
+            from core.software_keyboard import get_keyboard_manager
+            km = get_keyboard_manager()
+            # 用户主动关闭后 1.2s 内不因焦点回弹再次弹出
+            if current_time - getattr(km, "last_closed_time", 0) < 1.2:
+                return False
+            target_obj = self._resolve_keyboard_target(obj)
+            if km.is_visible() and getattr(km, "current_input", None) is target_obj:
+                return False
+            self.last_trigger_time = current_time
+            self.current_focused_obj = target_obj
+            log_inst.debug("Showing internal software keyboard")
+            km.show_keyboard_for_input(target_obj, obj.window())
+            return True
+        except Exception as e:
+            log_inst.error(f"Failed to show internal software keyboard: {e}")
+            return False
+
     def eventFilter(self, obj, event):
-        # 调试：记录所有事件类型
         if self.debug_keyboard and event.type() == QEvent.FocusIn:
             log_inst.info(f"DEBUG: FocusIn event detected on {type(obj).__name__}")
         
-        # 检查是否使用软件键盘方案 - 最优先检查
         use_software_keyboard = os.environ.get('USE_SOFTWARE_KEYBOARD')
         if self.debug_keyboard:
             log_inst.info(f"DEBUG eventFilter: USE_SOFTWARE_KEYBOARD={use_software_keyboard}, repr={repr(use_software_keyboard)}")
         use_software_keyboard_str = str(use_software_keyboard).strip() if use_software_keyboard else ''
-        if use_software_keyboard_str == '1':
-            # 软件键盘模式，使用内置键盘，不触发外部OSK
-            if event.type() == event.FocusIn and isinstance(obj, (QLineEdit, QSpinBox, QDoubleSpinBox, QTextEdit)):
-                current_time = time.time()
-                if current_time - self.last_trigger_time >= 0.5:
-                    self.last_trigger_time = current_time
-                    try:
-                        from core.software_keyboard import get_keyboard_manager
-                        km = get_keyboard_manager()
-                        if current_time - getattr(km, "last_closed_time", 0) < 0.5:
-                            return super().eventFilter(obj, event)
-                        # 若聚焦在QLineEdit，但其父是SpinBox，则优先绑定到SpinBox
-                        target_obj = obj
-                        if isinstance(obj, QLineEdit):
-                            parent = obj.parent()
-                            while parent is not None:
-                                if isinstance(parent, (QSpinBox, QDoubleSpinBox)):
-                                    target_obj = parent
-                                    break
-                                parent = parent.parent()
-                        if km.is_visible() and getattr(km, "current_input", None) is target_obj:
-                            return super().eventFilter(obj, event)
-                        log_inst.debug("Software keyboard mode - showing internal keyboard")
-                        km.show_keyboard_for_input(target_obj, obj.window())
-                    except Exception as e:
-                        log_inst.error(f"Failed to show internal software keyboard: {e}")
+        # 环境变量或设置页开关：统一走内置软键盘（工业做法，避免系统 OSK 关两次）
+        prefer_internal = use_software_keyboard_str == '1' or self.keyboard_enabled
+        # 仅当显式要求系统键盘时才回退（调试/兼容）
+        use_system_keyboard = str(os.environ.get('USE_SYSTEM_KEYBOARD', '')).strip() == '1'
+
+        if prefer_internal and not use_system_keyboard:
+            if event.type() == QEvent.FocusIn and isinstance(obj, (QLineEdit, QSpinBox, QDoubleSpinBox, QTextEdit)):
+                if use_software_keyboard_str == '1' or self.keyboard_enabled:
+                    self._show_internal_software_keyboard(obj)
             return super().eventFilter(obj, event)
         
         if not self.keyboard_enabled:
             return super().eventFilter(obj, event)
         if event.type() == QEvent.FocusIn:
             if isinstance(obj, (QLineEdit, QSpinBox, QDoubleSpinBox, QTextEdit)):
-                
-                # 保存当前获得焦点的对象
                 self.current_focused_obj = obj
-                # 添加防抖动逻辑，防止短时间内重复触发导致卡死
                 current_time = time.time()
                 if current_time - self.last_trigger_time < 1.0:
+                    return super().eventFilter(obj, event)
+                # 系统键盘路径也做关后抑制（若能感知关闭则更好；此处至少防抖）
+                if current_time - getattr(self, "last_system_kb_close_hint", 0) < 1.2:
                     return super().eventFilter(obj, event)
                 self.last_trigger_time = current_time
 
                 try:
                     log_inst.info("Input focus detected, attempting to show virtual keyboard...")
-                    
                     if self.platform == "win32":
-                        # Windows 平台：使用 Windows 屏幕键盘
                         self.show_windows_keyboard()
                     elif self.platform == "linux" or self.platform == "linux2":
-                        # Linux 平台：使用 GNOME OSK
                         self.show_linux_keyboard()
                     else:
                         log_inst.warning(f"Unsupported platform: {self.platform}")
-                        
                 except Exception as e:
                     log_inst.error(f"Error triggering keyboard: {e}")
         return super().eventFilter(obj, event)

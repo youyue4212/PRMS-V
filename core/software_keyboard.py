@@ -32,77 +32,74 @@ class SoftwareKeyboard(QDialog):
         self.initUI()
         
     def initUI(self):
-        """初始化UI"""
-        self.setWindowTitle("软件数字键盘")
-        self.setFixedSize(400, 300)
+        """初始化UI：工业风数字盘为主，字母为辅。"""
+        self.setWindowTitle("输入键盘")
+        self.setFixedSize(360, 420)
         self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
         
-        # 主布局
         main_layout = QVBoxLayout()
-        main_layout.setContentsMargins(6, 6, 6, 6)
-        main_layout.setSpacing(6)
+        main_layout.setContentsMargins(10, 10, 10, 10)
+        main_layout.setSpacing(8)
         
-        # 标题栏
         title_layout = QHBoxLayout()
-        self.title_label = QLabel("软件数字键盘")
-        self.title_label.setFont(QFont("Arial", 12, QFont.Bold))
-        self.title_label.setAlignment(Qt.AlignCenter)
-        title_layout.addWidget(self.title_label)
+        self.title_label = QLabel("输入键盘")
+        self.title_label.setFont(QFont("Arial", 13, QFont.Bold))
+        self.title_label.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)
+        title_layout.addWidget(self.title_label, 1)
         
-        # 切换按钮（数字/字母）
         self.toggle_btn = QPushButton("ABC")
-        self.toggle_btn.setFixedSize(50, 30)
+        self.toggle_btn.setFixedSize(56, 32)
+        self.toggle_btn.setToolTip("切换数字/字母")
         self.toggle_btn.clicked.connect(self.toggle_mode)
         title_layout.addWidget(self.toggle_btn)
 
-        # 大小写切换
-        self.case_btn = QPushButton("A⇄a")
-        self.case_btn.setFixedSize(50, 30)
+        self.case_btn = QPushButton("⇧")
+        self.case_btn.setFixedSize(40, 32)
+        self.case_btn.setToolTip("大小写")
         self.case_btn.clicked.connect(self.toggle_case)
+        self.case_btn.setVisible(False)
         title_layout.addWidget(self.case_btn)
 
-        # 关闭按钮
         self.close_btn = QPushButton("×")
-        self.close_btn.setFixedSize(30, 30)
+        self.close_btn.setFixedSize(36, 32)
+        self.close_btn.setToolTip("关闭")
         self.close_btn.clicked.connect(self.close_keyboard)
         title_layout.addWidget(self.close_btn)
         
         main_layout.addLayout(title_layout)
         
-        # 显示区域（模拟输入框）
         self.display_label = QLabel("")
         self.display_label.setStyleSheet("""
             QLabel {
-                background-color: #f0f0f0;
-                border: 2px solid #cccccc;
-                border-radius: 5px;
-                padding: 6px 10px;
-                font-size: 16px;
-                color: #333333;
-                min-height: 28px;
-                max-height: 36px;
+                background-color: #1e1e1e;
+                border: 1px solid #555555;
+                border-radius: 6px;
+                padding: 8px 12px;
+                font-size: 20px;
+                font-weight: bold;
+                color: #f5f5f5;
+                min-height: 32px;
+                max-height: 40px;
             }
         """)
-        self.display_label.setAlignment(Qt.AlignCenter)
+        self.display_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         main_layout.addWidget(self.display_label)
         
-        # 键盘布局容器
         self.keyboard_layout = QGridLayout()
-        self.keyboard_layout.setSpacing(4)
+        self.keyboard_layout.setSpacing(8)
+        self.keyboard_layout.setContentsMargins(0, 4, 0, 0)
         self.keyboard_layout.setAlignment(Qt.AlignHCenter | Qt.AlignVCenter)
         self.keyboard_mode = "numeric"
         self.adjust_size_for_mode()
         self.build_keyboard_layout()
 
         main_layout.addLayout(self.keyboard_layout)
-        
         self.setLayout(main_layout)
         
-        # 设置样式
         self.setStyleSheet("""
             QDialog {
-                background-color: #2a2a2a;
-                border: 2px solid #444444;
+                background-color: #2d2d2d;
+                border: 2px solid #555555;
                 border-radius: 10px;
             }
             QLabel {
@@ -116,20 +113,20 @@ class SoftwareKeyboard(QDialog):
             }
         """)
         
-        # 初始化显示文本
         self.display_text = ""
         self.update_display()
 
     def adjust_size_for_mode(self):
-        """根据键盘模式调整对话框尺寸，保证字母键显示清晰"""
+        """根据键盘模式调整对话框尺寸。"""
         screen_geometry = QApplication.desktop().screenGeometry()
         if self.keyboard_mode == "alpha":
-            width = min(700, max(540, screen_geometry.width() - 20))
-            height = min(380, max(320, screen_geometry.height() - 20))
+            width = min(760, max(640, int(screen_geometry.width() * 0.55)))
+            height = min(360, max(300, int(screen_geometry.height() * 0.38)))
             self.setFixedSize(width, height)
         else:
-            width = min(500, max(420, screen_geometry.width() - 20))
-            height = min(330, max(300, screen_geometry.height() - 20))
+            # 竖向计算器盘：键大、误触少
+            width = min(400, max(340, int(screen_geometry.width() * 0.32)))
+            height = min(460, max(400, int(screen_geometry.height() * 0.48)))
             self.setFixedSize(width, height)
 
     def clear_keyboard_layout(self):
@@ -139,72 +136,100 @@ class SoftwareKeyboard(QDialog):
             if widget:
                 widget.deleteLater()
 
+    def _key_size(self, cols, rows_hint=4):
+        """按当前对话框尺寸估算键帽大小，保证铺满且留边距。"""
+        avail_w = max(200, self.width() - 28)
+        avail_h = max(160, self.height() - 120)
+        bw = max(48, int((avail_w - 8 * (cols - 1)) / cols))
+        bh = max(44, int((avail_h - 8 * (rows_hint - 1)) / rows_hint))
+        return (bw, bh)
+
     def build_keyboard_layout(self):
         self.clear_keyboard_layout()
+        if hasattr(self, "case_btn"):
+            self.case_btn.setVisible(self.keyboard_mode == "alpha")
 
         if self.keyboard_mode == "numeric":
-            for col in range(5):
+            # 工业计算器盘：789 在上，右侧功能键，底栏 . 0 -
+            cols = 4
+            for col in range(cols):
                 self.keyboard_layout.setColumnStretch(col, 1)
-            buttons = [
-                ("1", 0, 1), ("2", 0, 2), ("3", 0, 3),
-                ("4", 1, 1), ("5", 1, 2), ("6", 1, 3),
-                ("7", 2, 1), ("8", 2, 2), ("9", 2, 3),
-                ("0", 3, 2),
+            for row in range(4):
+                self.keyboard_layout.setRowStretch(row, 1)
+
+            bw, bh = self._key_size(cols, 4)
+            font_size = 20 if bw >= 64 else 18
+
+            num_keys = [
+                ("7", 0, 0), ("8", 0, 1), ("9", 0, 2),
+                ("4", 1, 0), ("5", 1, 1), ("6", 1, 2),
+                ("1", 2, 0), ("2", 2, 1), ("3", 2, 2),
+                (".", 3, 0), ("0", 3, 1), ("-", 3, 2),
             ]
-            for text, row, col in buttons:
-                btn = self.create_number_button(text, size=(72, 54), font_size=18)
-                self.keyboard_layout.addWidget(btn, row, col, alignment=Qt.AlignCenter)
+            for text, row, col in num_keys:
+                btn = self.create_number_button(text, size=(bw, bh), font_size=font_size)
+                self.keyboard_layout.addWidget(btn, row, col)
 
-            self.backspace_btn = self.create_special_button("BS", "backspace", size=(72, 54), font_size=16)
+            self.backspace_btn = self.create_special_button("⌫", "backspace", size=(bw, bh), font_size=18)
             self.backspace_btn.clicked.connect(self.on_backspace)
-            self.keyboard_layout.addWidget(self.backspace_btn, 0, 4, alignment=Qt.AlignCenter)
+            self.keyboard_layout.addWidget(self.backspace_btn, 0, 3)
 
-            self.clear_btn = self.create_special_button("C", "clear", size=(72, 54), font_size=16)
+            self.clear_btn = self.create_special_button("清除", "clear", size=(bw, bh), font_size=14)
             self.clear_btn.clicked.connect(self.on_clear)
-            self.keyboard_layout.addWidget(self.clear_btn, 1, 4, alignment=Qt.AlignCenter)
+            self.keyboard_layout.addWidget(self.clear_btn, 1, 3)
 
-            self.enter_btn = self.create_special_button("OK", "enter", size=(72, 54), font_size=16)
+            self.enter_btn = self.create_special_button("确定", "enter", size=(bw, bh * 2 + 8), font_size=16)
             self.enter_btn.clicked.connect(self.on_enter)
-            self.keyboard_layout.addWidget(self.enter_btn, 2, 4, 2, 1, alignment=Qt.AlignCenter)
-
-            # create_number_button 内部已连接 on_number_click，勿重复连接（否则一按出两个符号）
-            self.decimal_btn = self.create_number_button(".", size=(72, 54), font_size=18)
-            self.keyboard_layout.addWidget(self.decimal_btn, 3, 1, alignment=Qt.AlignCenter)
-
-            self.minus_btn = self.create_number_button("-", size=(72, 54), font_size=18)
-            self.keyboard_layout.addWidget(self.minus_btn, 3, 3, alignment=Qt.AlignCenter)
+            self.keyboard_layout.addWidget(self.enter_btn, 2, 3, 2, 1)
 
         else:
-            for col in range(10):
+            # QWERTY：三行字母 + 底栏功能键
+            cols = 10
+            for col in range(cols):
                 self.keyboard_layout.setColumnStretch(col, 1)
+            for row in range(4):
+                self.keyboard_layout.setRowStretch(row, 1)
+
+            bw, bh = self._key_size(cols, 4)
+            # 字母键略窄于估算，避免挤出屏幕
+            bw = min(bw, 62)
+            bh = min(bh, 52)
+            font_size = 16 if bw >= 50 else 14
+
             rows = [
                 list("QWERTYUIOP"),
                 list("ASDFGHJKL"),
-                list("ZXCVBNM")
+                list("ZXCVBNM"),
             ]
+            # 中间两行左右留空，更接近实体键盘视觉对齐
+            row_offsets = [0, 0, 1]
             for r, row_keys in enumerate(rows):
+                offset = row_offsets[r]
                 for c, key in enumerate(row_keys):
                     display_key = key if self.is_uppercase else key.lower()
-                    btn = self.create_number_button(display_key, size=(56, 52), font_size=18)
-                    self.keyboard_layout.addWidget(btn, r, c, alignment=Qt.AlignCenter)
+                    btn = self.create_number_button(display_key, size=(bw, bh), font_size=font_size)
+                    self.keyboard_layout.addWidget(btn, r, c + offset)
 
-            # Space, Backspace, Clear, Enter
-            # create_number_button 内部已连接 on_number_click(" ")，勿重复连接
-            self.space_btn = self.create_number_button(" ", size=(56, 52), font_size=16)
-            self.space_btn.setText("Space")
-            self.keyboard_layout.addWidget(self.space_btn, 3, 2, 1, 4, alignment=Qt.AlignCenter)
+            # 底栏：123 | 空格 | ⌫ | 清除 | 确定
+            mode_btn = self.create_special_button("123", "mode", size=(bw * 2 + 8, bh), font_size=14)
+            mode_btn.clicked.connect(self.toggle_mode)
+            self.keyboard_layout.addWidget(mode_btn, 3, 0, 1, 2)
 
-            self.backspace_btn = self.create_special_button("BS", "backspace", size=(56, 52), font_size=16)
+            self.space_btn = self.create_number_button(" ", size=(bw, bh), font_size=14)
+            self.space_btn.setText("空格")
+            self.keyboard_layout.addWidget(self.space_btn, 3, 2, 1, 4)
+
+            self.backspace_btn = self.create_special_button("⌫", "backspace", size=(bw, bh), font_size=14)
             self.backspace_btn.clicked.connect(self.on_backspace)
-            self.keyboard_layout.addWidget(self.backspace_btn, 3, 0, 1, 2, alignment=Qt.AlignCenter)
+            self.keyboard_layout.addWidget(self.backspace_btn, 3, 6)
 
-            self.clear_btn = self.create_special_button("C", "clear", size=(56, 52), font_size=16)
+            self.clear_btn = self.create_special_button("清除", "clear", size=(bw, bh), font_size=12)
             self.clear_btn.clicked.connect(self.on_clear)
-            self.keyboard_layout.addWidget(self.clear_btn, 3, 6, 1, 2, alignment=Qt.AlignCenter)
+            self.keyboard_layout.addWidget(self.clear_btn, 3, 7)
 
-            self.enter_btn = self.create_special_button("OK", "enter", size=(56, 52), font_size=16)
+            self.enter_btn = self.create_special_button("确定", "enter", size=(bw, bh), font_size=12)
             self.enter_btn.clicked.connect(self.on_enter)
-            self.keyboard_layout.addWidget(self.enter_btn, 3, 8, 1, 2, alignment=Qt.AlignCenter)
+            self.keyboard_layout.addWidget(self.enter_btn, 3, 8, 1, 2)
 
     def toggle_mode(self):
         if self.keyboard_mode == "numeric":
@@ -218,70 +243,85 @@ class SoftwareKeyboard(QDialog):
 
     def toggle_case(self):
         self.is_uppercase = not self.is_uppercase
+        if hasattr(self, "case_btn"):
+            self.case_btn.setStyleSheet(
+                "QPushButton { background-color: #4caf50; border-radius: 4px; }"
+                if self.is_uppercase else
+                "QPushButton { background-color: #555555; border-radius: 4px; }"
+            )
         if self.keyboard_mode == "alpha":
             self.build_keyboard_layout()
     
     def create_number_button(self, text, size=(70, 50), font_size=16):
-        """创建数字按钮"""
+        """创建数字/字母按钮"""
         btn = QPushButton(text)
         btn.setFixedSize(size[0], size[1])
         btn.setFont(QFont("Arial", font_size, QFont.Bold))
         btn.setStyleSheet("""
             QPushButton {
-                background-color: #4a4a4a;
+                background-color: #454545;
                 color: white;
-                border: 2px solid #666666;
-                border-radius: 5px;
+                border: 1px solid #666666;
+                border-radius: 8px;
             }
             QPushButton:hover {
-                background-color: #5a5a5a;
-                border-color: #777777;
+                background-color: #565656;
+                border-color: #888888;
             }
             QPushButton:pressed {
-                background-color: #3a3a3a;
+                background-color: #2f2f2f;
             }
         """)
-        btn.clicked.connect(lambda: self.on_number_click(text))
+        btn.clicked.connect(lambda checked=False, t=text: self.on_number_click(t))
         return btn
     
     def create_special_button(self, text, button_type, size=(70, 50), font_size=16):
         """创建特殊功能按钮"""
         btn = QPushButton(text)
         btn.setFixedSize(size[0], size[1])
+        btn.setMinimumSize(size[0], size[1])
         btn.setFont(QFont("Arial", font_size, QFont.Bold))
         
-        # 根据按钮类型设置不同颜色
         if button_type == "backspace":
-            color = "#ff9800"  # 橙色
+            color = "#e69138"
         elif button_type == "clear":
-            color = "#f44336"  # 红色
+            color = "#d9534f"
         elif button_type == "enter":
-            color = "#4caf50"  # 绿色
+            color = "#5cb85c"
+        elif button_type == "mode":
+            color = "#5bc0de"
         else:
-            color = "#2196f3"  # 蓝色
+            color = "#5bc0de"
         
         btn.setStyleSheet(f"""
             QPushButton {{
                 background-color: {color};
                 color: white;
-                border: 2px solid {color};
-                border-radius: 5px;
+                border: 1px solid {color};
+                border-radius: 8px;
             }}
             QPushButton:hover {{
-                background-color: {self.adjust_color(color, 20)};
-                border-color: {self.adjust_color(color, 30)};
+                background-color: {self.adjust_color(color, 18)};
             }}
             QPushButton:pressed {{
-                background-color: {self.adjust_color(color, -20)};
+                background-color: {self.adjust_color(color, -22)};
             }}
         """)
         
         return btn
     
     def adjust_color(self, color, amount):
-        """调整颜色亮度"""
-        # 简单实现：在实际应用中可能需要更复杂的颜色调整
-        return color
+        """调整 #RRGGBB 亮度。"""
+        try:
+            c = color.lstrip("#")
+            if len(c) != 6:
+                return color
+            r = max(0, min(255, int(c[0:2], 16) + amount))
+            g = max(0, min(255, int(c[2:4], 16) + amount))
+            b = max(0, min(255, int(c[4:6], 16) + amount))
+            return f"#{r:02x}{g:02x}{b:02x}"
+        except Exception:
+            return color
     
     def _notify_activity(self):
         """把键盘上的操作计入“用户活动”，重置管理员无操作超时。
@@ -377,7 +417,7 @@ class SoftwareKeyboard(QDialog):
     def update_display(self):
         """更新显示"""
         if not self.display_text:
-            self.display_label.setText("点击数字按钮输入...")
+            self.display_label.setText("")
         else:
             self.display_label.setText(self.display_text)
 
@@ -430,6 +470,7 @@ class SoftwareKeyboard(QDialog):
         try:
             self.keyboard_mode = "numeric"
             self.toggle_btn.setText("ABC")
+            self.title_label.setText("输入键盘")
             self.replace_on_first_input = isinstance(input_widget, (QSpinBox, QDoubleSpinBox))
             self.adjust_size_for_mode()
             self.build_keyboard_layout()
@@ -580,7 +621,19 @@ class SoftwareKeyboardManager:
             QApplication.sendEvent(self.current_input, event)
     
     def on_keyboard_closed(self):
-        """键盘关闭事件"""
+        """键盘关闭事件：记录时间，抑制因焦点回弹再次弹出。"""
+        try:
+            # 关闭后清掉输入框焦点，避免 Win/Linux 立刻再次 FocusIn
+            if self.current_input is not None:
+                try:
+                    self.current_input.clearFocus()
+                except Exception:
+                    pass
+            w = QApplication.activeWindow()
+            if w is not None:
+                w.setFocus(Qt.OtherFocusReason)
+        except Exception:
+            pass
         self.current_input = None
         self.keyboard_window = None
         try:
