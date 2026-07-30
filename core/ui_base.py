@@ -1098,6 +1098,20 @@ class UIBase():
         self.occupancy_sensor_checkbox.stateChanged.connect(self.on_occupancy_sensor_enabled_changed)
         ctrl_layout.addWidget(self.occupancy_sensor_checkbox, 1, 0, 1, 3)
 
+        # 期望探头数：在线不足则报缺；达到期望则清除旧离线故障（支持换 IP）
+        self.expected_probe_label = QLabel(_t("set_expected_probes"))
+        self.expected_probe_spin = QSpinBox()
+        self.expected_probe_spin.setRange(0, 16)
+        self.expected_probe_spin.setValue(int(getattr(self.config, "expected_probe_count", 2) or 0))
+        self.expected_probe_spin.setToolTip(_t("tip_expected_probes"))
+        self.expected_probe_spin.valueChanged.connect(self.on_expected_probe_count_changed)
+        self.adopt_probe_count_btn = QPushButton(_t("btn_adopt_probe_count"))
+        self.adopt_probe_count_btn.setToolTip(_t("tip_adopt_probe_count"))
+        self.adopt_probe_count_btn.clicked.connect(self.adopt_current_probe_count)
+        ctrl_layout.addWidget(self.expected_probe_label, 2, 0)
+        ctrl_layout.addWidget(self.expected_probe_spin, 2, 1)
+        ctrl_layout.addWidget(self.adopt_probe_count_btn, 2, 2)
+
         settings_layout.addWidget(self.ctrl_group)
 
         # --- Virtual Keyboard Group ---
@@ -2083,15 +2097,62 @@ class UIBase():
             self.primary_client_id = client_id
             self.apply_primary_client_snapshot()
         self.update_client_selection_combo()
+        # 新探头上线且数量已达标时，立刻清幽灵离线故障/编号
+        try:
+            expected = int(getattr(self.config, "expected_probe_count", 0) or 0)
+        except (TypeError, ValueError):
+            expected = 0
+        connected = []
+        if hasattr(self, "get_online_probe_client_ids"):
+            connected = self.get_online_probe_client_ids()
+        elif hasattr(self, "worker") and self.worker is not None:
+            connected = list((getattr(self.worker, "client_infos", None) or {}).keys())
+        if expected > 0 and len(connected) >= expected and getattr(self, "diagnostics_manager", None):
+            known = set(self.diagnostics_manager.active_faults.keys()) | set(
+                self.diagnostics_manager.last_packet_time.keys()
+            )
+            connected_set = set(connected)
+            for cid in list(known):
+                if cid != "system" and cid not in connected_set:
+                    self.diagnostics_manager.remove_client(cid)
+            if hasattr(self, "prune_disconnected_probe_labels"):
+                self.prune_disconnected_probe_labels(connected)
+            if hasattr(self, "update_system_status"):
+                self.update_system_status()
 
     def on_tcp_client_disconnected(self, client_id: str):
         self.log(f"TCP client disconnected: {client_id}", 'INFO')
-        # 断线前保留 product_id/IP 编号，并立即记 E102
-        self._remember_probe(client_id, self._resolve_product_id(client_id))
+        old_pid = self._resolve_product_id(client_id)
+        old_ip = self._extract_client_ip(client_id)
+
+        # 断线后还剩几台在线（本 client 已从 worker 移除）
+        remaining = []
+        if hasattr(self, "get_online_probe_client_ids"):
+            remaining = self.get_online_probe_client_ids()
+        elif self.config.tcp_enabled and hasattr(self, "worker") and self.worker is not None:
+            remaining = list((getattr(self.worker, "client_infos", None) or {}).keys())
+        try:
+            expected = int(getattr(self.config, "expected_probe_count", 0) or 0)
+        except (TypeError, ValueError):
+            expected = 0
+
         if (getattr(self, 'diagnostics_manager', None) is not None
                 and getattr(self, 'is_acquiring', False)):
             from core.diagnostics import FaultCode
-            self.diagnostics_manager.add_fault(client_id, FaultCode.E102)
+            # 在线数仍 ≥ 期望：属于减配到期望内或热替换过程，不粘住旧 E102
+            if expected > 0 and len(remaining) >= expected:
+                self.diagnostics_manager.remove_client(client_id)
+                if old_ip:
+                    self.forget_probe_ip(old_ip)
+                self.log(
+                    f"Probe disconnected but online {len(remaining)}>={expected}: "
+                    f"skip sticky E102 for {client_id}",
+                    'INFO'
+                )
+            else:
+                # 真正缺编：保留编号快照并记 E102
+                self._remember_probe(client_id, old_pid)
+                self.diagnostics_manager.add_fault(client_id, FaultCode.E102)
 
         self.remove_client_display_data(client_id)
 
@@ -2101,6 +2162,8 @@ class UIBase():
             self.apply_primary_client_snapshot()
 
         self.update_client_selection_combo()
+        if expected > 0 and len(remaining) >= expected and hasattr(self, "prune_disconnected_probe_labels"):
+            self.prune_disconnected_probe_labels(remaining)
         if hasattr(self, 'update_system_status'):
             self.update_system_status()
 
@@ -2447,6 +2510,102 @@ class UIBase():
             for client_id in list(self.diagnostics_manager.active_faults.keys()):
                 self.diagnostics_manager.remove_fault(client_id, 'E501')
                 self.diagnostics_manager.occupancy_start_time.pop(client_id, None)
+
+    def on_expected_probe_count_changed(self, value):
+        self.apply_expected_probe_count(int(value), source="spinbox")
+
+    def get_online_probe_client_ids(self, fresh_sec: float = 12.0):
+        """
+        当前有效在线探头（按 IP 去重）。
+        优先：TCP client_infos 中近期有活动的连接；避免幽灵会话把台数抬高。
+        """
+        import time as _time
+        now = _time.time()
+        candidates = []
+
+        if self.config.tcp_enabled and hasattr(self, "worker") and self.worker is not None:
+            infos = getattr(self.worker, "client_infos", None) or {}
+            last_pkt = {}
+            if getattr(self, "diagnostics_manager", None) is not None:
+                last_pkt = getattr(self.diagnostics_manager, "last_packet_time", None) or {}
+
+            for cid, info in infos.items():
+                last_active = float(getattr(info, "last_active", 0) or 0)
+                pkt_t = float(last_pkt.get(cid, 0) or 0)
+                newest = max(last_active, pkt_t)
+                if newest <= 0:
+                    # 刚连上、尚未刷新时间戳
+                    candidates.append(cid)
+                elif (now - newest) <= fresh_sec:
+                    candidates.append(cid)
+
+            # 兜底：有实时 client_data 且仍在 infos 里
+            for cid in list(getattr(self, "client_data", None) or {}):
+                if cid in infos and cid not in candidates:
+                    candidates.append(cid)
+
+            if not candidates and infos:
+                # 极端情况：时间戳全异常时仍按当前 socket 计（去重后）
+                candidates = list(infos.keys())
+        elif getattr(self, "worker", None) is not None and getattr(self.worker, "is_running", False):
+            return ["serial_client"]
+
+        by_ip = {}
+        for cid in candidates:
+            ip = self._extract_client_ip(cid) if hasattr(self, "_extract_client_ip") else ""
+            key = ip or cid
+            by_ip[key] = cid
+        return list(by_ip.values())
+
+    def apply_expected_probe_count(self, n: int, source: str = "manual"):
+        """写入期望探头数，并立即按新期望清理幽灵故障/编号。"""
+        try:
+            n = max(0, min(16, int(n)))
+        except (TypeError, ValueError):
+            n = 0
+        self.config.update_settings(expected_probe_count=n)
+        self.config.save_settings()
+        if hasattr(self, "expected_probe_spin"):
+            self.expected_probe_spin.blockSignals(True)
+            self.expected_probe_spin.setValue(n)
+            self.expected_probe_spin.blockSignals(False)
+
+        online = self.get_online_probe_client_ids()
+        if getattr(self, "diagnostics_manager", None) is not None:
+            dm = self.diagnostics_manager
+            # 峰值对齐为当前期望，避免旧 peak=3 继续误导
+            dm.peak_connected_count = n if n > 0 else len(online)
+            online_set = set(online)
+            known = set(dm.active_faults.keys()) | set(dm.last_packet_time.keys())
+            for cid in list(known):
+                if cid == "system":
+                    continue
+                if cid not in online_set:
+                    # 用户已确认/改定期望且在线数达标 → 清掉全部离线幽灵故障
+                    if n <= 0 or len(online) >= n:
+                        dm.remove_client(cid)
+            if n <= 0 or len(online) >= n:
+                dm.remove_fault("system", "E101")
+            # 若在线仍不足期望，周期检查会再报 E101/E102
+
+        if hasattr(self, "prune_disconnected_probe_labels"):
+            self.prune_disconnected_probe_labels(online)
+        if hasattr(self, "update_system_status"):
+            self.update_system_status()
+        self.log(
+            f"Expected probe count={n} via {source}; online_now={len(online)}",
+            'INFO'
+        )
+
+    def adopt_current_probe_count(self):
+        """调试/开通：把当前有效在线探头数写入期望值，并立刻清幽灵故障。"""
+        online = self.get_online_probe_client_ids()
+        n = len(online)
+        if n <= 0:
+            self.log("Adopt probe count failed: no online probes detected", 'WARNING')
+            return
+        self.apply_expected_probe_count(n, source="adopt")
+        self.log(f"Adopted online probes as expected: {n} -> {online}", 'INFO')
     
     def update_comm_settings_visibility(self):
         """Update visibility of communication settings based on current configuration"""
@@ -2911,19 +3070,34 @@ class UIBase():
                     pass
         return None
 
-    def _product_id_is_unique(self, pid: int) -> bool:
-        """True only when this product_id maps to at most one probe IP."""
+    def _product_id_is_unique(self, pid: int, online_ips=None) -> bool:
+        """True only when this product_id maps to at most one *online* probe IP."""
+        if online_ips is None:
+            online_ips = set()
+            for cid in (getattr(self, "client_data", None) or {}):
+                ip = self._extract_client_ip(cid)
+                if ip and ip != "serial":
+                    online_ips.add(ip)
+            if hasattr(self, "worker") and getattr(self, "config", None) and self.config.tcp_enabled:
+                for cid in (getattr(self.worker, "client_infos", None) or {}):
+                    ip = self._extract_client_ip(cid)
+                    if ip and ip != "serial":
+                        online_ips.add(ip)
         ips = set()
         for ip, info in (getattr(self, "_probe_registry", {}) or {}).items():
+            if online_ips and ip not in online_ips:
+                continue
             try:
                 if int(info.get("product_id")) == pid:
                     ips.add(ip)
             except (TypeError, ValueError):
                 continue
-        for cid, data in self.client_data.items():
+        for cid, data in (getattr(self, "client_data", None) or {}).items():
             try:
                 if int(data.get("product_id")) == pid:
-                    ips.add(self._extract_client_ip(cid))
+                    ip = self._extract_client_ip(cid)
+                    if ip and (not online_ips or ip in online_ips):
+                        ips.add(ip)
             except (TypeError, ValueError):
                 continue
         ips.discard("")
@@ -2932,8 +3106,9 @@ class UIBase():
     def get_probe_label(self, client_id: str) -> str:
         """
         Human label for a detector: '1号' / 'Probe 1' / ...
-        - Prefer product_id only when it uniquely identifies one probe.
-        - Otherwise (common: both factory-default to 1) use stable IP order.
+        - Prefer product_id only when it uniquely identifies one online probe.
+        - Otherwise use stable IP order among online probes.
+        - Do NOT re-register offline clients into the IP index (avoids ghost 3号).
         """
         if not client_id or client_id == "system":
             return ""
@@ -2941,18 +3116,60 @@ class UIBase():
         from core.translation import TranslationManager
         lang = TranslationManager().get_language()
 
-        ip = self._remember_probe(client_id)
+        ip = self._extract_client_ip(client_id)
+        live = (
+            client_id in (getattr(self, "client_data", None) or {})
+            or client_id in (getattr(self, "client_latest_packets", None) or {})
+        )
+        if live:
+            self._remember_probe(client_id, self._resolve_product_id(client_id))
+
         num = None
         pid = self._resolve_product_id(client_id)
         if pid is not None and 1 <= pid <= 99 and self._product_id_is_unique(pid):
             num = pid
-        elif ip and ip in self._probe_ip_index:
+        elif ip and ip in (getattr(self, "_probe_ip_index", None) or {}):
             num = self._probe_ip_index[ip]
+        elif not live and pid is not None and 1 <= pid <= 99:
+            # 离线故障文案：仍可用历史产品 ID，但不写入在线编号表
+            num = pid
 
         if num is not None:
             return f"{num}\u53f7" if lang != "en" else f"Probe {num}"
-        # 无编号时不回退成中文「探头」，避免英文界面变成 “探头 probe ...”
         return ""
+
+    def forget_probe_ip(self, ip: str):
+        """Remove one IP from probe numbering tables."""
+        if not ip:
+            return
+        registry = getattr(self, "_probe_registry", None)
+        if registry is not None:
+            registry.pop(ip, None)
+        index = getattr(self, "_probe_ip_index", None)
+        if index is not None and ip in index:
+            index.pop(ip, None)
+            ips = sorted(index.keys())
+            self._probe_ip_index = {k: i + 1 for i, k in enumerate(ips)}
+
+    def prune_disconnected_probe_labels(self, connected_client_ids):
+        """Drop offline IPs from probe numbering so replacements are not labeled as ghost N号."""
+        connected_ips = set()
+        for cid in connected_client_ids or []:
+            ip = self._extract_client_ip(cid)
+            if ip and ip != "serial":
+                connected_ips.add(ip)
+        if not connected_ips:
+            return
+
+        registry = getattr(self, "_probe_registry", None) or {}
+        for ip in list(registry.keys()):
+            if ip not in connected_ips:
+                registry.pop(ip, None)
+        self._probe_registry = registry
+
+        # 只保留在线 IP，并按 IP 重排 1..N（不再保留幽灵槽位）
+        ips = sorted(connected_ips)
+        self._probe_ip_index = {k: i + 1 for i, k in enumerate(ips)}
 
     def format_fault_operator_message(self, client_id: str, code: str) -> str:
         """Build operator-facing fault text with correct probe number (no IP, keep short)."""

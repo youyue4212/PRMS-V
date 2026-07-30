@@ -31,6 +31,13 @@ class ConfigManager:
         self.tcp_client_port = self.settings.value("TCP_CLIENT_PORT", 8234, int)
         # 通道占用传感器：未接线时 bit5 可能浮空误报，默认关闭直到现场启用
         self.occupancy_sensor_enabled = self.settings.value("OCCUPANCY_SENSOR_ENABLED", False, bool)
+        # 期望探头数量：在线数 < 期望则报缺；>= 期望则清除旧离线 E102（支持换 IP）
+        # 0 = 未配置，回退为本轮峰值在线数（调试兜底）
+        self.expected_probe_count = self.settings.value("EXPECTED_PROBE_COUNT", 2, int)
+        try:
+            self.expected_probe_count = max(0, min(16, int(self.expected_probe_count)))
+        except (TypeError, ValueError):
+            self.expected_probe_count = 2
 
     @staticmethod
     def _to_bool(value, default=False):
@@ -139,7 +146,8 @@ class ConfigManager:
     def update_settings(self, baudrate=None, device=None, adc_channels=None, hv=None, threshold=None, sensitivity=None,
                        tcp_enabled=None, tcp_mode=None, tcp_host=None, tcp_port=None,
                        tcp_client_host=None, tcp_client_port=None, language=None,
-                       occupancy_sensor_enabled=None, hv_user_set=None):
+                       occupancy_sensor_enabled=None, hv_user_set=None,
+                       expected_probe_count=None):
         if language is not None:
             self.language = language
             self.settings.setValue("LANGUAGE", language)
@@ -167,6 +175,12 @@ class ConfigManager:
         if occupancy_sensor_enabled is not None:
             self.occupancy_sensor_enabled = bool(occupancy_sensor_enabled)
             self.settings.setValue("OCCUPANCY_SENSOR_ENABLED", self.occupancy_sensor_enabled)
+        if expected_probe_count is not None:
+            try:
+                self.expected_probe_count = max(0, min(16, int(expected_probe_count)))
+            except (TypeError, ValueError):
+                self.expected_probe_count = 0
+            self.settings.setValue("EXPECTED_PROBE_COUNT", self.expected_probe_count)
         
         # TCP/IP settings
         if tcp_enabled is not None:

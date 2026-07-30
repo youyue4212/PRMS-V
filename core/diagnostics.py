@@ -10,49 +10,49 @@ from typing import Dict, List, Tuple, Optional
 
 class FaultCode:
     # E1xx: Connection & Communication
-    E101 = "E101"  # Ì½²âÆ÷ÎÞÊý¾Ý / Î´Á¬½Ó
-    E102 = "E102"  # Í¨ÐÅÖÐ¶Ï / ³¬Ê±
+    E101 = "E101"  # æŽ¢æµ‹å™¨æ— æ•°æ® / æœªè¿žæŽ¥
+    E102 = "E102"  # é€šä¿¡ä¸­æ–­ / è¶…æ—¶
 
     # E2xx: High Voltage (HV)
-    E201 = "E201"  # ¸ßÑ¹Î´½¨Á¢ / Î´¹©µç
-    E202 = "E202"  # ¸ßÑ¹Æ«ÀëÉè¶¨Öµ
-    E203 = "E203"  # ¸ßÑ¹Í»È»µøÂä
+    E201 = "E201"  # é«˜åŽ‹æœªå»ºç«‹ / æœªä¾›ç”µ
+    E202 = "E202"  # é«˜åŽ‹åç¦»è®¾å®šå€¼
+    E203 = "E203"  # é«˜åŽ‹çªç„¶è·Œè½
 
     # E3xx: Temperature
-    E301 = "E301"  # ÎÂ¶È³¬ËÜÁÏÉÁË¸ÌåÉÏÏÞ
-    E302 = "E302"  # ÎÂ¶È³¬¹âµç±¶Ôö¹Ü·¶Î§
-    E303 = "E303"  # ÎÂ¶È´«¸ÐÆ÷¹ÊÕÏ (Í»È»´ó²¿·ù¶ÈÌø±ä)
-    E304 = "E304"  # ÎÂ¶È¶ÁÊýÒì³£ (¼«Öµ»òÎÞÐ§)
+    E301 = "E301"  # æ¸©åº¦è¶…å¡‘æ–™é—ªçƒä½“ä¸Šé™
+    E302 = "E302"  # æ¸©åº¦è¶…å…‰ç”µå€å¢žç®¡èŒƒå›´
+    E303 = "E303"  # æ¸©åº¦ä¼ æ„Ÿå™¨æ•…éšœ (çªç„¶å¤§éƒ¨å¹…åº¦è·³å˜)
+    E304 = "E304"  # æ¸©åº¦è¯»æ•°å¼‚å¸¸ (æžå€¼æˆ–æ— æ•ˆ)
 
     # E4xx: Count Rate (CPS)
-    E401 = "E401"  # ¼ÆÊýÂÊÍ»È»´ó·ù²¨¶¯
+    E401 = "E401"  # è®¡æ•°çŽ‡çªç„¶å¤§å¹…æ³¢åŠ¨
 
     # E5xx: Occupancy Sensor
-    E501 = "E501"  # Í¨µÀÕ¼ÓÃ´«¸ÐÆ÷Òì³£ / ¿¨ËÀ
+    E501 = "E501"  # é€šé“å ç”¨ä¼ æ„Ÿå™¨å¼‚å¸¸ / å¡æ­»
 
     MAP = {
-        E101: ("Ì½²âÆ÷ÎÞÊý¾Ý", "ÅäÖÃµÄÌ½²âÆ÷Î´ÉÏ±¨Êý¾Ý£¬Çë¼ì²éÍøÂç¡¢IPÉèÖÃ»òÌ½²âÆ÷¹©µç", "ERROR", "Ì½²âÆ÷Á¬½ÓÒì³££¡Çë¼ì²éÍøÏßÁ¬½Ó£¬»ò³¢ÊÔ¶ÏµçÖØÆôÉè±¸¡£ÈôÈÔÒì³££¬ÇëÁªÏµÎ¬±£ÈËÔ±¡£"),
-        E102: ("Í¨ÐÅÖÐ¶Ï", "Ì½²âÆ÷Í¨ÐÅ³¬Ê±£¬ÒÑ³¬¹ý5ÃëÎ´ÊÕµ½Êý¾Ý°ü", "ERROR", "·øÉäÌ½Í·Í¨Ñ¶Òì³£ ¡ú Çë¶ÏµçÖØÆôÉè±¸£¬ÈÔÒì³£ÁªÏµÎ¬±£ÈËÔ±¡£"),
-        E201: ("¸ßÑ¹Î´½¨Á¢", "Ì½²âÆ÷¸ßÑ¹½Ó½ü0V£¬¿ÉÄÜ¸ßÑ¹Ä£¿éÎ´¹©µç»òÒÑËð»µ", "ERROR", "Ì½²âÆ÷¸ßÑ¹Òì³££¡Éè±¸ÒÑ×Ô¶¯Í£Ö¹²É¼¯£¬ÇëÔÝÍ£Í¨µÀÍ¨ÐÐ£¬²¢Á¢¼´±¨ÐÞ¡£"),
-        E202: ("¸ßÑ¹Æ«ÀëÉè¶¨", "¼ì²âµ½¸ßÑ¹ÓëÉè¶¨ÖµÆ«²î¹ý´ó£¨½öÔÚÓÃ»§Ö÷¶¯ÉèÖÃ¸ßÑ¹ÇÒÎÈÆ×¹Ø±ÕÊ±¼ì²â£©", "WARNING", "¸ßÑ¹Ä£¿é¹ýÑ¹/Ç·Ñ¹±£»¤ ¡ú Éè±¸×Ô¶¯Í£»ú£¬½ûÖ¹Í¨ÐÐ£¬Á¢¼´±¨ÐÞ¡£"),
-        E203: ("¸ßÑ¹Í»È»µøÂä", "¸ßÑ¹ÔÚ¶ÌÊ±¼äÄÚ´ó·ù¶ÈÏÂ½µ£¬¿ÉÄÜ´æÔÚ¹ýÁ÷±£»¤»òÓ²¼þ¹ÊÕÏ", "ERROR", "Ì½²âÆ÷¸ßÑ¹Òì³££¡Éè±¸ÒÑ×Ô¶¯Í£Ö¹²É¼¯£¬ÇëÔÝÍ£Í¨µÀÍ¨ÐÐ£¬²¢Á¢¼´±¨ÐÞ¡£"),
-        E301: ("ÎÂ¶È³¬ÉÁË¸ÌåÉÏÏÞ", "Ì½²âÆ÷ÎÂ¶È³¬¹ýËÜÁÏÉÁË¸Ìå³ÐÊÜÎÂ¶È(>55¡ãC)", "ERROR", "Ì½²âÆ÷ÎÂ¶È³¬ÏÞ£¡Çë¼ì²é»·¾³É¢ÈÈ£¬ÔÝÍ£Ê¹ÓÃ£¬²¢ÁªÏµÎ¬±£ÈËÔ±¡£"),
-        E302: ("ÎÂ¶È³¬PMT·¶Î§", "ÎÂ¶È³¬³ö¹âµç±¶Ôö¹ÜÕý³£¹¤×÷·¶Î§(-20¡ãC ~ 50¡ãC)", "WARNING", "Ì½²âÆ÷ÎÂ¶ÈÒì³££¡Çë¼ì²é»·¾³É¢ÈÈ£¬ÔÝÍ£Ê¹ÓÃ£¬²¢ÁªÏµÎ¬±£ÈËÔ±¡£"),
-        E303: ("ÎÂ¶È´«¸ÐÆ÷¹ÊÕÏ", "ÎÂ¶ÈÔÚ¶ÌÊ±¼äÄÚ³öÏÖ´ó·ù¶ÈÌø±ä(>8¡ãC)£¬¿ÉÄÜ´«¸ÐÆ÷½Ó´¥²»Á¼", "ERROR", "Í¨µÀÎÂ¶È´«¸ÐÆ÷¹ÊÕÏ ¡ú ÎÞ·¨×¼È·¶ÁÈ¡ÎÂ¶È£¬ÇëÁªÏµÎ¬±£ÈËÔ±¡£"),
-        E304: ("ÎÂ¶È¶ÁÊýÒì³£", "ÎÂ¶È¶ÁÊý¼«Öµ»òºã¶¨Òì³££¬¿ÉÄÜÎÂ¶È´«¸ÐÆ÷Ëð»µ", "WARNING", "Í¨µÀÎÂ¶È´«¸ÐÆ÷¹ÊÕÏ ¡ú ÎÞ·¨×¼È·¶ÁÈ¡ÎÂ¶È£¬ÇëÁªÏµÎ¬±£ÈËÔ±¡£"),
-        E401: ("¼ÆÊýÂÊÒì³£²¨¶¯", "¼ÆÊýÂÊ(CPS)³öÏÖ·ÇÕý³£µÄÍ»·¢ÐÔ´ó·ù¶È²¨¶¯£¬¿ÉÄÜÇ°¶ËÊÜµç´Å¸ÉÈÅ", "WARNING", "Ì½²âÆ÷ÐÅºÅ²»ÎÈ¶¨£¡Çë¼ì²éÖÜ±ßÊÇ·ñÓÐÇ¿µç´Å¸ÉÈÅ£¬»òÖØÆôÉè±¸¡£"),
-        E501: ("Õ¼ÓÃ´«¸ÐÆ÷Òì³£", "Í¨µÀÕ¼ÓÃ´«¸ÐÆ÷×´Ì¬³ÖÐøÒì³£»ò¿¨ËÀ£¬Çë¼ì²é½ÓÏß", "WARNING", "Í¨µÀÈËÌå¸ÐÓ¦¹ÊÕÏ ¡ú ÎÞ·¨Ê¶±ðÐÐÈË£¬ÔÝÍ£Ê¹ÓÃ£¬ÇëÁªÏµÎ¬±£ÈËÔ±¡£"),
+        E101: ("æŽ¢æµ‹å™¨æ— æ•°æ®", "é…ç½®çš„æŽ¢æµ‹å™¨æœªä¸ŠæŠ¥æ•°æ®ï¼Œè¯·æ£€æŸ¥ç½‘ç»œã€IPè®¾ç½®æˆ–æŽ¢æµ‹å™¨ä¾›ç”µ", "ERROR", "æŽ¢æµ‹å™¨è¿žæŽ¥å¼‚å¸¸ï¼è¯·æ£€æŸ¥ç½‘çº¿è¿žæŽ¥ï¼Œæˆ–å°è¯•æ–­ç”µé‡å¯è®¾å¤‡ã€‚è‹¥ä»å¼‚å¸¸ï¼Œè¯·è”ç³»ç»´ä¿äººå‘˜ã€‚"),
+        E102: ("é€šä¿¡ä¸­æ–­", "æŽ¢æµ‹å™¨é€šä¿¡è¶…æ—¶ï¼Œå·²è¶…è¿‡5ç§’æœªæ”¶åˆ°æ•°æ®åŒ…", "ERROR", "è¾å°„æŽ¢å¤´é€šè®¯å¼‚å¸¸ â†’ è¯·æ–­ç”µé‡å¯è®¾å¤‡ï¼Œä»å¼‚å¸¸è”ç³»ç»´ä¿äººå‘˜ã€‚"),
+        E201: ("é«˜åŽ‹æœªå»ºç«‹", "æŽ¢æµ‹å™¨é«˜åŽ‹æŽ¥è¿‘0Vï¼Œå¯èƒ½é«˜åŽ‹æ¨¡å—æœªä¾›ç”µæˆ–å·²æŸå", "ERROR", "æŽ¢æµ‹å™¨é«˜åŽ‹å¼‚å¸¸ï¼è®¾å¤‡å·²è‡ªåŠ¨åœæ­¢é‡‡é›†ï¼Œè¯·æš‚åœé€šé“é€šè¡Œï¼Œå¹¶ç«‹å³æŠ¥ä¿®ã€‚"),
+        E202: ("é«˜åŽ‹åç¦»è®¾å®š", "æ£€æµ‹åˆ°é«˜åŽ‹ä¸Žè®¾å®šå€¼åå·®è¿‡å¤§ï¼ˆä»…åœ¨ç”¨æˆ·ä¸»åŠ¨è®¾ç½®é«˜åŽ‹ä¸”ç¨³è°±å…³é—­æ—¶æ£€æµ‹ï¼‰", "WARNING", "é«˜åŽ‹æ¨¡å—è¿‡åŽ‹/æ¬ åŽ‹ä¿æŠ¤ â†’ è®¾å¤‡è‡ªåŠ¨åœæœºï¼Œç¦æ­¢é€šè¡Œï¼Œç«‹å³æŠ¥ä¿®ã€‚"),
+        E203: ("é«˜åŽ‹çªç„¶è·Œè½", "é«˜åŽ‹åœ¨çŸ­æ—¶é—´å†…å¤§å¹…åº¦ä¸‹é™ï¼Œå¯èƒ½å­˜åœ¨è¿‡æµä¿æŠ¤æˆ–ç¡¬ä»¶æ•…éšœ", "ERROR", "æŽ¢æµ‹å™¨é«˜åŽ‹å¼‚å¸¸ï¼è®¾å¤‡å·²è‡ªåŠ¨åœæ­¢é‡‡é›†ï¼Œè¯·æš‚åœé€šé“é€šè¡Œï¼Œå¹¶ç«‹å³æŠ¥ä¿®ã€‚"),
+        E301: ("æ¸©åº¦è¶…é—ªçƒä½“ä¸Šé™", "æŽ¢æµ‹å™¨æ¸©åº¦è¶…è¿‡å¡‘æ–™é—ªçƒä½“æ‰¿å—æ¸©åº¦(>55Â°C)", "ERROR", "æŽ¢æµ‹å™¨æ¸©åº¦è¶…é™ï¼è¯·æ£€æŸ¥çŽ¯å¢ƒæ•£çƒ­ï¼Œæš‚åœä½¿ç”¨ï¼Œå¹¶è”ç³»ç»´ä¿äººå‘˜ã€‚"),
+        E302: ("æ¸©åº¦è¶…PMTèŒƒå›´", "æ¸©åº¦è¶…å‡ºå…‰ç”µå€å¢žç®¡æ­£å¸¸å·¥ä½œèŒƒå›´(-20Â°C ~ 50Â°C)", "WARNING", "æŽ¢æµ‹å™¨æ¸©åº¦å¼‚å¸¸ï¼è¯·æ£€æŸ¥çŽ¯å¢ƒæ•£çƒ­ï¼Œæš‚åœä½¿ç”¨ï¼Œå¹¶è”ç³»ç»´ä¿äººå‘˜ã€‚"),
+        E303: ("æ¸©åº¦ä¼ æ„Ÿå™¨æ•…éšœ", "æ¸©åº¦åœ¨çŸ­æ—¶é—´å†…å‡ºçŽ°å¤§å¹…åº¦è·³å˜(>8Â°C)ï¼Œå¯èƒ½ä¼ æ„Ÿå™¨æŽ¥è§¦ä¸è‰¯", "ERROR", "é€šé“æ¸©åº¦ä¼ æ„Ÿå™¨æ•…éšœ â†’ æ— æ³•å‡†ç¡®è¯»å–æ¸©åº¦ï¼Œè¯·è”ç³»ç»´ä¿äººå‘˜ã€‚"),
+        E304: ("æ¸©åº¦è¯»æ•°å¼‚å¸¸", "æ¸©åº¦è¯»æ•°æžå€¼æˆ–æ’å®šå¼‚å¸¸ï¼Œå¯èƒ½æ¸©åº¦ä¼ æ„Ÿå™¨æŸå", "WARNING", "é€šé“æ¸©åº¦ä¼ æ„Ÿå™¨æ•…éšœ â†’ æ— æ³•å‡†ç¡®è¯»å–æ¸©åº¦ï¼Œè¯·è”ç³»ç»´ä¿äººå‘˜ã€‚"),
+        E401: ("è®¡æ•°çŽ‡å¼‚å¸¸æ³¢åŠ¨", "è®¡æ•°çŽ‡(CPS)å‡ºçŽ°éžæ­£å¸¸çš„çªå‘æ€§å¤§å¹…åº¦æ³¢åŠ¨ï¼Œå¯èƒ½å‰ç«¯å—ç”µç£å¹²æ‰°", "WARNING", "æŽ¢æµ‹å™¨ä¿¡å·ä¸ç¨³å®šï¼è¯·æ£€æŸ¥å‘¨è¾¹æ˜¯å¦æœ‰å¼ºç”µç£å¹²æ‰°ï¼Œæˆ–é‡å¯è®¾å¤‡ã€‚"),
+        E501: ("å ç”¨ä¼ æ„Ÿå™¨å¼‚å¸¸", "é€šé“å ç”¨ä¼ æ„Ÿå™¨çŠ¶æ€æŒç»­å¼‚å¸¸æˆ–å¡æ­»ï¼Œè¯·æ£€æŸ¥æŽ¥çº¿", "WARNING", "é€šé“äººä½“æ„Ÿåº”æ•…éšœ â†’ æ— æ³•è¯†åˆ«è¡Œäººï¼Œæš‚åœä½¿ç”¨ï¼Œè¯·è”ç³»ç»´ä¿äººå‘˜ã€‚"),
     }
 
     @classmethod
     def get_info(cls, code: str) -> Tuple[str, str, str, str]:
-        return cls.MAP.get(code, ("Î´Öª¹ÊÕÏ", "Î´ÖªµÄÏµÍ³¹ÊÕÏ", "WARNING", "ÏµÍ³³öÏÖÎ´Öª¹ÊÕÏ£¬ÇëÁªÏµÎ¬±£ÈËÔ±¡£"))
+        return cls.MAP.get(code, ("æœªçŸ¥æ•…éšœ", "æœªçŸ¥çš„ç³»ç»Ÿæ•…éšœ", "WARNING", "ç³»ç»Ÿå‡ºçŽ°æœªçŸ¥æ•…éšœï¼Œè¯·è”ç³»ç»´ä¿äººå‘˜ã€‚"))
 
 
 class DiagnosticsManager:
-    # Í¨Ñ¶ÖÐ¶ÏÅÐ¶¨£ºÎÞÊý¾Ý°ü³¬¹ý¸ÃÃëÊý¼´±¨ E102£¨Ô­ 30s ÏÖ³¡·´À¡¹ýÂý£©
+    # é€šè®¯ä¸­æ–­åˆ¤å®šï¼šæ— æ•°æ®åŒ…è¶…è¿‡è¯¥ç§’æ•°å³æŠ¥ E102ï¼ˆåŽŸ 30s çŽ°åœºåé¦ˆè¿‡æ…¢ï¼‰
     COMM_TIMEOUT_SEC = 5.0
-    # ¿ª»úºó³¤Ê±¼äÍêÈ«ÎÞÊý¾Ý±¨ E101
+    # å¼€æœºåŽé•¿æ—¶é—´å®Œå…¨æ— æ•°æ®æŠ¥ E101
     NO_DATA_STARTUP_SEC = 8.0
 
     def __init__(self, config_manager):
@@ -76,7 +76,12 @@ class DiagnosticsManager:
         # Occupancy stuck detection
         self.occupancy_start_time: Dict[str, float] = {}
 
-        # ·ÖÌ½Í·¸ßÑ¹Éè¶¨£º{probe_key(IP): voltage}£»½ö¶Ô¸ÃÌ½Í·ÆôÓÃ E202
+        # æœ¬è½®é‡‡é›†ä¸­æ›¾åŒæ—¶åœ¨çº¿çš„æœ€å¤§æŽ¢å¤´æ•°ï¼›ç”¨äºŽçƒ­æ›¿æ¢åŽæ¸…é™¤æ—§ IP çš„ç²˜æ€§ E102
+        self.peak_connected_count = 0
+        # æœ€è¿‘ä¸€æ¬¡å‘¨æœŸæ£€æŸ¥ä¸­å› â€œåœ¨çº¿æ•°å·²æ¢å¤â€è€Œæ¸…é™¤çš„ç¦»çº¿ client_id
+        self.purged_offline_clients: List[str] = []
+
+        # åˆ†æŽ¢å¤´é«˜åŽ‹è®¾å®šï¼š{probe_key(IP): voltage}ï¼›ä»…å¯¹è¯¥æŽ¢å¤´å¯ç”¨ E202
         self.client_hv_setpoints: Dict[str, float] = {}
         self._load_client_hv_setpoints_from_config()
 
@@ -85,7 +90,7 @@ class DiagnosticsManager:
         self.client_hv_setpoints = {str(k): float(v) for k, v in stored.items()}
 
     def mark_client_hv_setpoint(self, client_id: str, voltage: float):
-        """Record per-probe HV setpoint after user clicks¡¸ÉèÖÃ¸ßÑ¹¡¹."""
+        """Record per-probe HV setpoint after user clicksã€Œè®¾ç½®é«˜åŽ‹ã€."""
         key = self._extract_ip(client_id) or client_id
         if not key or key == "system":
             return
@@ -100,7 +105,9 @@ class DiagnosticsManager:
         self.cps_history.clear()
         self.last_packet_time.clear()
         self.occupancy_start_time.clear()
-        # ±£Áô·ÖÌ½Í·¸ßÑ¹Éè¶¨£¨²»Ëæ¿ªÍ£²É¼¯Çå¿Õ£©
+        self.peak_connected_count = 0
+        self.purged_offline_clients = []
+        # ä¿ç•™åˆ†æŽ¢å¤´é«˜åŽ‹è®¾å®šï¼ˆä¸éšå¼€åœé‡‡é›†æ¸…ç©ºï¼‰
         self._load_client_hv_setpoints_from_config()
 
     def stop_acquisition(self):
@@ -176,23 +183,23 @@ class DiagnosticsManager:
         self.remove_fault(client_id, FaultCode.E102)
         self._clear_stale_sessions_for_ip(client_id)
 
-        # 1. High Voltage (¸ßÑ¹) Diagnostics
+        # 1. High Voltage (é«˜åŽ‹) Diagnostics
         hv = float(packet.HV)
         # device_status bit3: gain stabilizer on/off
         gain_stabilizer_on = ((int(packet.device_status) >> 3) & 0x1) == 1
 
-        # ·ÖÌ½Í·Éè¶¨£ºÁ½Ì¨Ì½Í·¿É·Ö±ð 1100/1200£¬»¥²»Ó°Ïì
+        # åˆ†æŽ¢å¤´è®¾å®šï¼šä¸¤å°æŽ¢å¤´å¯åˆ†åˆ« 1100/1200ï¼Œäº’ä¸å½±å“
         probe_key = self._extract_ip(client_id) or client_id
         per_probe_set = self.client_hv_setpoints.get(probe_key)
         if per_probe_set is not None:
             hv_user_set = True
             hv_set = float(per_probe_set)
         elif client_id == "serial_client" and bool(getattr(self.config, "hv_user_set", False)):
-            # ´®¿Úµ¥Ì½Í·£ºÑØÓÃÈ«¾ÖÉè¶¨
+            # ä¸²å£å•æŽ¢å¤´ï¼šæ²¿ç”¨å…¨å±€è®¾å®š
             hv_user_set = True
             hv_set = float(self.config.hv)
         else:
-            # ¸ÃÌ½Í·´ÓÎ´µ¥¶À¡¸ÉèÖÃ¸ßÑ¹¡¹£º²»ÅÐ E202
+            # è¯¥æŽ¢å¤´ä»Žæœªå•ç‹¬ã€Œè®¾ç½®é«˜åŽ‹ã€ï¼šä¸åˆ¤ E202
             hv_user_set = False
             hv_set = float(self.config.hv)
         
@@ -205,10 +212,10 @@ class DiagnosticsManager:
             self.remove_fault(client_id, FaultCode.E201)
             
             # E202: HV deviation from THIS probe's setpoint (> 80V)
-            # ·ÀÎó±¨£º
-            # 1) ¸ÃÌ½Í·´ÓÎ´µã»÷¡¸ÉèÖÃ¸ßÑ¹¡¹Ê±²»±È½Ï
-            # 2) ÎÈÆ×¿ªÆôÊ±Éè±¸»áÖ÷¶¯µ÷Ñ¹£¬²»±¨ E202£¨Í»½µÈÔÓÉ E203 ¸²¸Ç£©
-            # 3) Êµ¼Ê¸ßÑ¹»Øµ½Éè¶¨¡À80V ÄÚ×Ô¶¯Ïû¾¯£¨ÎÞÐèÔÙµã°´Å¥£©
+            # é˜²è¯¯æŠ¥ï¼š
+            # 1) è¯¥æŽ¢å¤´ä»Žæœªç‚¹å‡»ã€Œè®¾ç½®é«˜åŽ‹ã€æ—¶ä¸æ¯”è¾ƒ
+            # 2) ç¨³è°±å¼€å¯æ—¶è®¾å¤‡ä¼šä¸»åŠ¨è°ƒåŽ‹ï¼Œä¸æŠ¥ E202ï¼ˆçªé™ä»ç”± E203 è¦†ç›–ï¼‰
+            # 3) å®žé™…é«˜åŽ‹å›žåˆ°è®¾å®šÂ±80V å†…è‡ªåŠ¨æ¶ˆè­¦ï¼ˆæ— éœ€å†ç‚¹æŒ‰é’®ï¼‰
             if (not hv_user_set) or gain_stabilizer_on:
                 self.remove_fault(client_id, FaultCode.E202)
             elif abs(hv - hv_set) > 80.0:
@@ -226,22 +233,22 @@ class DiagnosticsManager:
                     
         self.hv_history[client_id].append(hv)
 
-        # 2. Temperature (ÎÂ¶È) Diagnostics
-        temp = float(packet.temperature) / 100.0  # Convert to ¡ãC
+        # 2. Temperature (æ¸©åº¦) Diagnostics
+        temp = float(packet.temperature) / 100.0  # Convert to Â°C
         
-        # E301: Scintillator over temp (> 55¡ãC)
+        # E301: Scintillator over temp (> 55Â°C)
         if temp > 55.0:
             self.add_fault(client_id, FaultCode.E301)
         else:
             self.remove_fault(client_id, FaultCode.E301)
             
-        # E302: PMT out of range (-20¡ãC ~ 50¡ãC)
+        # E302: PMT out of range (-20Â°C ~ 50Â°C)
         if temp < -20.0 or temp > 50.0:
             self.add_fault(client_id, FaultCode.E302)
         else:
             self.remove_fault(client_id, FaultCode.E302)
             
-        # E303: Temperature sudden jump (> 8¡ãC)
+        # E303: Temperature sudden jump (> 8Â°C)
         if len(self.temp_history[client_id]) >= 1:
             last_temp = self.temp_history[client_id][-1]
             if abs(temp - last_temp) > 8.0:
@@ -252,7 +259,7 @@ class DiagnosticsManager:
                     if now - self.active_faults[client_id][FaultCode.E303] > 10.0:
                         self.remove_fault(client_id, FaultCode.E303)
                         
-        # E304: Temperature×xÊýÒì³£ (e.g., exactly 0.0 or extreme static value)
+        # E304: Temperatureè®€æ•°å¼‚å¸¸ (e.g., exactly 0.0 or extreme static value)
         # Check if temperature is exactly -128 or 127 (sensor disconnect values for some ICs)
         if temp == -128.0 or temp == 127.0 or temp == 0.0:
             # Note: 0.0 is possible but rare, we flag it if it stays exactly 0.0 for 10 packets
@@ -263,7 +270,7 @@ class DiagnosticsManager:
             
         self.temp_history[client_id].append(temp)
 
-        # 3. Count Rate (¼ÆÊýÂÊ) Diagnostics
+        # 3. Count Rate (è®¡æ•°çŽ‡) Diagnostics
         cps = float(packet.counter)
         
         # E401: Count rate sudden wild fluctuation
@@ -294,9 +301,9 @@ class DiagnosticsManager:
 
         self.cps_history[client_id].append(cps)
 
-        # 4. Occupancy Sensor (Í¨µÀÕ¼ÓÃ) Diagnostics
+        # 4. Occupancy Sensor (é€šé“å ç”¨) Diagnostics
         # device_status bit5: 0=Free, 1=Occupied
-        # Î´½ÓÈë´«¸ÐÆ÷Ê± bit5 ¿ÉÄÜ¸¡¿ÕÎó±¨£»¹Ø±Õ¿ª¹ØºóºöÂÔÕ¼ÓÃÓë E501
+        # æœªæŽ¥å…¥ä¼ æ„Ÿå™¨æ—¶ bit5 å¯èƒ½æµ®ç©ºè¯¯æŠ¥ï¼›å…³é—­å¼€å…³åŽå¿½ç•¥å ç”¨ä¸Ž E501
         if not getattr(self.config, 'occupancy_sensor_enabled', False):
             self.occupancy_start_time.pop(client_id, None)
             self.remove_fault(client_id, FaultCode.E501)
@@ -304,7 +311,7 @@ class DiagnosticsManager:
             is_occupied = (packet.device_status & 0b100000) != 0
             if is_occupied:
                 start_ts = self.occupancy_start_time.get(client_id)
-                # ½öÔÚÕæÕý´Ó¿ÕÏÐ½øÈëÕ¼ÓÃÊ±¿ªÊ¼¼ÆÊ±£»ÎðÓÃ 0.0 Õ¼Î»£¨»áµ¼ÖÂÁ¢¿ÌÎó±¨ E501£©
+                # ä»…åœ¨çœŸæ­£ä»Žç©ºé—²è¿›å…¥å ç”¨æ—¶å¼€å§‹è®¡æ—¶ï¼›å‹¿ç”¨ 0.0 å ä½ï¼ˆä¼šå¯¼è‡´ç«‹åˆ»è¯¯æŠ¥ E501ï¼‰
                 if not start_ts:
                     self.occupancy_start_time[client_id] = now
                 elif now - start_ts > 300.0:
@@ -327,7 +334,7 @@ class DiagnosticsManager:
         if not self.is_acquiring or not self.acquisition_start_time:
             return {}
 
-        # 1. Check for E101 (¿ª»úÎÞÊý¾Ý)
+        # 1. Check for E101 (å¼€æœºæ— æ•°æ®)
         # If acquisition has been running for more than 15 seconds, and we have no data from expected clients
         time_since_start = now - self.acquisition_start_time
         
@@ -357,11 +364,28 @@ class DiagnosticsManager:
                         self.add_fault(client_id, FaultCode.E102)
                     else:
                         self.remove_fault(client_id, FaultCode.E102)
-        # Offline/reconnect by probe IP: keep E102 for dropped probe;
-        # clear old session when same IP reconnects under a new client_id.
+        # Offline/reconnect by probe IP:
+        # - target count = expected_probe_count (>0) else peak this acquisition
+        # - keep sticky E102 while online < target
+        # - clear when same IP reconnects, or when online >= target (hot-swap new IP)
         connected_set = set(connected_clients)
         connected_ips = {self._extract_ip(c) for c in connected_clients}
         connected_ips.discard("")
+        n_conn = len(connected_clients)
+        if n_conn > self.peak_connected_count:
+            self.peak_connected_count = n_conn
+
+        try:
+            expected = int(getattr(self.config, "expected_probe_count", 0) or 0)
+        except (TypeError, ValueError):
+            expected = 0
+        if expected > 0:
+            target = expected
+        else:
+            target = self.peak_connected_count
+
+        slots_restored = target > 0 and n_conn >= target
+        self.purged_offline_clients = []
 
         known_ids = set(self.active_faults.keys()) | set(self.last_packet_time.keys())
         for client_id in list(known_ids):
@@ -369,6 +393,11 @@ class DiagnosticsManager:
                 continue
             ip = self._extract_ip(client_id)
             if ip and ip in connected_ips:
+                self.remove_client(client_id)
+                continue
+            if slots_restored:
+                # åœ¨çº¿æ•°å·²è¾¾åˆ°æœŸæœ›ï¼ˆæˆ–å³°å€¼ï¼‰â†’ æ¸…é™¤æ—§ç¦»çº¿ E102ï¼ˆæ”¯æŒæ¢ IP çƒ­æ›¿æ¢ï¼‰
+                self.purged_offline_clients.append(client_id)
                 self.remove_client(client_id)
                 continue
             if client_id in self.last_packet_time or FaultCode.E102 in self.active_faults.get(client_id, {}):
@@ -382,6 +411,13 @@ class DiagnosticsManager:
         )
         if has_fresh_data:
             self.remove_fault("system", FaultCode.E101)
+
+        # å·²é…ç½®æœŸæœ›æ•°é‡ä¸”é•¿æœŸä¸è¶³ï¼šç³»ç»Ÿçº§ E101ï¼ˆå³ä½¿å·²æœ‰éƒ¨åˆ†æŽ¢å¤´åœ¨çº¿ï¼‰
+        if (expected > 0
+                and self.acquisition_start_time
+                and (now - self.acquisition_start_time) > self.NO_DATA_STARTUP_SEC
+                and n_conn < expected):
+            self.add_fault("system", FaultCode.E101)
 
         return {cid: list(faults.keys()) for cid, faults in self.active_faults.items()}
 

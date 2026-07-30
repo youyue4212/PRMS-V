@@ -353,15 +353,27 @@ class MainWindow(QMainWindow, UIBase):
                 self.log("WARNING: alarm_status_callback is None, resetting...", 'WARNING')
                 self.alarm_status_callback = self.update_alarm_status
 
-        # 运行周期性诊断检查
-        connected_clients = []
-        if self.config.tcp_enabled and hasattr(self.worker, 'client_infos'):
-            connected_clients = list(self.worker.client_infos.keys())
+        # 运行周期性诊断检查（按有效在线探头/IP 去重，避免幽灵连接）
+        if hasattr(self, "get_online_probe_client_ids"):
+            connected_clients = self.get_online_probe_client_ids()
         else:
-            if self.worker and self.worker.is_running:
-                connected_clients = ["serial_client"]
+            connected_clients = []
+            if self.config.tcp_enabled and hasattr(self.worker, 'client_infos'):
+                connected_clients = list(self.worker.client_infos.keys())
+            else:
+                if self.worker and self.worker.is_running:
+                    connected_clients = ["serial_client"]
 
         self.diagnostics_manager.run_periodic_checks(connected_clients)
+        purged = getattr(self.diagnostics_manager, "purged_offline_clients", None) or []
+        try:
+            expected = int(getattr(self.config, "expected_probe_count", 0) or 0)
+        except (TypeError, ValueError):
+            expected = 0
+        # 在线数已达标：务必清掉幽灵 IP 编号（即使本轮没有 purged 列表）
+        if hasattr(self, "prune_disconnected_probe_labels"):
+            if purged or (expected > 0 and len(connected_clients) >= expected):
+                self.prune_disconnected_probe_labels(connected_clients)
         
         # 更新系统状态（综合报警与故障码）
         self.update_system_status()
@@ -1067,6 +1079,13 @@ class MainWindow(QMainWindow, UIBase):
         
         if hasattr(self, 'alarm_read_btn'):
             self.alarm_read_btn.setEnabled(can_modify_settings)
+
+        if hasattr(self, 'occupancy_sensor_checkbox'):
+            self.occupancy_sensor_checkbox.setEnabled(can_modify_settings)
+        if hasattr(self, 'expected_probe_spin'):
+            self.expected_probe_spin.setEnabled(can_modify_settings)
+        if hasattr(self, 'adopt_probe_count_btn'):
+            self.adopt_probe_count_btn.setEnabled(can_modify_settings)
         
         if hasattr(self, 'telemetry_checkbox'):
             self.telemetry_checkbox.setEnabled(can_modify_settings)
@@ -1770,6 +1789,13 @@ class MainWindow(QMainWindow, UIBase):
             self.gain_stabilizer_title_label.setText(_t("set_gain_stabilizer"))
             if hasattr(self, 'occupancy_sensor_checkbox'):
                 self.occupancy_sensor_checkbox.setText(_t("set_occupancy_enable"))
+            if hasattr(self, 'expected_probe_label'):
+                self.expected_probe_label.setText(_t("set_expected_probes"))
+            if hasattr(self, 'expected_probe_spin'):
+                self.expected_probe_spin.setToolTip(_t("tip_expected_probes"))
+            if hasattr(self, 'adopt_probe_count_btn'):
+                self.adopt_probe_count_btn.setText(_t("btn_adopt_probe_count"))
+                self.adopt_probe_count_btn.setToolTip(_t("tip_adopt_probe_count"))
             self.update_control_labels()
             
         if hasattr(self, 'keyboard_group'):
