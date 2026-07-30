@@ -1,4 +1,4 @@
-# -*- coding: gbk -*-
+# -*- coding: utf-8 -*-
 """
 Translation Module for Radiation Detection System
 Supports dynamic switching between Chinese (zh) and English (en).
@@ -51,6 +51,10 @@ class TranslationManager:
             "plot_cps_y": "计数率 (cps)",
             "plot_cps_x": "时间 (s)",
             "plot_cps_legend": "计数率",
+            "plot_cps_title_window": "计数率–时间（最近{n}分钟）",
+            "plot_cps_x_local": "本地时间",
+            "plot_cps_window": "时间窗口:",
+            "plot_cps_window_min": "{n} 分钟",
             "plot_spec_title": "能谱（{channels} 道）",
             "plot_spec_y": "计数",
             "plot_spec_x": "道址",
@@ -350,6 +354,10 @@ class TranslationManager:
             "plot_cps_y": "Count Rate (cps)",
             "plot_cps_x": "Time (s)",
             "plot_cps_legend": "Count Rate",
+            "plot_cps_title_window": "Count Rate vs Time (last {n} min)",
+            "plot_cps_x_local": "Local time",
+            "plot_cps_window": "Time window:",
+            "plot_cps_window_min": "{n} min",
             "plot_spec_title": "Spectrum ({channels} Channels)",
             "plot_spec_y": "Counts",
             "plot_spec_x": "Channel",

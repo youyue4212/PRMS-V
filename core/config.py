@@ -38,6 +38,14 @@ class ConfigManager:
             self.expected_probe_count = max(0, min(16, int(self.expected_probe_count)))
         except (TypeError, ValueError):
             self.expected_probe_count = 2
+        # 计数率图时间窗口（分钟）：1 / 5 / 15，默认 5
+        self.cps_window_minutes = self.settings.value("CPS_WINDOW_MINUTES", 5, int)
+        try:
+            self.cps_window_minutes = int(self.cps_window_minutes)
+        except (TypeError, ValueError):
+            self.cps_window_minutes = 5
+        if self.cps_window_minutes not in (1, 5, 15):
+            self.cps_window_minutes = 5
 
     @staticmethod
     def _to_bool(value, default=False):
@@ -147,7 +155,7 @@ class ConfigManager:
                        tcp_enabled=None, tcp_mode=None, tcp_host=None, tcp_port=None,
                        tcp_client_host=None, tcp_client_port=None, language=None,
                        occupancy_sensor_enabled=None, hv_user_set=None,
-                       expected_probe_count=None):
+                       expected_probe_count=None, cps_window_minutes=None):
         if language is not None:
             self.language = language
             self.settings.setValue("LANGUAGE", language)
@@ -181,6 +189,15 @@ class ConfigManager:
             except (TypeError, ValueError):
                 self.expected_probe_count = 0
             self.settings.setValue("EXPECTED_PROBE_COUNT", self.expected_probe_count)
+        if cps_window_minutes is not None:
+            try:
+                m = int(cps_window_minutes)
+            except (TypeError, ValueError):
+                m = 5
+            if m not in (1, 5, 15):
+                m = 5
+            self.cps_window_minutes = m
+            self.settings.setValue("CPS_WINDOW_MINUTES", self.cps_window_minutes)
         
         # TCP/IP settings
         if tcp_enabled is not None:

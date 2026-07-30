@@ -35,7 +35,10 @@ FILTER_ENABLED =  True
 FILTER_WIN_SIZE = 4
 FILTER_NUM_SIGMA = 2
 
-MAX_SPECTRUM_STORED=100
+MAX_SPECTRUM_STORED = 100
+# 计数率图最多保留的历史（覆盖可选最大窗口 15 分钟）
+CPS_HISTORY_KEEP_SEC = 15 * 60
+CPS_WINDOW_CHOICES = (1, 5, 15)
 
 
 
@@ -591,14 +594,28 @@ class UIBase():
         if not hasattr(self.cps_widget, 'setTitle'):
             return
         from core.translation import _t
-        self.cps_widget.setTitle(_t("plot_cps_title"), color='#ffffff', size='12pt')
+        n = int(getattr(self, "cps_window_minutes", 5) or 5)
+        self.cps_widget.setTitle(
+            _t("plot_cps_title_window", n=n), color='#ffffff', size='12pt'
+        )
         self.cps_widget.setLabel('left', _t("plot_cps_y"), color='#ffffff')
-        self.cps_widget.setLabel('bottom', _t("plot_cps_x"), color='#ffffff')
+        self.cps_widget.setLabel('bottom', _t("plot_cps_x_local"), color='#ffffff')
         if hasattr(self, 'curve_cps') and self.curve_cps is not None:
             try:
                 self.curve_cps.opts['name'] = _t("plot_cps_legend")
             except Exception:
                 pass
+        if hasattr(self, "cps_window_label"):
+            self.cps_window_label.setText(_t("plot_cps_window"))
+        if hasattr(self, "cps_window_combo"):
+            cur = self.cps_window_combo.currentData()
+            self.cps_window_combo.blockSignals(True)
+            self.cps_window_combo.clear()
+            for m in CPS_WINDOW_CHOICES:
+                self.cps_window_combo.addItem(_t("plot_cps_window_min", n=m), m)
+            idx = self.cps_window_combo.findData(cur if cur in CPS_WINDOW_CHOICES else n)
+            self.cps_window_combo.setCurrentIndex(idx if idx >= 0 else 1)
+            self.cps_window_combo.blockSignals(False)
 
     def _apply_spec_plot_labels(self):
         """Apply localized title/axis labels to spectrum plot."""
@@ -679,14 +696,35 @@ class UIBase():
         container = QWidget()
         layout = QVBoxLayout(container)
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(4)
+
+        from core.translation import _t
+        self.cps_window_minutes = int(getattr(self.config, "cps_window_minutes", 5) or 5)
+        if self.cps_window_minutes not in CPS_WINDOW_CHOICES:
+            self.cps_window_minutes = 5
+
+        # 时间窗口选择：1 / 5 / 15 分钟
+        toolbar = QHBoxLayout()
+        self.cps_window_label = QLabel(_t("plot_cps_window"))
+        self.cps_window_label.setStyleSheet("color: #ffffff;")
+        self.cps_window_combo = QComboBox()
+        for m in CPS_WINDOW_CHOICES:
+            self.cps_window_combo.addItem(_t("plot_cps_window_min", n=m), m)
+        idx = self.cps_window_combo.findData(self.cps_window_minutes)
+        self.cps_window_combo.setCurrentIndex(idx if idx >= 0 else 1)
+        self.cps_window_combo.setMinimumWidth(100)
+        self.cps_window_combo.currentIndexChanged.connect(self.on_cps_window_changed)
+        toolbar.addWidget(self.cps_window_label)
+        toolbar.addWidget(self.cps_window_combo)
+        toolbar.addStretch(1)
+        layout.addLayout(toolbar)
         
-        # 创建PlotWidget - 更简单，兼容性更好
+        # 创建PlotWidget：底轴用本地时间
         try:
-            self.cps_widget = pg.PlotWidget()
+            date_axis = pg.DateAxisItem(orientation='bottom')
+            self.cps_widget = pg.PlotWidget(axisItems={'bottom': date_axis})
         except Exception as e:
-            # 如果创建失败，尝试不同的方法
             print(f"Error creating PlotWidget: {e}")
-            # 创建一个普通的QWidget作为后备
             self.cps_widget = QWidget()
             layout.addWidget(QLabel("Chart initialization failed"))
             return container
@@ -706,7 +744,6 @@ class UIBase():
         self.cps_widget.getAxis('bottom').setTextPen(pg.mkPen(color='#ffffff'))
         
         # 创建曲线
-        from core.translation import _t
         self.curve_cps = self.cps_widget.plot(
             [], [], pen=pg.mkPen(color='#1f77b4', width=2), name=_t("plot_cps_legend")
         )
@@ -714,8 +751,9 @@ class UIBase():
         # 添加图例
         self.cps_widget.addLegend()
         
-        # 启用自动范围
+        # Y 自动；X 由时间窗口固定
         self.cps_widget.enableAutoRange('y', True)
+        self.cps_widget.disableAutoRange('x')
         
         # 确保曲线正确初始化
         self.curve_cps.setData([], [])
@@ -724,6 +762,27 @@ class UIBase():
         layout.addWidget(self.cps_widget)
         
         return container
+
+    def on_cps_window_changed(self, _index=None):
+        """切换计数率图时间窗口（1/5/15 分钟）。"""
+        if not hasattr(self, "cps_window_combo"):
+            return
+        minutes = self.cps_window_combo.currentData()
+        try:
+            minutes = int(minutes)
+        except (TypeError, ValueError):
+            minutes = 5
+        if minutes not in CPS_WINDOW_CHOICES:
+            minutes = 5
+        self.cps_window_minutes = minutes
+        self.config.update_settings(cps_window_minutes=minutes)
+        self.config.save_settings()
+        self._apply_cps_plot_labels()
+        try:
+            self.update_data()
+        except Exception:
+            pass
+        self.log(f"CPS time window set to {minutes} min", 'INFO')
 
 
     def create_spec_widget(self):
@@ -1593,7 +1652,10 @@ class UIBase():
                 if time_series_data:
                     timestamps, counters, temperatures, hvs, spec_counts = zip(*time_series_data)
                     df_time_series = pd.DataFrame({
-                        'Timestamp': timestamps, 
+                        'Timestamp': [
+                            time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(float(t)))
+                            for t in timestamps
+                        ],
                         'Counter': counters,
                         'Temperature': temperatures,
                         'HV': hvs,
@@ -1664,7 +1726,10 @@ class UIBase():
         if time_series_data:
             timestamps, counters, temperatures, hvs, spec_counts = zip(*time_series_data)
             df_time_series = pd.DataFrame({
-                'Timestamp': timestamps,
+                'Timestamp': [
+                    time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(float(t)))
+                    for t in timestamps
+                ],
                 'Counter': counters,
                 'Temperature': temperatures,
                 'HV': hvs,
@@ -1940,7 +2005,11 @@ class UIBase():
                 self.primary_client_id = storage_client_id
                 self.log(f"Set {storage_client_id} as primary client for chart display", 'INFO')
         
-        self.client_time_series[storage_client_id].append([packet.timestamp, packet.counter, packet.temperature, packet.HV, np.sum(spectrum)])
+        # 用主机接收时刻作横轴（本地时间）；设备 tick 不能当挂钟
+        host_ts = time.time()
+        self.client_time_series[storage_client_id].append(
+            [host_ts, packet.counter, packet.temperature, packet.HV, np.sum(spectrum)]
+        )
         
         # Ensure spectrum data array has correct shape
         if self.client_spectrum_data[storage_client_id].shape != spectrum.shape:
@@ -1949,9 +2018,11 @@ class UIBase():
         # Accumulate spectrum data for this client
         self.client_spectrum_data[storage_client_id] += spectrum
         
-        # Limit the size of time series data for each client
-        if len(self.client_time_series[storage_client_id]) > 1000:  # Keep last 1000 data points
-            self.client_time_series[storage_client_id] = self.client_time_series[storage_client_id][-1000:]
+        # 按时间裁剪：至少保留最大窗口（15 分钟）历史，便于切换 1/5/15
+        cut = host_ts - CPS_HISTORY_KEEP_SEC
+        series = self.client_time_series[storage_client_id]
+        if series and series[0][0] < cut:
+            self.client_time_series[storage_client_id] = [r for r in series if r[0] >= cut]
 
         # Update displayed spectrum data from primary client
         if storage_client_id == self.primary_client_id:
@@ -2026,28 +2097,36 @@ class UIBase():
         
         if time_series_data:
             timestamps, counters, temperatures, hvs, spec_counts = zip(*time_series_data)
-            if len(timestamps)>=1:
-                _times = np.array(timestamps)/1000.
-                times= _times-_times[0]
-                
-                # 根据用户说明：数据包中的counter字段已经是每秒计数（counts/sec）
-                # 所以直接使用counter值作为计数率，而不是计算差值
-                rates = np.array(counters, dtype=np.float64)
-                
-                # 显示计数率曲线（只显示主要客户端的数据）
+            if len(timestamps) >= 1:
+                # 横轴：本地 Unix 时间；只显示最近 N 分钟
+                window_min = int(getattr(self, "cps_window_minutes", 5) or 5)
+                if window_min not in CPS_WINDOW_CHOICES:
+                    window_min = 5
+                now = time.time()
+                t0 = now - window_min * 60
+                ts = np.asarray(timestamps, dtype=np.float64)
+                rates_all = np.asarray(counters, dtype=np.float64)
+                mask = ts >= t0
+                if np.any(mask):
+                    times = ts[mask]
+                    rates = rates_all[mask]
+                else:
+                    times = ts[-1:]
+                    rates = rates_all[-1:]
+
                 self.curve_cps.setData(times, rates)
+                if hasattr(self, "cps_widget") and hasattr(self.cps_widget, "setXRange"):
+                    self.cps_widget.setXRange(t0, now, padding=0)
+                    self.cps_widget.enableAutoRange('y', True)
 
                 # 更新当前状态（使用最后一个数据包的值）
-                self.current_stat ={'hv':hvs[-1],
-                                    'rates': rates[-1],
-                                    'temp':temperatures[-1]/100
-                                    }
-                
-                # 不再计算总计数率，根据用户要求移除
-                # self.calculate_total_count_rate()
+                self.current_stat = {
+                    'hv': hvs[-1],
+                    'rates': float(rates_all[-1]),
+                    'temp': temperatures[-1] / 100
+                }
                 
                 if self.data_updated_callback is not None:
-                    # 不再传递总计数率
                     self.data_updated_callback(self.current_stat, 0, self.client_data)
 
             
