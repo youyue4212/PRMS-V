@@ -1,4 +1,4 @@
-# -*- coding: gbk -*-
+# -*- coding: utf-8 -*-
 """
 Diagnostics and Self-Check Module for Radiation Detection System
 Manages self-check (POST) and runtime fault detection.

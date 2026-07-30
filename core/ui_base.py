@@ -692,32 +692,20 @@ class UIBase():
     
 
     def create_cps_widget(self):
-        # 创建一个QWidget容器
+        # 创建一个QWidget容器（仅图表，窗口选择放在标题行以免挤占曲线高度）
         container = QWidget()
         layout = QVBoxLayout(container)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(4)
+        layout.setSpacing(0)
 
         from core.translation import _t
         self.cps_window_minutes = int(getattr(self.config, "cps_window_minutes", 5) or 5)
         if self.cps_window_minutes not in CPS_WINDOW_CHOICES:
             self.cps_window_minutes = 5
 
-        # 时间窗口选择：1 / 5 / 15 分钟
-        toolbar = QHBoxLayout()
-        self.cps_window_label = QLabel(_t("plot_cps_window"))
-        self.cps_window_label.setStyleSheet("color: #ffffff;")
-        self.cps_window_combo = QComboBox()
-        for m in CPS_WINDOW_CHOICES:
-            self.cps_window_combo.addItem(_t("plot_cps_window_min", n=m), m)
-        idx = self.cps_window_combo.findData(self.cps_window_minutes)
-        self.cps_window_combo.setCurrentIndex(idx if idx >= 0 else 1)
-        self.cps_window_combo.setMinimumWidth(100)
-        self.cps_window_combo.currentIndexChanged.connect(self.on_cps_window_changed)
-        toolbar.addWidget(self.cps_window_label)
-        toolbar.addWidget(self.cps_window_combo)
-        toolbar.addStretch(1)
-        layout.addLayout(toolbar)
+        # 若尚未创建窗口控件（由总览页标题行挂载），在此兜底创建
+        if not hasattr(self, "cps_window_combo") or self.cps_window_combo is None:
+            self._ensure_cps_window_controls()
         
         # 创建PlotWidget：底轴用本地时间
         try:
@@ -762,6 +750,40 @@ class UIBase():
         layout.addWidget(self.cps_widget)
         
         return container
+
+    def _ensure_cps_window_controls(self):
+        """Create compact time-window label+combo (mounted on overview title row)."""
+        from core.translation import _t
+        if hasattr(self, "cps_window_combo") and self.cps_window_combo is not None:
+            return
+        minutes = int(getattr(self, "cps_window_minutes",
+                              getattr(self.config, "cps_window_minutes", 5)) or 5)
+        if minutes not in CPS_WINDOW_CHOICES:
+            minutes = 5
+        self.cps_window_minutes = minutes
+        self.cps_window_label = QLabel(_t("plot_cps_window"))
+        self.cps_window_label.setStyleSheet("color: #ffffff; font-size: 12px;")
+        self.cps_window_combo = QComboBox()
+        self.cps_window_combo.setFixedHeight(24)
+        self.cps_window_combo.setMinimumWidth(88)
+        self.cps_window_combo.setMaximumWidth(120)
+        for m in CPS_WINDOW_CHOICES:
+            self.cps_window_combo.addItem(_t("plot_cps_window_min", n=m), m)
+        idx = self.cps_window_combo.findData(minutes)
+        self.cps_window_combo.setCurrentIndex(idx if idx >= 0 else 1)
+        self.cps_window_combo.currentIndexChanged.connect(self.on_cps_window_changed)
+
+    def create_cps_window_controls_widget(self):
+        """Return a compact widget for the chart title row (does not steal plot height)."""
+        self._ensure_cps_window_controls()
+        wrap = QWidget()
+        row = QHBoxLayout(wrap)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(6)
+        row.addWidget(self.cps_window_label)
+        row.addWidget(self.cps_window_combo)
+        wrap.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
+        return wrap
 
     def on_cps_window_changed(self, _index=None):
         """切换计数率图时间窗口（1/5/15 分钟）。"""

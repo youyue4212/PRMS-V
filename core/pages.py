@@ -290,7 +290,11 @@ class OverviewPage(QWidget):
         
         layout.addLayout(cards_layout)
         
-        # Chart section
+        # Chart section：标题与时间窗口同一行，不额外占曲线高度
+        chart_header = QHBoxLayout()
+        chart_header.setContentsMargins(0, 0, 0, 0)
+        chart_header.setSpacing(8)
+
         self.chart_title = QLabel("实时计数率时序图")
         chart_title_font = QFont(FONTS["subtitle"][0], FONTS["subtitle"][1])
         if len(FONTS["subtitle"]) > 2 and "bold" in FONTS["subtitle"][2]:
@@ -301,11 +305,14 @@ class OverviewPage(QWidget):
                 color: white;
                 font-weight: bold;
                 font-size: 14px;
-                margin-top: 8px;
-                margin-bottom: 5px;
+                margin-top: 4px;
+                margin-bottom: 2px;
             }
         """)
-        layout.addWidget(self.chart_title)
+        chart_header.addWidget(self.chart_title, 1)
+        if hasattr(parent, "create_cps_window_controls_widget"):
+            chart_header.addWidget(parent.create_cps_window_controls_widget(), 0, Qt.AlignRight | Qt.AlignVCenter)
+        layout.addLayout(chart_header)
         
         self.chart = parent.create_cps_widget()
         layout.addWidget(self.chart, 1)
