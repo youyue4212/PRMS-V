@@ -464,40 +464,80 @@ class SoftwareKeyboard(QDialog):
                 self.update_display()
     
     def show_for_input(self, input_widget, position=None):
-        """为指定的输入框显示键盘"""
+        """为指定的输入框显示键盘。
+
+        普通文本框（登录用户名/密码等）默认字母盘；SpinBox 默认数字盘。
+        不在每次 show 时 rebuild，仅模式切换时重建。
+        """
         self.set_target_input(input_widget)
-        # 默认使用数字键盘，字母需要手动切换
+        self.replace_on_first_input = isinstance(input_widget, (QSpinBox, QDoubleSpinBox))
+        want_numeric = isinstance(input_widget, (QSpinBox, QDoubleSpinBox))
         try:
-            self.keyboard_mode = "numeric"
-            self.toggle_btn.setText("ABC")
             self.title_label.setText("输入键盘")
-            self.replace_on_first_input = isinstance(input_widget, (QSpinBox, QDoubleSpinBox))
-            self.adjust_size_for_mode()
-            self.build_keyboard_layout()
+            target_mode = "numeric" if want_numeric else "alpha"
+            if self.keyboard_mode != target_mode:
+                self.keyboard_mode = target_mode
+                self.toggle_btn.setText("ABC" if target_mode == "numeric" else "123")
+                self.adjust_size_for_mode()
+                self.build_keyboard_layout()
+            else:
+                self.toggle_btn.setText("ABC" if target_mode == "numeric" else "123")
         except Exception:
             pass
-        
-        # 设置键盘位置（带边界裁剪，防止被屏幕裁切）
-        screen_geometry = QApplication.desktop().screenGeometry()
-        if position:
-            x = position.x()
-            y = position.y()
-        else:
-            x = (screen_geometry.width() - self.width()) // 2
-            y = (screen_geometry.height() - self.height()) // 2
-        x = max(screen_geometry.left(), min(x, screen_geometry.right() - self.width()))
-        y = max(screen_geometry.top(), min(y, screen_geometry.bottom() - self.height()))
-        self.move(x, y)
-        
+
+        self._place_near_input(input_widget, position)
         self.show()
         self.raise_()
         self.activateWindow()
+
+    def _place_near_input(self, input_widget, position=None):
+        """尽量贴近输入框，并优先对齐所属窗口中心，避免掉到屏幕最底部挡住登录按钮。"""
+        screen = QApplication.desktop().screenGeometry()
+        kb_w, kb_h = self.width(), self.height()
+        margin = 8
+
+        # 水平：相对所属顶层窗口居中（登录框场景更自然）
+        try:
+            host = input_widget.window()
+            if host is not None:
+                hg = host.frameGeometry()
+                x = hg.center().x() - kb_w // 2
+            else:
+                x = (screen.width() - kb_w) // 2
+        except Exception:
+            x = (screen.width() - kb_w) // 2
+
+        # 垂直：优先放在输入框下方；放不下则放到上方；仍不够则屏幕垂直居中
+        try:
+            input_top = input_widget.mapToGlobal(input_widget.rect().topLeft()).y()
+            input_bottom = input_widget.mapToGlobal(input_widget.rect().bottomLeft()).y()
+        except Exception:
+            input_top = screen.center().y()
+            input_bottom = input_top
+
+        if position is not None:
+            y_below = position.y() + margin
+        else:
+            y_below = input_bottom + margin
+
+        if y_below + kb_h <= screen.bottom() - margin:
+            y = y_below
+        else:
+            y_above = input_top - kb_h - margin
+            if y_above >= screen.top() + margin:
+                y = y_above
+            else:
+                y = screen.top() + max(margin, (screen.height() - kb_h) // 2)
+
+        x = max(screen.left() + margin, min(x, screen.right() - kb_w - margin))
+        y = max(screen.top() + margin, min(y, screen.bottom() - kb_h - margin))
+        self.move(x, y)
     
     def close_keyboard(self):
-        """关闭键盘"""
+        """隐藏键盘（不销毁窗口）。改样式前长时间稳定的关键做法是 hide，不是 close+DeleteOnClose。"""
         self.commit_target_input()
+        self.hide()
         self.keyboard_closed.emit()
-        self.close()
 
     def commit_target_input(self):
         if not self.target_input:
@@ -532,7 +572,6 @@ class SoftwareKeyboard(QDialog):
         """键盘按键事件"""
         key = event.key()
         
-        # 处理数字键
         if Qt.Key_0 <= key <= Qt.Key_9:
             digit = str(key - Qt.Key_0)
             self.on_number_click(digit)
@@ -550,61 +589,62 @@ class SoftwareKeyboard(QDialog):
             super().keyPressEvent(event)
     
     def closeEvent(self, event):
-        """关闭事件"""
+        """系统 close 时也按“隐藏”处理，避免误销毁单例键盘。"""
+        self.hide()
         self.keyboard_closed.emit()
-        super().closeEvent(event)
+        event.ignore()
 
 
 class SoftwareKeyboardManager:
-    """软件键盘管理器"""
+    """软件键盘管理器：单例窗口 + hide/show（对齐改样式前长时间可稳定弹出的生命周期）。"""
     
     def __init__(self):
         self.keyboard_window = None
         self.current_input = None
         self.last_closed_time = 0
-    
-    def show_keyboard_for_input(self, input_widget, parent=None):
-        """为输入框显示软件键盘"""
-        # 关闭并销毁现有的键盘，避免长期运行时对话框对象越积越多导致内存泄漏
-        if self.keyboard_window:
-            try:
-                self.keyboard_window.close()  # 设了 WA_DeleteOnClose，close 会自动销毁
-            except Exception:
-                pass
-            self.keyboard_window = None
 
-        # 创建新的键盘
-        self.keyboard_window = SoftwareKeyboard(parent)
-        self.keyboard_window.setAttribute(Qt.WA_DeleteOnClose, True)
-        self.current_input = input_widget
-        
-        # 连接信号
+    @staticmethod
+    def _widget_alive(widget):
+        if widget is None:
+            return False
+        try:
+            widget.objectName()
+            return True
+        except RuntimeError:
+            return False
+
+    def _ensure_keyboard(self):
+        """复用同一键盘窗口；仅在不存在/已销毁时新建。禁止 WA_DeleteOnClose。"""
+        if self._widget_alive(self.keyboard_window):
+            return self.keyboard_window
+        self.keyboard_window = SoftwareKeyboard(None)
+        self.keyboard_window.setAttribute(Qt.WA_DeleteOnClose, False)
         self.keyboard_window.key_pressed.connect(self.on_key_pressed)
         self.keyboard_window.backspace_pressed.connect(self.on_backspace_pressed)
         self.keyboard_window.enter_pressed.connect(self.on_enter_pressed)
         self.keyboard_window.keyboard_closed.connect(self.on_keyboard_closed)
-        
-        # 获取输入框的全局位置
-        global_pos = input_widget.mapToGlobal(input_widget.rect().bottomLeft())
-        
-        # 显示键盘
-        self.keyboard_window.show_for_input(input_widget, global_pos)
-        
+        return self.keyboard_window
+    
+    def show_keyboard_for_input(self, input_widget, parent=None):
+        """为输入框显示软件键盘（复用同一窗口）。"""
+        win = self._ensure_keyboard()
+        self.current_input = input_widget
+        try:
+            global_pos = input_widget.mapToGlobal(input_widget.rect().bottomLeft())
+        except Exception:
+            global_pos = None
+        win.show_for_input(input_widget, global_pos)
         return True
     
     def on_key_pressed(self, key):
-        """按键按下事件"""
-        # 由 SoftwareKeyboard 直接更新输入框，避免重复写入
-        if self.keyboard_window and self.keyboard_window.target_input is not None:
+        if self._widget_alive(self.keyboard_window) and self.keyboard_window.target_input is not None:
             return
         if self.current_input:
             current_text = self.current_input.text()
             self.current_input.setText(current_text + key)
     
     def on_backspace_pressed(self):
-        """退格键事件"""
-        # 由 SoftwareKeyboard 直接更新输入框，避免重复写入
-        if self.keyboard_window and self.keyboard_window.target_input is not None:
+        if self._widget_alive(self.keyboard_window) and self.keyboard_window.target_input is not None:
             return
         if self.current_input:
             current_text = self.current_input.text()
@@ -612,30 +652,15 @@ class SoftwareKeyboardManager:
                 self.current_input.setText(current_text[:-1])
     
     def on_enter_pressed(self):
-        """回车键事件"""
         if self.current_input:
-            # 模拟回车键按下
             from PyQt5.QtGui import QKeyEvent
-            from PyQt5.QtCore import Qt
             event = QKeyEvent(QKeyEvent.KeyPress, Qt.Key_Return, Qt.NoModifier)
             QApplication.sendEvent(self.current_input, event)
     
     def on_keyboard_closed(self):
-        """键盘关闭事件：记录时间，抑制因焦点回弹再次弹出。"""
-        try:
-            # 关闭后清掉输入框焦点，避免 Win/Linux 立刻再次 FocusIn
-            if self.current_input is not None:
-                try:
-                    self.current_input.clearFocus()
-                except Exception:
-                    pass
-            w = QApplication.activeWindow()
-            if w is not None:
-                w.setFocus(Qt.OtherFocusReason)
-        except Exception:
-            pass
+        """关闭回调：只清业务引用。不 clearFocus（改样式时加的，触摸屏上容易导致再也 FocusIn 不了）。"""
         self.current_input = None
-        self.keyboard_window = None
+        # 保持 keyboard_window 实例，供下次 show
         try:
             import time
             self.last_closed_time = time.time()
@@ -643,13 +668,29 @@ class SoftwareKeyboardManager:
             pass
     
     def is_visible(self):
-        """检查键盘是否可见"""
-        return self.keyboard_window and self.keyboard_window.isVisible()
+        w = self.keyboard_window
+        if not self._widget_alive(w):
+            self.keyboard_window = None
+            return False
+        try:
+            return w.isVisible()
+        except RuntimeError:
+            self.keyboard_window = None
+            return False
     
     def hide_keyboard(self):
-        """隐藏键盘"""
-        if self.keyboard_window:
-            self.keyboard_window.close()
+        """隐藏键盘（管理员超时等场景）。"""
+        if self._widget_alive(self.keyboard_window):
+            try:
+                self.keyboard_window.hide()
+            except RuntimeError:
+                self.keyboard_window = None
+        self.current_input = None
+        try:
+            import time
+            self.last_closed_time = time.time()
+        except Exception:
+            pass
 
 
 # 全局键盘管理器实例

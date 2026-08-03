@@ -1396,6 +1396,11 @@ class MainWindow(QMainWindow, UIBase):
         app = QApplication.instance()
         login_dialog = LoginDialog()
         if login_dialog.exec_() == LoginDialog.Accepted:
+            try:
+                from core.software_keyboard import get_keyboard_manager
+                get_keyboard_manager().hide_keyboard()
+            except Exception:
+                pass
             # 重新创建主窗口
             from core.main_window import MainWindow
             current_user = login_dialog.get_current_user_info()
@@ -1542,6 +1547,13 @@ class MainWindow(QMainWindow, UIBase):
         # 显示登录对话框
         login_dialog = LoginDialog()
         if login_dialog.exec_() == LoginDialog.Accepted:
+            # 登录框关闭后再次确保置顶软键盘已收起，避免挡住成功提示
+            try:
+                from core.software_keyboard import get_keyboard_manager
+                get_keyboard_manager().hide_keyboard()
+            except Exception:
+                pass
+
             # 获取登录用户信息
             current_user = login_dialog.get_current_user_info()
             

@@ -247,14 +247,35 @@ class LoginDialog(QDialog):
         self.username_input.returnPressed.connect(self.password_input.setFocus)
         self.password_input.returnPressed.connect(self.on_login_clicked)
 
+    def _hide_login_keyboard(self):
+        """登录流程中必须收起置顶软键盘，否则会挡住登录框/成功提示。"""
+        try:
+            from core.software_keyboard import get_keyboard_manager
+            get_keyboard_manager().hide_keyboard()
+        except Exception:
+            pass
+
+    def _cleanup_login_keyboard_filter(self):
+        try:
+            if hasattr(self, "_login_focus_filter") and self._login_focus_filter is not None:
+                QApplication.instance().removeEventFilter(self._login_focus_filter)
+                self._login_focus_filter = None
+        except Exception:
+            pass
+
     def enable_login_virtual_keyboard(self):
         """Enable virtual keyboard auto-trigger on login dialog."""
         enable_env = os.environ.get("ENABLE_LOGIN_KEYBOARD", "1").strip()
         if enable_env == "0":
             return
+        # 主窗口已装全局过滤器时不再重复安装；启动时先弹登录则仍需本地过滤器
         if str(os.environ.get("USE_SOFTWARE_KEYBOARD", "")).strip() == "1":
-            # 内置键盘已由全局过滤器处理，避免重复安装导致双键盘
-            return
+            try:
+                app = QApplication.instance()
+                if app and any(w.__class__.__name__ == "MainWindow" for w in app.topLevelWidgets()):
+                    return
+            except Exception:
+                pass
         try:
             from core.ui_base import FocusEventFilter
             self._login_focus_filter = FocusEventFilter()
@@ -263,13 +284,20 @@ class LoginDialog(QDialog):
         except Exception as e:
             print(f"Login keyboard enable failed: {e}")
 
+    def accept(self):
+        self._hide_login_keyboard()
+        self._cleanup_login_keyboard_filter()
+        super().accept()
+
+    def reject(self):
+        self._hide_login_keyboard()
+        self._cleanup_login_keyboard_filter()
+        super().reject()
+
     def closeEvent(self, event):
-        """Remove login keyboard filter on close."""
-        try:
-            if hasattr(self, "_login_focus_filter"):
-                QApplication.instance().removeEventFilter(self._login_focus_filter)
-        except Exception:
-            pass
+        """关闭登录框时收起键盘并移除过滤器。"""
+        self._hide_login_keyboard()
+        self._cleanup_login_keyboard_filter()
         super().closeEvent(event)
     
     def load_saved_credentials(self):
@@ -306,6 +334,9 @@ class LoginDialog(QDialog):
     
     def on_login_clicked(self):
         """Login button click event"""
+        # 先收起置顶键盘，避免挡住校验提示或登录成功后的确认框
+        self._hide_login_keyboard()
+
         username = self.username_input.text().strip()
         password = self.password_input.text().strip()
         
@@ -330,7 +361,7 @@ class LoginDialog(QDialog):
                 # Emit login successful signal
                 self.login_successful.emit(username, current_user.role)
                 
-                # Close dialog
+                # Close dialog（accept 内会再次确保键盘已隐藏）
                 self.accept()
             else:
                 QMessageBox.critical(self, _t("msg_login_failed"), _t("msg_get_user_failed"))

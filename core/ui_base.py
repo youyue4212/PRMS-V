@@ -78,13 +78,13 @@ class FocusEventFilter(QObject):
     def _show_internal_software_keyboard(self, obj):
         """弹出内置工业软键盘；关后短时抑制，避免回焦再弹。"""
         current_time = time.time()
-        if current_time - self.last_trigger_time < 0.5:
+        if current_time - self.last_trigger_time < 0.35:
             return False
         try:
             from core.software_keyboard import get_keyboard_manager
             km = get_keyboard_manager()
-            # 用户主动关闭后 1.2s 内不因焦点回弹再次弹出
-            if current_time - getattr(km, "last_closed_time", 0) < 1.2:
+            # 与改样式前一致：关后约 0.5s 抑制回弹；不再 clearFocus
+            if current_time - getattr(km, "last_closed_time", 0) < 0.5:
                 return False
             target_obj = self._resolve_keyboard_target(obj)
             if km.is_visible() and getattr(km, "current_input", None) is target_obj:
@@ -92,7 +92,7 @@ class FocusEventFilter(QObject):
             self.last_trigger_time = current_time
             self.current_focused_obj = target_obj
             log_inst.debug("Showing internal software keyboard")
-            km.show_keyboard_for_input(target_obj, obj.window())
+            km.show_keyboard_for_input(target_obj, None)
             return True
         except Exception as e:
             log_inst.error(f"Failed to show internal software keyboard: {e}")
@@ -112,9 +112,20 @@ class FocusEventFilter(QObject):
         use_system_keyboard = str(os.environ.get('USE_SYSTEM_KEYBOARD', '')).strip() == '1'
 
         if prefer_internal and not use_system_keyboard:
-            if event.type() == QEvent.FocusIn and isinstance(obj, (QLineEdit, QSpinBox, QDoubleSpinBox, QTextEdit)):
-                if use_software_keyboard_str == '1' or self.keyboard_enabled:
+            is_input = isinstance(obj, (QLineEdit, QSpinBox, QDoubleSpinBox, QTextEdit))
+            if is_input and (use_software_keyboard_str == '1' or self.keyboard_enabled):
+                if event.type() == QEvent.FocusIn:
                     self._show_internal_software_keyboard(obj)
+                elif event.type() == QEvent.MouseButtonPress:
+                    # 输入框已聚焦时再次点击不会有 FocusIn，需用点击补一次弹出
+                    try:
+                        focused = obj.hasFocus()
+                        if not focused and hasattr(obj, "lineEdit") and obj.lineEdit() is not None:
+                            focused = obj.lineEdit().hasFocus()
+                    except RuntimeError:
+                        focused = False
+                    if focused:
+                        self._show_internal_software_keyboard(obj)
             return super().eventFilter(obj, event)
         
         if not self.keyboard_enabled:
