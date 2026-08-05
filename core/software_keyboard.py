@@ -35,7 +35,8 @@ class SoftwareKeyboard(QDialog):
         """初始化UI：工业风数字盘为主，字母为辅。"""
         self.setWindowTitle("输入键盘")
         self.setFixedSize(360, 420)
-        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
+        # Tool：挂到模态登录框时才能显示在登录框前面并可点击
+        self.setWindowFlags(Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
         
         main_layout = QVBoxLayout()
         main_layout.setContentsMargins(10, 10, 10, 10)
@@ -531,7 +532,13 @@ class SoftwareKeyboard(QDialog):
 
         x = max(screen.left() + margin, min(x, screen.right() - kb_w - margin))
         y = max(screen.top() + margin, min(y, screen.bottom() - kb_h - margin))
-        self.move(x, y)
+        # 有父窗口（登录模态）时 move 用父坐标，否则键盘会跑偏/被挡住
+        parent = self.parentWidget()
+        if parent is not None:
+            from PyQt5.QtCore import QPoint
+            self.move(parent.mapFromGlobal(QPoint(int(x), int(y))))
+        else:
+            self.move(int(x), int(y))
     
     def close_keyboard(self):
         """隐藏键盘（不销毁窗口）。改样式前长时间稳定的关键做法是 hide，不是 close+DeleteOnClose。"""
@@ -613,27 +620,65 @@ class SoftwareKeyboardManager:
         except RuntimeError:
             return False
 
+    def _window_flags(self):
+        return Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
+
     def _ensure_keyboard(self):
         """复用同一键盘窗口；仅在不存在/已销毁时新建。禁止 WA_DeleteOnClose。"""
         if self._widget_alive(self.keyboard_window):
             return self.keyboard_window
         self.keyboard_window = SoftwareKeyboard(None)
         self.keyboard_window.setAttribute(Qt.WA_DeleteOnClose, False)
+        self.keyboard_window.setWindowFlags(self._window_flags())
         self.keyboard_window.key_pressed.connect(self.on_key_pressed)
         self.keyboard_window.backspace_pressed.connect(self.on_backspace_pressed)
         self.keyboard_window.enter_pressed.connect(self.on_enter_pressed)
         self.keyboard_window.keyboard_closed.connect(self.on_keyboard_closed)
         return self.keyboard_window
+
+    def _attach_modal_parent(self, win, host):
+        """模态登录框必须作为键盘 parent，否则键盘会画在登录框后面且点不到。"""
+        flags = self._window_flags()
+        modal_parent = None
+        try:
+            if host is not None and host.isModal():
+                modal_parent = host
+        except Exception:
+            modal_parent = None
+        try:
+            if modal_parent is not None:
+                if win.parentWidget() is not modal_parent:
+                    win.setParent(modal_parent, flags)
+                else:
+                    win.setWindowFlags(flags)
+            elif win.parentWidget() is not None:
+                # 离开登录框后卸下，避免被登录框销毁带走
+                win.setParent(None, flags)
+        except Exception:
+            pass
     
     def show_keyboard_for_input(self, input_widget, parent=None):
         """为输入框显示软件键盘（复用同一窗口）。"""
         win = self._ensure_keyboard()
+        host = parent
+        if host is None:
+            try:
+                host = input_widget.window()
+            except Exception:
+                host = None
+        self._attach_modal_parent(win, host)
         self.current_input = input_widget
         try:
             global_pos = input_widget.mapToGlobal(input_widget.rect().bottomLeft())
         except Exception:
             global_pos = None
         win.show_for_input(input_widget, global_pos)
+        # 确保叠在登录框前面
+        try:
+            win.raise_()
+            win.activateWindow()
+        except Exception:
+            pass
         return True
     
     def on_key_pressed(self, key):
@@ -679,10 +724,12 @@ class SoftwareKeyboardManager:
             return False
     
     def hide_keyboard(self):
-        """隐藏键盘（管理员超时等场景）。"""
+        """隐藏键盘（登录结束/管理员超时等）。先 hide 再卸下模态父窗口。"""
         if self._widget_alive(self.keyboard_window):
             try:
                 self.keyboard_window.hide()
+                if self.keyboard_window.parentWidget() is not None:
+                    self.keyboard_window.setParent(None, self._window_flags())
             except RuntimeError:
                 self.keyboard_window = None
         self.current_input = None

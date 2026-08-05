@@ -92,7 +92,8 @@ class FocusEventFilter(QObject):
             self.last_trigger_time = current_time
             self.current_focused_obj = target_obj
             log_inst.debug("Showing internal software keyboard")
-            km.show_keyboard_for_input(target_obj, None)
+            # 传入所属窗口：登录模态时键盘会挂到登录框前，避免被挡在后面
+            km.show_keyboard_for_input(target_obj, obj.window())
             return True
         except Exception as e:
             log_inst.error(f"Failed to show internal software keyboard: {e}")

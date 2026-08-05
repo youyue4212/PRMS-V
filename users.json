@@ -6,7 +6,7 @@
     "full_name": "系统管理员",
     "email": "admin@example.com",
     "created_at": "2025-01-01",
-    "last_login": "2026-07-30 10:27:54"
+    "last_login": "2026-08-05 11:13:07"
   },
   "user": {
     "username": "user",
@@ -15,6 +15,6 @@
     "full_name": "",
     "email": "",
     "created_at": "2026-02-05 17:52:01",
-    "last_login": "2026-07-30 10:27:07"
+    "last_login": "2026-08-05 11:12:46"
   }
 }
