@@ -323,16 +323,24 @@ class DiagnosticsManager:
 
         return list(self.active_faults[client_id].keys())
 
-    def run_periodic_checks(self, connected_clients: List[str]) -> Dict[str, List[str]]:
+    def run_periodic_checks(self, connected_clients: List[str],
+                            ignore_clients: List[str] = None) -> Dict[str, List[str]]:
         """
         Run periodic diagnostics (e.g., connection timeouts).
         Should be called every 1 second.
+        ignore_clients: e.g. master TCP id — never treat as probe E101/E102.
         Returns a dictionary of active faults per client.
         """
         now = time.time()
+        ignore = {c for c in (ignore_clients or []) if c}
         
         if not self.is_acquiring or not self.acquisition_start_time:
             return {}
+
+        # Master / non-probe sockets: drop from probe fault tables
+        for cid in list(ignore):
+            if cid in self.active_faults or cid in self.last_packet_time:
+                self.remove_client(cid)
 
         # 1. Check for E101 (开机无数据)
         # If acquisition has been running for more than 15 seconds, and we have no data from expected clients
@@ -349,6 +357,8 @@ class DiagnosticsManager:
             
             # Check each connected client
             for client_id in connected_clients:
+                if client_id in ignore:
+                    continue
                 self.register_client(client_id)
                 last_seen = self.last_packet_time.get(client_id, 0.0)
                 
@@ -389,7 +399,7 @@ class DiagnosticsManager:
 
         known_ids = set(self.active_faults.keys()) | set(self.last_packet_time.keys())
         for client_id in list(known_ids):
-            if client_id == "system" or client_id in connected_set:
+            if client_id == "system" or client_id in connected_set or client_id in ignore:
                 continue
             ip = self._extract_ip(client_id)
             if ip and ip in connected_ips:
@@ -408,6 +418,7 @@ class DiagnosticsManager:
         has_fresh_data = any(
             (now - self.last_packet_time.get(cid, 0.0)) <= self.COMM_TIMEOUT_SEC
             for cid in connected_clients
+            if cid not in ignore
         )
         if has_fresh_data:
             self.remove_fault("system", FaultCode.E101)

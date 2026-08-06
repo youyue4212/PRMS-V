@@ -577,6 +577,12 @@ class UIBase():
         self.client_spectrum_data = {}  # {client_id: spectrum_array} - Store spectrum data for each client
         self.client_latest_packets = {}  # {client_id: latest SpectrumPacket} - used for immediate display switching
         self.primary_client_id = None  # The client whose data is displayed in the chart
+
+        # Master L2 summary (homepage / hard-alarm authority)
+        self.latest_master_summary = None
+        self.master_client_id = None
+        self.master_summary_callback = None
+        self._master_was_online = False
         
         self.spectrum_data = np.zeros(self.config.adc_channels)  # Current displayed spectrum data
         self.temperature_data = []
@@ -609,6 +615,66 @@ class UIBase():
         # Start auto-save timer if enabled
         if self.auto_save_enabled:
             self.auto_save_timer.start(self.auto_save_interval * 1000)
+
+        # Master offline watchdog (~1 Hz summary → 3 s timeout)
+        self.master_watchdog_timer = QTimer()
+        self.master_watchdog_timer.timeout.connect(self._check_master_link)
+        self.master_watchdog_timer.start(1000)
+
+    def is_master_online(self) -> bool:
+        from core.master_summary import is_master_online
+        return is_master_online(self.latest_master_summary)
+
+    def _check_master_link(self):
+        """Notify UI once when master summary ages out."""
+        online = self.is_master_online()
+        if online:
+            self._master_was_online = True
+            return
+        if not self._master_was_online:
+            return
+        self._master_was_online = False
+        if self.master_summary_callback is not None:
+            self.master_summary_callback(None, self.master_client_id)
+
+    def on_master_link_seen(self, client_id: str = None):
+        """Master TCP frame header seen (may still be awaiting valid CRC)."""
+        if not client_id:
+            return
+        self.master_client_id = client_id
+        if hasattr(self, "worker") and self.worker is not None:
+            try:
+                self.worker.master_client_id = client_id
+            except Exception:
+                pass
+        # 主控不是探头：从诊断表移除，避免 E101/E102 误报
+        if getattr(self, "diagnostics_manager", None) is not None:
+            try:
+                self.diagnostics_manager.remove_client(client_id)
+            except Exception:
+                pass
+        if self.master_summary_callback is not None and not self.is_master_online():
+            # Refresh home status to "TCP connected / waiting L2"
+            self.master_summary_callback(None, client_id)
+
+    def on_master_summary_received(self, packet, client_id: str = None):
+        """Handle MasterSummaryPacket (60B L2). Homepage CPS/alarm follow this."""
+        self.latest_master_summary = packet
+        self._master_was_online = True
+        if client_id:
+            self.master_client_id = client_id
+            if hasattr(self, "worker") and self.worker is not None:
+                try:
+                    self.worker.master_client_id = client_id
+                except Exception:
+                    pass
+            if getattr(self, "diagnostics_manager", None) is not None:
+                try:
+                    self.diagnostics_manager.remove_client(client_id)
+                except Exception:
+                    pass
+        if self.master_summary_callback is not None:
+            self.master_summary_callback(packet, client_id)
 
     def _apply_cps_plot_labels(self):
         """Apply localized title/axis labels to count-rate plot."""
@@ -1007,6 +1073,10 @@ class UIBase():
             self.worker.cmd_feedback_received.connect(self.on_cmd_feedback_received)
             self.worker.dev_message_received.connect(self.on_dev_message_received)
             self.worker.spectrum_packet_received.connect(self.on_spectrum_packet_received)
+            if hasattr(self.worker, "master_summary_received"):
+                self.worker.master_summary_received.connect(self.on_master_summary_received)
+            if hasattr(self.worker, "master_link_seen"):
+                self.worker.master_link_seen.connect(self.on_master_link_seen)
             self.worker.connection_status_changed.connect(self.on_connection_status_changed)
             self.worker.error_occurred.connect(self.on_error_occurred)
             self.worker.has_log.connect(self.on_has_log)
@@ -1216,6 +1286,18 @@ class UIBase():
         ctrl_layout.addWidget(self.expected_probe_spin, 2, 1)
         ctrl_layout.addWidget(self.adopt_probe_count_btn, 2, 2)
 
+        # One-click factory parameter reset (command 0x14 → probe TCP/serial)
+        self.factory_reset_label = QLabel(_t("set_factory_reset"))
+        self.reset_defaults_current_btn = QPushButton(_t("btn_reset_current"))
+        self.reset_defaults_current_btn.setToolTip(_t("tip_reset_defaults"))
+        self.reset_defaults_current_btn.clicked.connect(lambda: self.reset_factory_defaults(all_probes=False))
+        self.reset_defaults_all_btn = QPushButton(_t("btn_reset_all"))
+        self.reset_defaults_all_btn.setToolTip(_t("tip_reset_defaults"))
+        self.reset_defaults_all_btn.clicked.connect(lambda: self.reset_factory_defaults(all_probes=True))
+        ctrl_layout.addWidget(self.factory_reset_label, 3, 0)
+        ctrl_layout.addWidget(self.reset_defaults_current_btn, 3, 1)
+        ctrl_layout.addWidget(self.reset_defaults_all_btn, 3, 2)
+
         settings_layout.addWidget(self.ctrl_group)
 
         # --- Virtual Keyboard Group ---
@@ -1260,7 +1342,7 @@ class UIBase():
         device_layout.addWidget(self.sensitivity_set_btn, 1, 3)
         device_layout.addWidget(self.sensitivity_read_btn, 1, 4)
         
-        # Relay Control (继电器设置)
+        # Relay Control (探头继电器 — 发往当前选中探头，勿发主控)
         self.relay0_checkbox = QCheckBox("Relay 0")
         self.relay0_checkbox.stateChanged.connect(lambda state: self.control_single_relay(0, state == Qt.Checked))
         self.relay1_checkbox = QCheckBox("Relay 1")
@@ -1279,12 +1361,15 @@ class UIBase():
         relay_checkbox_layout.addWidget(self.relay2_checkbox)
         relay_checkbox_layout.addStretch()  # 添加弹性空间
         
-        self.relay_control_title_label = QLabel(_t("set_relay_control"))
+        self.relay_control_title_label = QLabel(_t("set_probe_relay_control"))
         device_layout.addWidget(self.relay_control_title_label, 2, 0)
-        # 将水平布局添加到网格布局中，跨3列
         device_layout.addLayout(relay_checkbox_layout, 2, 1, 1, 3)
         device_layout.addWidget(self.relay_read_btn, 2, 4)
         device_layout.addWidget(self.relay_status_label, 3, 0, 1, 5)
+        self.probe_relay_hint_label = QLabel(_t("tip_probe_relay_hint"))
+        self.probe_relay_hint_label.setStyleSheet("color: #888888; font-size: 11px;")
+        self.probe_relay_hint_label.setWordWrap(True)
+        device_layout.addWidget(self.probe_relay_hint_label, 4, 0, 1, 5)
         
         # Alarm Status (报警状态)
         self.alarm_status_label = QLabel("--")
@@ -1292,23 +1377,76 @@ class UIBase():
         self.alarm_read_btn.clicked.connect(self.read_alarm_status)
         
         self.alarm_status_title_label = QLabel(_t("card_alarm_title"))
-        device_layout.addWidget(self.alarm_status_title_label, 4, 0)
-        device_layout.addWidget(self.alarm_status_label, 4, 1, 1, 3)
-        device_layout.addWidget(self.alarm_read_btn, 4, 4)
+        device_layout.addWidget(self.alarm_status_title_label, 5, 0)
+        device_layout.addWidget(self.alarm_status_label, 5, 1, 1, 3)
+        device_layout.addWidget(self.alarm_read_btn, 5, 4)
         
         # Occupancy Status (通道占用状态) - device_status bit5 (0=Free, 1=Occupied)
         self.occupancy_status_label = QLabel("--")
         self.occupancy_title_label = QLabel(_t("set_occupancy"))
-        device_layout.addWidget(self.occupancy_title_label, 5, 0)
-        device_layout.addWidget(self.occupancy_status_label, 5, 1, 1, 4)
+        device_layout.addWidget(self.occupancy_title_label, 6, 0)
+        device_layout.addWidget(self.occupancy_status_label, 6, 1, 1, 4)
 
         # Counter Display
         self.counter_label = QLabel("--")
         self.counter_title_label = QLabel(_t("set_counter"))
-        device_layout.addWidget(self.counter_title_label, 6, 0)
-        device_layout.addWidget(self.counter_label, 6, 1, 1, 4)
+        device_layout.addWidget(self.counter_title_label, 7, 0)
+        device_layout.addWidget(self.counter_label, 7, 1, 1, 4)
         
         settings_layout.addWidget(self.device_group)
+
+        # --- Master Relay Control (same UX as probe: checkbox toggle = send) ---
+        self.master_relay_group = QGroupBox(_t("set_master_relay"))
+        master_relay_layout = QGridLayout(self.master_relay_group)
+
+        self.master_relay0_checkbox = QCheckBox("Relay 0")
+        self.master_relay0_checkbox.stateChanged.connect(
+            lambda state: self.control_master_relay(0, state == Qt.Checked)
+        )
+        self.master_relay1_checkbox = QCheckBox("Relay 1")
+        self.master_relay1_checkbox.stateChanged.connect(
+            lambda state: self.control_master_relay(1, state == Qt.Checked)
+        )
+        self.master_relay2_checkbox = QCheckBox("Relay 2")
+        self.master_relay2_checkbox.stateChanged.connect(
+            lambda state: self.control_master_relay(2, state == Qt.Checked)
+        )
+
+        master_cb_row = QHBoxLayout()
+        master_cb_row.addWidget(self.master_relay0_checkbox)
+        master_cb_row.addWidget(self.master_relay1_checkbox)
+        master_cb_row.addWidget(self.master_relay2_checkbox)
+        master_cb_row.addStretch()
+
+        self.master_relay_read_btn = QPushButton(_t("btn_read_status"))
+        self.master_relay_read_btn.clicked.connect(self.read_master_relay_status)
+        self.master_relay_status_label = QLabel(_t("set_master_relay_status"))
+        self.master_relay_states = None  # (r0, r1, r2)
+        self._pending_master_relay_cmd = 0.0
+        self._pending_master_relay_num = None
+        self._pending_probe_relay_cmd = 0.0
+        self._probe_relay_hold_until = 0.0
+        # keep attrs so older enable/retranslate code does not crash
+        self.master_relay_r1_btn = None
+        self.master_relay_r2_btn = None
+        self.master_relay_apply_btn = None
+        self.master_relay_draft_label = None
+
+        self.master_relay_control_title = QLabel(_t("set_master_relay_control"))
+        master_relay_layout.addWidget(self.master_relay_control_title, 0, 0)
+        master_relay_layout.addLayout(master_cb_row, 0, 1, 1, 3)
+        master_relay_layout.addWidget(self.master_relay_read_btn, 0, 4)
+        self.master_force_gate_btn = QPushButton(_t("btn_force_open_gate"))
+        self.master_force_gate_btn.setToolTip(_t("tip_force_open_gate"))
+        self.master_force_gate_btn.clicked.connect(self.force_open_master_gate)
+        master_relay_layout.addWidget(self.master_force_gate_btn, 0, 5)
+        master_relay_layout.addWidget(self.master_relay_status_label, 1, 0, 1, 6)
+        self.master_relay_hint_label = QLabel(_t("tip_master_relay_hint"))
+        self.master_relay_hint_label.setStyleSheet("color: #888888; font-size: 11px;")
+        self.master_relay_hint_label.setWordWrap(True)
+        master_relay_layout.addWidget(self.master_relay_hint_label, 2, 0, 1, 6)
+
+        settings_layout.addWidget(self.master_relay_group)
 
 
         # --- Telemetry Logging Group ---
@@ -2002,6 +2140,75 @@ class UIBase():
             self.log(f"建议：等待至少100ms后再断电，确保参数已保存到EEPROM。", 'WARNING')
             self.log(f"注意：MODBUS参数保存正常，但串口命令反馈可能发送太快，Flash还未写入完成。", 'WARNING')
 
+        # Relay command feedback:
+        # - 0x06 value = that channel's 0/1 (NOT a 3-bit mask)
+        # - 0x11 / 0x12 value = actual 3-ch mask
+        src = getattr(packet, "source_client_id", None)
+        master_cid = self._get_master_client_id() if hasattr(self, "_get_master_client_id") else None
+        pending_relay_age = time.time() - float(getattr(self, "_pending_master_relay_cmd", 0) or 0)
+        pending_reset_age = time.time() - float(getattr(self, "_pending_channel_reset_at", 0) or 0)
+        from_master = bool(master_cid and src and src == master_cid)
+        if not from_master and master_cid and not src:
+            if 0 <= pending_relay_age <= 3.0 or 0 <= pending_reset_age <= 5.0:
+                from_master = True
+
+        # 通道报警人工复位 0x15（仅主控）
+        if from_master and packet.control_code == 0x15:
+            if hasattr(self, "on_channel_alarm_reset_feedback"):
+                self.on_channel_alarm_reset_feedback(packet)
+
+        elif from_master and packet.control_code in (0x06, 0x11, 0x12) and hasattr(self, "master_relay_status_label"):
+            if not packet.status:
+                from core.translation import _t
+                self.log(
+                    "Master relay command failed (status=0), control=0x%02X value=0x%02X"
+                    % (int(packet.control_code), int(packet.value) & 0xFF),
+                    "WARNING",
+                )
+                self.master_relay_status_label.setText(_t("set_master_relay_fail"))
+            elif packet.control_code == 0x06:
+                # Single-relay ack: value is 0/1 for the commanded channel only
+                rnum = getattr(self, "_pending_master_relay_num", None)
+                if rnum in (0, 1, 2):
+                    on = bool(int(packet.value) & 0x01)
+                    self._set_master_relay_bit_ui(rnum, on)
+                self._pending_master_relay_num = None
+                self._pending_master_relay_cmd = 0.0
+                # Optional sync of full mask (R0 etc.) — blockSignals so no re-send
+                QTimer.singleShot(120, self._sync_master_relay_status_after_06)
+            else:
+                # 0x11 / 0x12: value is 3-ch mask
+                self._apply_master_relay_mask_to_ui(int(packet.value) & 0x07)
+                self._pending_master_relay_cmd = 0.0
+                self._pending_master_relay_num = None
+
+        # Probe relay 0x06/0x12 from non-master: refresh probe status label only
+        elif (
+            (not from_master)
+            and packet.control_code in (0x06, 0x11, 0x12)
+            and packet.status
+            and hasattr(self, "relay_status_label")
+        ):
+            if packet.control_code in (0x11, 0x12):
+                mask = int(packet.value) & 0x07
+                r0 = bool(mask & 0x01)
+                r1 = bool(mask & 0x02)
+                r2 = bool(mask & 0x04)
+                self.relay_states = (r0, r1, r2)
+                from core.translation import _t
+                self.relay_status_label.setText(
+                    _t("relay_status_format", r0=int(r0), r1=int(r1), r2=int(r2))
+                )
+                for cb, st in (
+                    (self.relay0_checkbox, r0),
+                    (self.relay1_checkbox, r1),
+                    (self.relay2_checkbox, r2),
+                ):
+                    cb.blockSignals(True)
+                    cb.setChecked(st)
+                    cb.blockSignals(False)
+            self._pending_probe_relay_cmd = 0.0
+
     def on_dev_message_received(self, packet: DevMessage):
         self.packet_counts['dev_msg'] += 1
         if packet.message_type==1:
@@ -2246,6 +2453,23 @@ class UIBase():
 
     def on_tcp_client_disconnected(self, client_id: str):
         self.log(f"TCP client disconnected: {client_id}", 'INFO')
+
+        # 主控 TCP 断开：首页立即切离线（硬报警不再由 PC 拼）
+        if client_id and client_id == self.master_client_id:
+            self.master_client_id = None
+            if hasattr(self, "worker") and self.worker is not None:
+                try:
+                    self.worker.master_client_id = None
+                except Exception:
+                    pass
+            self.latest_master_summary = None
+            self._master_was_online = False
+            if self.master_summary_callback is not None:
+                self.master_summary_callback(None, client_id)
+            # 主控不是探头，不记 E102
+            self.remove_client_display_data(client_id)
+            return
+
         old_pid = self._resolve_product_id(client_id)
         old_ip = self._extract_client_ip(client_id)
 
@@ -2674,8 +2898,11 @@ class UIBase():
         elif getattr(self, "worker", None) is not None and getattr(self.worker, "is_running", False):
             return ["serial_client"]
 
+        master_cid = self.master_client_id or getattr(self.worker, "master_client_id", None)
         by_ip = {}
         for cid in candidates:
+            if master_cid and cid == master_cid:
+                continue  # 主控连接不算探头
             ip = self._extract_client_ip(cid) if hasattr(self, "_extract_client_ip") else ""
             key = ip or cid
             by_ip[key] = cid
@@ -2858,36 +3085,299 @@ class UIBase():
                 self.log("Failed to send read sensitivity coefficient command", "ERROR")
     
     def control_single_relay(self, relay_num: int, state: bool):
-        if self.ensure_serial_ready():
-            # 如果TCP模式且有多客户端，发送到当前选中客户端
-            if self.config.tcp_enabled and self.primary_client_id:
-                # TCP模式下，需要将命令发送到特定客户端
-                if hasattr(self.worker, 'send_command_to_client'):
-                    success = self.worker.send_command_to_client(self.primary_client_id, 'control_single_relay', (relay_num, state))
-                    if success:
-                        self.log(f"Control relay {relay_num} command sent to client {self.primary_client_id}: {'ON' if state else 'OFF'}")
-                    else:
-                        self.log(f"Failed to send relay command to client {self.primary_client_id}", 'ERROR')
-                else:
-                    success = self.worker.control_single_relay(relay_num, state)
-                    if success:
-                        self.log(f"Control relay {relay_num} command sent: {'ON' if state else 'OFF'}")
-                    else:
-                        self.log(f"Failed to send control relay {relay_num} command", "ERROR")
+        """Probe relay 0x06 — must target a probe, never the master."""
+        def _revert():
+            cbs = (self.relay0_checkbox, self.relay1_checkbox, self.relay2_checkbox)
+            if 0 <= int(relay_num) <= 2:
+                cb = cbs[int(relay_num)]
+                cb.blockSignals(True)
+                cb.setChecked(not bool(state))
+                cb.blockSignals(False)
+
+        if not self.ensure_serial_ready():
+            _revert()
+            return False
+
+        if self.config.tcp_enabled:
+            probe_cid = self._get_probe_client_id_for_settings()
+            if not probe_cid:
+                self.log("No probe selected — cannot control probe relay", "ERROR")
+                _revert()
+                return False
+            if not hasattr(self.worker, "send_command_to_client"):
+                self.log("Worker cannot send targeted TCP commands", "ERROR")
+                _revert()
+                return False
+            ok = self.worker.send_command_to_client(
+                probe_cid, "control_single_relay", (int(relay_num), bool(state))
+            )
+            if ok:
+                self._pending_probe_relay_cmd = time.time()
+                self._probe_relay_hold_until = time.time() + 2.0
+                self.log(
+                    "Probe relay %d → %s (0x06) via %s"
+                    % (int(relay_num), "ON" if state else "OFF", probe_cid)
+                )
             else:
-                success = self.worker.control_single_relay(relay_num, state)
-                if success:
-                    self.log(f"Control relay {relay_num} command sent: {'ON' if state else 'OFF'}")
-                else:
-                    self.log(f"Failed to send control relay {relay_num} command", "ERROR")
-    
+                self.log("Failed to send probe relay 0x06", "ERROR")
+                _revert()
+            return ok
+
+        ok = self.worker.control_single_relay(relay_num, state)
+        if ok:
+            self._probe_relay_hold_until = time.time() + 2.0
+            self.log("Control relay %d command sent: %s" % (relay_num, "ON" if state else "OFF"))
+        else:
+            self.log("Failed to send control relay %d command" % relay_num, "ERROR")
+            _revert()
+        return ok
+
     def read_relay_status(self):
-        if self.ensure_serial_ready():
-            success = self.worker.read_relay_status(True)
-            if success:
-                self.log("Read relay status command sent")
+        """Probe relay read 0x12 — targeted to current probe only (not broadcast)."""
+        if not self.ensure_serial_ready():
+            return False
+        if self.config.tcp_enabled:
+            probe_cid = self._get_probe_client_id_for_settings()
+            if not probe_cid:
+                self.log("No probe selected — cannot read probe relay", "ERROR")
+                return False
+            ok = self.worker.send_command_to_client(probe_cid, "read_relay_status", True)
+            if ok:
+                self._pending_probe_relay_cmd = time.time()
+                self.log("Probe relay status read (0x12) via %s" % probe_cid)
             else:
-                self.log("Failed to send read relay status command", "ERROR")
+                self.log("Failed to send probe relay 0x12", "ERROR")
+            return ok
+        ok = self.worker.read_relay_status(True)
+        if ok:
+            self.log("Read relay status command sent")
+        else:
+            self.log("Failed to send read relay status command", "ERROR")
+        return ok
+
+    def _get_probe_client_id_for_settings(self):
+        """Current settings target: primary probe, never master."""
+        master_cid = self._get_master_client_id()
+        cid = getattr(self, "primary_client_id", None)
+        if cid and cid != master_cid:
+            return cid
+        if hasattr(self, "get_online_probe_client_ids"):
+            probes = self.get_online_probe_client_ids()
+            if probes:
+                return probes[0]
+        return None
+
+    def _get_master_client_id(self):
+        cid = getattr(self, "master_client_id", None)
+        if not cid and getattr(self, "worker", None) is not None:
+            cid = getattr(self.worker, "master_client_id", None)
+        return cid
+
+    def control_master_relay(self, relay_num: int, state: bool):
+        """
+        Master single relay — same UX as probe checkbox:
+          55 AA 03 06 [relay_num=0|1|2] [0/1] [xor]
+        """
+        def _revert():
+            cbs = (
+                self.master_relay0_checkbox,
+                self.master_relay1_checkbox,
+                self.master_relay2_checkbox,
+            )
+            if 0 <= int(relay_num) <= 2:
+                cb = cbs[int(relay_num)]
+                cb.blockSignals(True)
+                cb.setChecked(not bool(state))
+                cb.blockSignals(False)
+
+        if int(relay_num) not in (0, 1, 2):
+            self.log("Master relay number must be 0-2", "ERROR")
+            _revert()
+            return False
+        if not self.config.tcp_enabled:
+            self.log("Master relay control requires TCP mode", "ERROR")
+            _revert()
+            return False
+        if not self.ensure_serial_ready():
+            _revert()
+            return False
+        master_cid = self._get_master_client_id()
+        if not master_cid:
+            self.log("Master not connected — cannot control relay", "ERROR")
+            _revert()
+            return False
+        if not hasattr(self.worker, "send_command_to_client"):
+            self.log("Worker cannot send targeted TCP commands", "ERROR")
+            _revert()
+            return False
+        ok = self.worker.send_command_to_client(
+            master_cid, "control_single_relay", (int(relay_num), bool(state))
+        )
+        if ok:
+            self._pending_master_relay_cmd = time.time()
+            self._pending_master_relay_num = int(relay_num)
+            self.log(
+                "Master relay %d → %s (0x06) via %s"
+                % (int(relay_num), "ON" if state else "OFF", master_cid)
+            )
+        else:
+            self.log("Failed to send master relay 0x06 command", "ERROR")
+            _revert()
+        return ok
+
+    def _master_relay_draft_mask(self) -> int:
+        mask = 0
+        if getattr(self, "master_relay0_checkbox", None) and self.master_relay0_checkbox.isChecked():
+            mask |= 0x01
+        if getattr(self, "master_relay1_checkbox", None) and self.master_relay1_checkbox.isChecked():
+            mask |= 0x02
+        if getattr(self, "master_relay2_checkbox", None) and self.master_relay2_checkbox.isChecked():
+            mask |= 0x04
+        return mask & 0x07
+
+    def _refresh_master_relay_draft_mask(self, *_args):
+        pass  # kept for compatibility; UI no longer shows draft mask
+
+    def apply_master_relay_mask(self):
+        """Optional batch 0x11 from current checkbox states (same mask bits as protocol).
+
+        注意：mask bit0=0 会触发主控复位全清（与关路0 / 0x15 等价）。
+        """
+        from core.translation import _t
+        from PyQt5.QtWidgets import QMessageBox
+
+        if not self.config.tcp_enabled:
+            self.log("Master relay control requires TCP mode", "ERROR")
+            return False
+        if not self.ensure_serial_ready():
+            return False
+        master_cid = self._get_master_client_id()
+        if not master_cid:
+            self.log("Master not connected — cannot control relay mask", "ERROR")
+            return False
+        mask = self._master_relay_draft_mask()
+        if (mask & 0x01) == 0:
+            reply = QMessageBox.question(
+                self if isinstance(self, QWidget) else None,
+                _t("msg_relay0_off_title"),
+                _t("msg_mask_bit0_clear_text"),
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            if reply != QMessageBox.Yes:
+                return False
+        if not hasattr(self.worker, "send_command_to_client"):
+            self.log("Worker cannot send targeted TCP commands", "ERROR")
+            return False
+        ok = self.worker.send_command_to_client(
+            master_cid, "control_multiple_relays", mask
+        )
+        if ok:
+            self._pending_master_relay_cmd = time.time()
+            self._pending_master_relay_num = None
+            self.log("Master relay mask 0x%02X (0x11) via %s" % (mask, master_cid))
+        else:
+            self.log("Failed to send master relay 0x11 command", "ERROR")
+        return ok
+
+    def force_open_master_gate(self):
+        """强行开闸：关继电器 1+2（≠ 复位）。子类可覆盖加权限/确认。"""
+        from core.translation import _t
+        from PyQt5.QtWidgets import QMessageBox
+
+        reply = QMessageBox.question(
+            self if isinstance(self, QWidget) else None,
+            _t("msg_force_gate_title"),
+            _t("msg_force_gate_text"),
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return False
+        ok1 = self.control_master_relay(1, False)
+        ok2 = self.control_master_relay(2, False)
+        return bool(ok1 or ok2)
+
+    def read_master_relay_status(self):
+        """Read master multi-relay status via TCP 0x12."""
+        if not self.config.tcp_enabled:
+            self.log("Master relay read requires TCP mode", "ERROR")
+            return False
+        if not self.ensure_serial_ready():
+            return False
+        master_cid = self._get_master_client_id()
+        if not master_cid:
+            self.log("Master not connected — cannot read relay", "ERROR")
+            return False
+        ok = self.worker.send_command_to_client(
+            master_cid, "read_relay_status", True
+        )
+        if ok:
+            self._pending_master_relay_cmd = time.time()
+            self._pending_master_relay_num = None
+            self.log("Master relay status read (0x12) via %s" % master_cid)
+        else:
+            self.log("Failed to send master relay 0x12 command", "ERROR")
+        return ok
+
+    def _sync_master_relay_status_after_06(self):
+        """Internal follow-up 0x12 after single-relay ack (no extra UI prompts)."""
+        try:
+            UIBase.read_master_relay_status(self)
+        except Exception:
+            pass
+
+    def _set_master_relay_bit_ui(self, relay_num: int, on: bool):
+        """Update one master relay checkbox from 0x06 ack (value is 0/1)."""
+        from core.translation import _t
+        cbs = (
+            self.master_relay0_checkbox,
+            self.master_relay1_checkbox,
+            self.master_relay2_checkbox,
+        )
+        if int(relay_num) not in (0, 1, 2):
+            return
+        cb = cbs[int(relay_num)]
+        cb.blockSignals(True)
+        cb.setChecked(bool(on))
+        cb.blockSignals(False)
+        states = list(getattr(self, "master_relay_states", None) or (False, False, False))
+        while len(states) < 3:
+            states.append(False)
+        states[int(relay_num)] = bool(on)
+        self.master_relay_states = tuple(states)
+        mask = (int(states[0]) & 1) | ((int(states[1]) & 1) << 1) | ((int(states[2]) & 1) << 2)
+        self.master_relay_status_label.setText(
+            _t(
+                "master_relay_status_format",
+                r0=int(states[0]),
+                r1=int(states[1]),
+                r2=int(states[2]),
+                mask=mask,
+            )
+        )
+
+    def _apply_master_relay_mask_to_ui(self, mask: int):
+        """Update master relay checkboxes/status from 3-bit mask (0x11/0x12)."""
+        from core.translation import _t
+
+        mask = int(mask) & 0x07
+        r0 = bool(mask & 0x01)
+        r1 = bool(mask & 0x02)
+        r2 = bool(mask & 0x04)
+        self.master_relay_states = (r0, r1, r2)
+        for cb, st in (
+            (self.master_relay0_checkbox, r0),
+            (self.master_relay1_checkbox, r1),
+            (self.master_relay2_checkbox, r2),
+        ):
+            cb.blockSignals(True)
+            cb.setChecked(st)
+            cb.blockSignals(False)
+        self.master_relay_status_label.setText(
+            _t("master_relay_status_format", r0=int(r0), r1=int(r1), r2=int(r2), mask=mask)
+        )
+        self._refresh_master_relay_draft_mask()
     
     def read_alarm_status(self):
         if self.ensure_serial_ready():
@@ -2914,28 +3404,36 @@ class UIBase():
             # 更新灵敏度系数显示
             self.sensitivity_label.setText(f"{packet.sen_coef}")
             
-            # 更新继电器状态显示
+            # 更新继电器状态显示（用户刚操作后短时不覆盖勾选，避免跳变）
             relay0_state = (packet.device_status & 0b00001) != 0
             relay1_state = (packet.device_status & 0b00010) != 0
             relay2_state = (packet.device_status & 0b00100) != 0
-            
-            # 更新复选框状态（但不触发信号）
-            self.relay0_checkbox.blockSignals(True)
-            self.relay0_checkbox.setChecked(relay0_state)
-            self.relay0_checkbox.blockSignals(False)
-            
-            self.relay1_checkbox.blockSignals(True)
-            self.relay1_checkbox.setChecked(relay1_state)
-            self.relay1_checkbox.blockSignals(False)
-            
-            self.relay2_checkbox.blockSignals(True)
-            self.relay2_checkbox.setChecked(relay2_state)
-            self.relay2_checkbox.blockSignals(False)
-            
-            # 更新继电器状态标签
-            self.relay_states = (relay0_state, relay1_state, relay2_state)
-            relay_status_text = _t("relay_status_format", r0=int(relay0_state), r1=int(relay1_state), r2=int(relay2_state))
-            self.relay_status_label.setText(relay_status_text)
+            hold = time.time() < float(getattr(self, "_probe_relay_hold_until", 0) or 0)
+            if not hold:
+                self.relay0_checkbox.blockSignals(True)
+                self.relay0_checkbox.setChecked(relay0_state)
+                self.relay0_checkbox.blockSignals(False)
+
+                self.relay1_checkbox.blockSignals(True)
+                self.relay1_checkbox.setChecked(relay1_state)
+                self.relay1_checkbox.blockSignals(False)
+
+                self.relay2_checkbox.blockSignals(True)
+                self.relay2_checkbox.setChecked(relay2_state)
+                self.relay2_checkbox.blockSignals(False)
+
+                self.relay_states = (relay0_state, relay1_state, relay2_state)
+                relay_status_text = _t("relay_status_format", r0=int(relay0_state), r1=int(relay1_state), r2=int(relay2_state))
+                self.relay_status_label.setText(relay_status_text)
+            else:
+                # still refresh text from last known user intent if available
+                states = getattr(self, "relay_states", None)
+                if states is not None and len(states) >= 3:
+                    relay_status_text = _t(
+                        "relay_status_format",
+                        r0=int(states[0]), r1=int(states[1]), r2=int(states[2]),
+                    )
+                    self.relay_status_label.setText(relay_status_text)
             
             # 更新报警状态
             remote_sig_alarm = (packet.device_status & 0b10000) != 0
@@ -2950,7 +3448,7 @@ class UIBase():
                 # 无报警：绿色背景
                 self.alarm_status_label.setStyleSheet("background-color: #ccffcc; color: #000000;")
             
-            # 调用报警状态回调，更新主窗口的报警指示灯
+            # 原「实时概览」仍用探头 bit；公共「主显示」单独吃主控 L2
             if self.alarm_status_callback is not None:
                 self.alarm_status_callback(remote_sig_alarm)
 
@@ -3615,6 +4113,62 @@ class UIBase():
             0x11: "多继电器控制",
             0x12: "获取继电器状态",
             0x13: "获取报警状态",
+            0x14: "恢复默认参数",
+            0x15: "通道报警人工复位",
             0xF0: "错误命令"
         }
         return control_code_descriptions.get(control_code, f"未知命令 (0x{control_code:02X})")
+
+    def reset_factory_defaults(self, all_probes: bool = False):
+        """Send probe command 0x14 (restore HV/trigger/sen_coef defaults)."""
+        from core.translation import _t
+        from PyQt5.QtWidgets import QMessageBox
+
+        target_label = _t("reset_target_all") if all_probes else _t("reset_target_current")
+        reply = QMessageBox.question(
+            self if isinstance(self, QWidget) else None,
+            _t("msg_reset_defaults_title"),
+            _t("msg_reset_defaults_text", target=target_label),
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return False
+
+        if not self.worker:
+            self.log(_t("msg_reset_defaults_fail"), "ERROR")
+            return False
+
+        ok = False
+        if self.config.tcp_enabled and isinstance(self.worker, TcpPacketWorker):
+            if all_probes:
+                n = self.worker.reset_factory_defaults_broadcast_probes()
+                ok = n > 0
+                target_label = f"{_t('reset_target_all')} ({n})"
+            else:
+                cid = self.primary_client_id
+                if cid and cid == getattr(self.worker, "master_client_id", None):
+                    cid = None
+                if not cid:
+                    probes = self.get_online_probe_client_ids()
+                    cid = probes[0] if probes else None
+                if not cid:
+                    self.log(_t("msg_reset_defaults_fail"), "ERROR")
+                    QMessageBox.warning(self, _t("msg_reset_defaults_title"), _t("msg_reset_defaults_fail"))
+                    return False
+                ok = self.worker.send_command_to_client(cid, "reset_factory_defaults", None)
+                target_label = cid
+        else:
+            if hasattr(self.worker, "reset_factory_defaults"):
+                ok = bool(self.worker.reset_factory_defaults())
+            else:
+                ok = False
+
+        if ok:
+            self.log(_t("msg_reset_defaults_ok", target=target_label), "INFO")
+            QMessageBox.information(self, _t("msg_reset_defaults_title"),
+                                    _t("msg_reset_defaults_ok", target=target_label))
+        else:
+            self.log(_t("msg_reset_defaults_fail"), "ERROR")
+            QMessageBox.warning(self, _t("msg_reset_defaults_title"), _t("msg_reset_defaults_fail"))
+        return ok

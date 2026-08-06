@@ -13,12 +13,12 @@ from core.ui_components import DataCard, FONTS, PADDING
 from core.icons import get_icon_svg
 import time
 
-# 概览页四张卡片统一高度，避免故障多行文字把整页撑出全屏
+# Original overview page card height
 OVERVIEW_CARD_HEIGHT = 180
 
 
 def _make_card_scroll_label(max_height: int = 40) -> QScrollArea:
-    """卡片内可滚动说明文字，限制高度防止撑破全屏布局。"""
+    """Scrollable description inside cards."""
     scroll = QScrollArea()
     scroll.setWidgetResizable(True)
     scroll.setFrameShape(QFrame.NoFrame)
@@ -39,17 +39,16 @@ def _make_card_scroll_label(max_height: int = 40) -> QScrollArea:
 
 
 class OverviewPage(QWidget):
-    """Overview page showing radiation data cards and chart - optimized for 1024x600 screen"""
+    """Original overview: radiation/status/alarm/occupancy cards + CPS chart."""
+
     def __init__(self, parent):
         super().__init__()
         self.parent = parent
         layout = QVBoxLayout()
-        # Reduce margins for small screen
         layout.setContentsMargins(10, 10, 10, 10)
         layout.setSpacing(8)
-        
-        # Title - smaller font
-        self.title = QLabel("伽玛能谱探测系统")
+
+        self.title = QLabel("Gamma Spectrum System")
         self.title.setStyleSheet("""
             QLabel {
                 color: white;
@@ -59,34 +58,30 @@ class OverviewPage(QWidget):
             }
         """)
         layout.addWidget(self.title)
-        
-        # Cards row - ensure three cards have equal width
+
         cards_layout = QHBoxLayout()
         cards_layout.setSpacing(8)
-        
-        # Radiation card - shows count rate (cps) with larger font, no dose rate
+
         self.radiation_card = DataCard(
-            "辐射水平",
+            "Radiation",
             "0 cps",
-            "当前计数率",  # Show second title
-            "",  # Empty subvalue (no dose rate)
-            "",  # Empty subtitle
+            "Count rate",
+            "",
+            "",
             value_color="#ffffff",
-            show_second_title=True,  # Show second title
-            larger_font=True  # Use larger font for count rate
+            show_second_title=True,
+            larger_font=True
         )
-        
-        # Status card - shows temperature and HV
         self.status_card = DataCard(
-            "设备状态",
-            "0 " + chr(176) + "C",
-            "探头温度",
+            "Device",
+            "0 C",
+            "Temperature",
             "0 V",
-            "高压电压",
+            "HV",
             value_color="#ff8c00"
         )
-        
-        # Alarm indicator card - optimized for compact
+
+        # Alarm card
         self.alarm_card = QFrame()
         self.alarm_card.setFixedHeight(OVERVIEW_CARD_HEIGHT)
         self.alarm_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
@@ -98,93 +93,56 @@ class OverviewPage(QWidget):
                 background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
                     stop: 0 #2a2a2a, stop: 1 #1f1f1f);
             }
-            QFrame:hover {
-                border: 1px solid #444444;
-                background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
-                    stop: 0 #2f2f2f, stop: 1 #242424);
-            }
         """)
-        
         alarm_layout = QVBoxLayout()
         alarm_layout.setContentsMargins(10, 10, 10, 8)
         alarm_layout.setSpacing(4)
-        
-        # Alarm title with icon
+
         title_layout = QHBoxLayout()
-        title_layout.setContentsMargins(0, 0, 0, 0)
-        title_layout.setSpacing(6)
-        
-        # Title icon
         self.alarm_title_icon = QSvgWidget()
         self.alarm_title_icon.setFixedSize(16, 16)
         self.alarm_title_icon.load(get_icon_svg('alarm_inactive'))
         title_layout.addWidget(self.alarm_title_icon)
-        
-        self.alarm_title_label = QLabel("报警状态")
-        self.alarm_title_label.setStyleSheet("""
-            QLabel {
-                color: #cccccc;
-                font-size: 13px;
-                font-weight: bold;
-                letter-spacing: 0.5px;
-            }
-        """)
+        self.alarm_title_label = QLabel("Alarm")
+        self.alarm_title_label.setStyleSheet(
+            "color: #cccccc; font-size: 13px; font-weight: bold;"
+        )
         title_layout.addWidget(self.alarm_title_label)
         title_layout.addStretch()
-        
         alarm_layout.addLayout(title_layout)
-        
-        # Main alarm indicator
+
         self.alarm_indicator = QSvgWidget()
         self.alarm_indicator.setFixedSize(40, 40)
         self.alarm_indicator.load(get_icon_svg('alarm_inactive'))
         alarm_layout.addWidget(self.alarm_indicator, 0, Qt.AlignCenter)
-        
-        # Alarm status label
-        self.alarm_status_label = QLabel("系统正常")
+
+        self.alarm_status_label = QLabel("Normal")
+        self.alarm_status_label.setAlignment(Qt.AlignCenter)
         self.alarm_status_label.setStyleSheet("""
             QLabel {
-                color: #4caf50;
-                font-size: 15px;
-                font-weight: bold;
-                margin-top: 2px;
-                padding: 2px 6px;
+                color: #4caf50; font-size: 15px; font-weight: bold;
+                margin-top: 2px; padding: 2px 6px;
                 background-color: rgba(76, 175, 80, 0.1);
                 border-radius: 8px;
                 border: 1px solid rgba(76, 175, 80, 0.3);
             }
         """)
-        self.alarm_status_label.setAlignment(Qt.AlignCenter)
         alarm_layout.addWidget(self.alarm_status_label, 0, Qt.AlignCenter)
-        
-        # Alarm description (scrollable, max 2 lines visible)
+
         self.alarm_desc_scroll, self.alarm_desc_label = _make_card_scroll_label(38)
-        self.alarm_desc_label.setText("未检测到异常")
-        self.alarm_desc_label.setStyleSheet("""
-            QLabel {
-                color: #aaaaaa;
-                font-size: 11px;
-                font-weight: normal;
-                margin-top: 0px;
-            }
-        """)
+        self.alarm_desc_label.setText("No alarm")
+        self.alarm_desc_label.setStyleSheet("color: #aaaaaa; font-size: 11px;")
         alarm_layout.addWidget(self.alarm_desc_scroll)
-        
-        # Status indicator bar
+
         self.status_indicator_bar = QFrame()
         self.status_indicator_bar.setFixedHeight(2)
-        self.status_indicator_bar.setStyleSheet("""
-            QFrame {
-                background-color: #4caf50;
-                border-radius: 1px;
-                margin-top: 3px;
-            }
-        """)
+        self.status_indicator_bar.setStyleSheet(
+            "QFrame { background-color: #4caf50; border-radius: 1px; margin-top: 3px; }"
+        )
         alarm_layout.addWidget(self.status_indicator_bar)
-        
         self.alarm_card.setLayout(alarm_layout)
 
-        # Occupancy indicator card - optimized for compact
+        # Occupancy card
         self.occupancy_card = QFrame()
         self.occupancy_card.setFixedHeight(OVERVIEW_CARD_HEIGHT)
         self.occupancy_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
@@ -196,154 +154,98 @@ class OverviewPage(QWidget):
                 background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
                     stop: 0 #2a2a2a, stop: 1 #1f1f1f);
             }
-            QFrame:hover {
-                border: 1px solid #444444;
-                background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
-                    stop: 0 #2f2f2f, stop: 1 #242424);
-            }
         """)
-        
         occupancy_layout = QVBoxLayout()
         occupancy_layout.setContentsMargins(10, 10, 10, 8)
         occupancy_layout.setSpacing(4)
-        
-        # Occupancy title with icon
+
         occ_title_layout = QHBoxLayout()
-        occ_title_layout.setContentsMargins(0, 0, 0, 0)
-        occ_title_layout.setSpacing(6)
-        
-        # Title icon
         self.occupancy_title_icon = QSvgWidget()
         self.occupancy_title_icon.setFixedSize(16, 16)
         self.occupancy_title_icon.load(get_icon_svg('occupancy_inactive'))
         occ_title_layout.addWidget(self.occupancy_title_icon)
-        
-        self.occupancy_title_label = QLabel("通道状态")
-        self.occupancy_title_label.setStyleSheet("""
-            QLabel {
-                color: #cccccc;
-                font-size: 13px;
-                font-weight: bold;
-                letter-spacing: 0.5px;
-            }
-        """)
+        self.occupancy_title_label = QLabel("Channel")
+        self.occupancy_title_label.setStyleSheet(
+            "color: #cccccc; font-size: 13px; font-weight: bold;"
+        )
         occ_title_layout.addWidget(self.occupancy_title_label)
         occ_title_layout.addStretch()
-        
         occupancy_layout.addLayout(occ_title_layout)
-        
-        # Main occupancy indicator
+
         self.occupancy_indicator = QSvgWidget()
         self.occupancy_indicator.setFixedSize(40, 40)
         self.occupancy_indicator.load(get_icon_svg('occupancy_inactive'))
         occupancy_layout.addWidget(self.occupancy_indicator, 0, Qt.AlignCenter)
-        
-        # Occupancy status label
-        self.occupancy_status_label = QLabel("通道空闲")
+
+        self.occupancy_status_label = QLabel("Vacant")
+        self.occupancy_status_label.setAlignment(Qt.AlignCenter)
         self.occupancy_status_label.setStyleSheet("""
             QLabel {
-                color: #4caf50;
-                font-size: 15px;
-                font-weight: bold;
-                margin-top: 2px;
-                padding: 2px 6px;
+                color: #4caf50; font-size: 15px; font-weight: bold;
+                margin-top: 2px; padding: 2px 6px;
                 background-color: rgba(76, 175, 80, 0.1);
                 border-radius: 8px;
                 border: 1px solid rgba(76, 175, 80, 0.3);
             }
         """)
-        self.occupancy_status_label.setAlignment(Qt.AlignCenter)
         occupancy_layout.addWidget(self.occupancy_status_label, 0, Qt.AlignCenter)
-        
-        # Occupancy description (scrollable)
+
         self.occupancy_desc_scroll, self.occupancy_desc_label = _make_card_scroll_label(38)
-        self.occupancy_desc_label.setText("未检测到人员经过")
-        self.occupancy_desc_label.setStyleSheet("""
-            QLabel {
-                color: #aaaaaa;
-                font-size: 11px;
-                font-weight: normal;
-                margin-top: 0px;
-            }
-        """)
+        self.occupancy_desc_label.setText("No traffic")
+        self.occupancy_desc_label.setStyleSheet("color: #aaaaaa; font-size: 11px;")
         occupancy_layout.addWidget(self.occupancy_desc_scroll)
-        
-        # Occupancy indicator bar
+
         self.occupancy_indicator_bar = QFrame()
         self.occupancy_indicator_bar.setFixedHeight(2)
-        self.occupancy_indicator_bar.setStyleSheet("""
-            QFrame {
-                background-color: #4caf50;
-                border-radius: 1px;
-                margin-top: 3px;
-            }
-        """)
+        self.occupancy_indicator_bar.setStyleSheet(
+            "QFrame { background-color: #4caf50; border-radius: 1px; margin-top: 3px; }"
+        )
         occupancy_layout.addWidget(self.occupancy_indicator_bar)
-        
         self.occupancy_card.setLayout(occupancy_layout)
-        
-        # Add four cards to layout with equal width
+
         cards_layout.addWidget(self.radiation_card, 1)
         cards_layout.addWidget(self.status_card, 1)
         cards_layout.addWidget(self.alarm_card, 1)
         cards_layout.addWidget(self.occupancy_card, 1)
-        
         layout.addLayout(cards_layout)
-        
-        # Chart section：标题与时间窗口同一行，不额外占曲线高度
+
         chart_header = QHBoxLayout()
         chart_header.setContentsMargins(0, 0, 0, 0)
         chart_header.setSpacing(8)
-
-        self.chart_title = QLabel("实时计数率时序图")
+        self.chart_title = QLabel("CPS Chart")
         chart_title_font = QFont(FONTS["subtitle"][0], FONTS["subtitle"][1])
         if len(FONTS["subtitle"]) > 2 and "bold" in FONTS["subtitle"][2]:
             chart_title_font.setBold(True)
         self.chart_title.setFont(chart_title_font)
-        self.chart_title.setStyleSheet("""
-            QLabel {
-                color: white;
-                font-weight: bold;
-                font-size: 14px;
-                margin-top: 4px;
-                margin-bottom: 2px;
-            }
-        """)
+        self.chart_title.setStyleSheet(
+            "QLabel { color: white; font-weight: bold; font-size: 14px; }"
+        )
         chart_header.addWidget(self.chart_title, 1)
         if hasattr(parent, "create_cps_window_controls_widget"):
-            chart_header.addWidget(parent.create_cps_window_controls_widget(), 0, Qt.AlignRight | Qt.AlignVCenter)
+            chart_header.addWidget(
+                parent.create_cps_window_controls_widget(),
+                0, Qt.AlignRight | Qt.AlignVCenter
+            )
         layout.addLayout(chart_header)
-        
+
         self.chart = parent.create_cps_widget()
         layout.addWidget(self.chart, 1)
-        
         self.setLayout(layout)
 
-
     def retranslate_ui(self):
-        """Retranslate UI elements based on current language"""
         from core.translation import _t
-        self.title.setText(_t("sys_title"))
-        
-        # Update DataCards titles
-        self.radiation_card.title_label.setText(_t("card_rad_title"))
-        self.radiation_card.second_title_label.setText(_t("card_rad_desc"))
-        
-        self.status_card.title_label.setText(_t("card_status_title"))
+        self.title.setText(_t("sys_title_overview"))
+        self.radiation_card.title_label.setText(_t("card_rad_title_overview"))
+        self.radiation_card.second_title_label.setText(_t("card_rad_desc_overview"))
+        self.status_card.title_label.setText(_t("card_status_title_overview"))
         self.status_card.second_title_label.setText(_t("card_status_temp"))
         self.status_card.subtitle_label.setText(_t("card_status_hv"))
-        
-        # Update Alarm card
         self.alarm_title_label.setText(_t("card_alarm_title"))
         self.alarm_status_label.setText(_t("status_normal"))
         self.alarm_desc_label.setText(_t("desc_no_alarm"))
-        
-        # Update Occupancy card
         self.occupancy_title_label.setText(_t("card_occ_title"))
         self.occupancy_status_label.setText(_t("status_vacant"))
         self.occupancy_desc_label.setText(_t("desc_no_traffic"))
-        
-        # Update Chart title
         self.chart_title.setText(_t("chart_title"))
 
 

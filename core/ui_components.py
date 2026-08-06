@@ -165,7 +165,11 @@ class StatusBar(QWidget):
 
     def update_user_info(self, username: str, role):
         """Update user information display"""
-        if role == UserRole.ADMIN:
+        if role is None:
+            from core.translation import _t
+            role_text = username or _t("status_public_mode")
+            color = "#607d8b"
+        elif role == UserRole.ADMIN:
             role_text = "Admin"
             color = "#ff9800"  # Orange
         else:
@@ -452,39 +456,40 @@ class BottomNavBar(QWidget):
 
         # 定义每个按钮的主题色
         button_colors = {
-            "overview": "#4a9eff",      # 蓝色
+            "home": "#26c6da",          # 青色 - 主显示（免登录）
+            "overview": "#4a9eff",      # 蓝色 - 原实时概览
             "spectrum": "#4caf50",      # 绿色
             "clients": "#ff9800",       # 橙色
             "alarm_log": "#f44336",     # 红色
             "settings": "#9c27b0"       # 紫色
         }
         
-        # Overview button
         from core.translation import _t
-        overview_widget = self.create_nav_button(_t("nav_overview"), "overview", button_colors["overview"], True)
+        home_widget = self.create_nav_button(_t("nav_home"), "alarm_inactive", button_colors["home"], True)
+        self.button_widgets.append(home_widget)
+        self.buttons.append(home_widget.findChild(QPushButton))
+
+        overview_widget = self.create_nav_button(_t("nav_overview"), "overview", button_colors["overview"], False)
         self.button_widgets.append(overview_widget)
         self.buttons.append(overview_widget.findChild(QPushButton))
         
-        # Spectrum button (第二个页面)
         spectrum_widget = self.create_nav_button(_t("nav_spectrum"), "spectrum", button_colors["spectrum"], False)
         self.button_widgets.append(spectrum_widget)
         self.buttons.append(spectrum_widget.findChild(QPushButton))
         
-        # Clients button (第三个页面)
         clients_widget = self.create_nav_button(_t("nav_clients"), "clients", button_colors["clients"], False)
         self.button_widgets.append(clients_widget)
         self.buttons.append(clients_widget.findChild(QPushButton))
         
-        # Alarm log button (第四个页面)
         alarm_log_widget = self.create_nav_button(_t("nav_alarm_log"), "alarm_log", button_colors["alarm_log"], False)
         self.button_widgets.append(alarm_log_widget)
         self.buttons.append(alarm_log_widget.findChild(QPushButton))
         
-        # Settings button
         settings_widget = self.create_nav_button(_t("nav_settings"), "settings", button_colors["settings"], False)
         self.button_widgets.append(settings_widget)
         self.buttons.append(settings_widget.findChild(QPushButton))
         
+        layout.addWidget(home_widget)
         layout.addWidget(overview_widget)
         layout.addWidget(spectrum_widget)
         layout.addWidget(clients_widget)
@@ -493,12 +498,12 @@ class BottomNavBar(QWidget):
         
         self.setLayout(layout)
 
-        # 保持向后兼容性 - 添加按钮属性引用
-        self.overview_btn = self.buttons[0]
-        self.spectrum_btn = self.buttons[1]
-        self.clients_btn = self.buttons[2]
-        self.alarm_log_btn = self.buttons[3]
-        self.settings_btn = self.buttons[4]
+        self.home_btn = self.buttons[0]
+        self.overview_btn = self.buttons[1]
+        self.spectrum_btn = self.buttons[2]
+        self.clients_btn = self.buttons[3]
+        self.alarm_log_btn = self.buttons[4]
+        self.settings_btn = self.buttons[5]
     
     def create_nav_button(self, text, icon_tag, color, active=False):
         """Create a navigation button with SVG icon"""
@@ -687,7 +692,10 @@ class BottomNavBar(QWidget):
     def retranslate_ui(self):
         """Retranslate bottom navigation bar buttons"""
         from core.translation import _t
-        nav_keys = ["nav_overview", "nav_spectrum", "nav_clients", "nav_alarm_log", "nav_settings"]
+        nav_keys = [
+            "nav_home", "nav_overview", "nav_spectrum",
+            "nav_clients", "nav_alarm_log", "nav_settings",
+        ]
         for i, widget in enumerate(self.button_widgets):
             if i < len(nav_keys):
                 new_text = _t(nav_keys[i])

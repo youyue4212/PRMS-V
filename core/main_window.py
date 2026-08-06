@@ -46,6 +46,7 @@ from core.icons import get_icon_svg  # Assuming your SVG functions are in a sepa
 from core.ui_components import StatusBar, DataCard, BottomNavBar, AcquisitionButton
 from core.diagnostics import FaultCode
 from core.pages import OverviewPage, SpectrumPage, SettingsPage, ClientsPage
+from core.home_page import HomePage
 
 # 概览报警卡内说明区最多显示行数（超出部分在卡片内滚动，完整内容放 tooltip）
 _FAULT_DESC_MAX_LINES = 2
@@ -98,12 +99,13 @@ class MainWindow(QMainWindow, UIBase):
         self.timeout_manager = get_timeout_manager()
         
         # Set window title based on user role
+        from core.translation import _t
         if current_user and 'username' in current_user:
             username = current_user['username']
             role_name = "Admin" if current_user['role'] == UserRole.ADMIN else "User"
             self.setWindowTitle(f"Gamma-ray Spectrometer - {username} ({role_name})")
         else:
-            self.setWindowTitle("Gamma-ray Spectrometer")
+            self.setWindowTitle(_t("home_title"))
         
         # 设置窗口初始大小，但不固定，允许外部控制全屏或调整大小
         self.resize(1024, 600)
@@ -122,25 +124,23 @@ class MainWindow(QMainWindow, UIBase):
         self.status_bar = StatusBar()
         if current_user and 'username' in current_user:
             self.status_bar.update_user_info(current_user['username'], current_user['role'])
+        else:
+            self.status_bar.update_user_info(_t("status_public_mode"), None)
         main_layout.addWidget(self.status_bar)
         
         # Stacked widget for pages
+        # 0: 主显示(免登录)  1: 原实时概览  2:能谱  3:诊断  4:报警日志  5:设置
         self.stacked_widget = QStackedWidget()
-        
 
+        self.home_page = HomePage(self)
+        self.home_page.channel_reset_btn.clicked.connect(self.request_channel_alarm_reset)
         self.overview_page = OverviewPage(self)
-        
-        # Spectrum page (现在在第二位)
         self.spectrum_page = SpectrumPage(self)
-
-        # Clients page (现在在第三位)
         self.clients_page = ClientsPage(self)
-        
-        # Alarm log page (第四位)
         self.alarm_log_page = AlarmLogPage(self)
+        self.settings_page = SettingsPage(self)
 
-        self.settings_page=SettingsPage(self)
-        
+        self.stacked_widget.addWidget(self.home_page)
         self.stacked_widget.addWidget(self.overview_page)
         self.stacked_widget.addWidget(self.spectrum_page)
         self.stacked_widget.addWidget(self.clients_page)
@@ -149,9 +149,9 @@ class MainWindow(QMainWindow, UIBase):
         
         main_layout.addWidget(self.stacked_widget, 1)
         
-        # Acquisition button container - 优化为小屏幕
-        button_container = QWidget()
-        button_container.setStyleSheet("background-color: #1a1a1a;")
+        # Acquisition button container - 优化为小屏幕（登录后才显示）
+        self.button_container = QWidget()
+        self.button_container.setStyleSheet("background-color: #1a1a1a;")
         button_layout = QHBoxLayout()
         button_layout.setContentsMargins(20, 5, 20, 5)  # 大幅减少边距，适应小屏幕
         
@@ -163,7 +163,6 @@ class MainWindow(QMainWindow, UIBase):
         button_layout.addWidget(self.acquisition_btn)
         
         # Add save data button
-        from core.translation import _t
         self.save_data_btn = QPushButton(_t("btn_save"))
         self.save_data_btn.setFixedHeight(button_height)
         self.save_data_btn.setStyleSheet(f"""
@@ -213,12 +212,12 @@ class MainWindow(QMainWindow, UIBase):
         self.user_management_btn.clicked.connect(self.show_user_management)
         button_layout.addWidget(self.user_management_btn)
 
-        # Add logout button
-        self.logout_btn = QPushButton(_t("btn_logout"))
+        # Add logout / login button
+        self.logout_btn = QPushButton(_t("btn_login"))
         self.logout_btn.setFixedHeight(button_height)
         self.logout_btn.setStyleSheet(f"""
             QPushButton {{
-                background-color: #f44336;
+                background-color: #4CAF50;
                 color: white;
                 border: none;
                 border-radius: 12px;
@@ -228,26 +227,27 @@ class MainWindow(QMainWindow, UIBase):
                 min-height: {button_height}px;
             }}
             QPushButton:pressed {{
-                background-color: #d32f2f;
+                background-color: #45a049;
             }}
             QPushButton:disabled {{
                 background-color: #666666;
                 color: #aaaaaa;
             }}
         """)
-        self.logout_btn.clicked.connect(self.logout)
+        self.logout_btn.clicked.connect(self.login)
         button_layout.addWidget(self.logout_btn)
         
-        button_container.setLayout(button_layout)
-        main_layout.addWidget(button_container)
+        self.button_container.setLayout(button_layout)
+        main_layout.addWidget(self.button_container)
         
         # Bottom navigation
         self.bottom_nav = BottomNavBar()
-        self.bottom_nav.overview_btn.clicked.connect(lambda: self.switch_page(0))
-        self.bottom_nav.spectrum_btn.clicked.connect(lambda: self.switch_page(1))  # 能谱页面现在在第二位
-        self.bottom_nav.clients_btn.clicked.connect(lambda: self.switch_page(2))   # 客户端页面现在在第三位
-        self.bottom_nav.alarm_log_btn.clicked.connect(lambda: self.switch_page(3))  # 报警记录页面在第四位
-        self.bottom_nav.settings_btn.clicked.connect(lambda: self.switch_page(4))   # 设置页面现在在第五位
+        self.bottom_nav.home_btn.clicked.connect(lambda: self.switch_page(0))
+        self.bottom_nav.overview_btn.clicked.connect(lambda: self.switch_page(1))
+        self.bottom_nav.spectrum_btn.clicked.connect(lambda: self.switch_page(2))
+        self.bottom_nav.clients_btn.clicked.connect(lambda: self.switch_page(3))
+        self.bottom_nav.alarm_log_btn.clicked.connect(lambda: self.switch_page(4))
+        self.bottom_nav.settings_btn.clicked.connect(lambda: self.switch_page(5))
         main_layout.addWidget(self.bottom_nav)
         
         central_widget.setLayout(main_layout)
@@ -257,6 +257,7 @@ class MainWindow(QMainWindow, UIBase):
         # 在UIBase中设置回调函数
         self.data_updated_callback = self.data_updated
         self.alarm_status_callback = self.update_alarm_status
+        self.master_summary_callback = self.on_master_summary_ui
         self.prev_fault_keys = set()
 
         # 连接超时管理器信号
@@ -290,8 +291,16 @@ class MainWindow(QMainWindow, UIBase):
         # Initial check
         self.check_device_connection()
         
-        # 根据用户权限更新UI
+        # 根据用户权限更新UI（未登录=主显示监视模式）
         self.update_ui_for_user_role()
+        for page in (
+            self.home_page, self.overview_page, self.spectrum_page,
+            self.clients_page, self.alarm_log_page, self.settings_page,
+        ):
+            if hasattr(page, "retranslate_ui"):
+                page.retranslate_ui()
+        if hasattr(self.bottom_nav, "retranslate_ui"):
+            self.bottom_nav.retranslate_ui()
         
         # 如果是管理员模式，启动超时计时器
         if self.current_user and self.current_user['role'] == UserRole.ADMIN:
@@ -352,6 +361,8 @@ class MainWindow(QMainWindow, UIBase):
             if self.alarm_status_callback is None:
                 self.log("WARNING: alarm_status_callback is None, resetting...", 'WARNING')
                 self.alarm_status_callback = self.update_alarm_status
+            if self.master_summary_callback is None:
+                self.master_summary_callback = self.on_master_summary_ui
 
         # 运行周期性诊断检查（按有效在线探头/IP 去重，避免幽灵连接）
         if hasattr(self, "get_online_probe_client_ids"):
@@ -364,7 +375,10 @@ class MainWindow(QMainWindow, UIBase):
                 if self.worker and self.worker.is_running:
                     connected_clients = ["serial_client"]
 
-        self.diagnostics_manager.run_periodic_checks(connected_clients)
+        self.diagnostics_manager.run_periodic_checks(
+            connected_clients,
+            ignore_clients=[cid for cid in [getattr(self, "master_client_id", None)] if cid],
+        )
         purged = getattr(self.diagnostics_manager, "purged_offline_clients", None) or []
         try:
             expected = int(getattr(self.config, "expected_probe_count", 0) or 0)
@@ -379,10 +393,34 @@ class MainWindow(QMainWindow, UIBase):
         self.update_system_status()
         
     
+    def is_logged_in(self) -> bool:
+        """Whether a real user session is active (not public monitor mode)."""
+        return bool(self.current_user and self.current_user.get("username"))
+
     def switch_page(self, index):
-        """Switch between pages"""
+        """Switch between pages. Index 0 (home) is public; others require login."""
+        if index != 0 and not self.is_logged_in():
+            from core.translation import _t
+            # Offer login; on success open the requested page
+            if self.login(preferred_page=index, required_for_page=True):
+                return
+            QMessageBox.information(
+                self,
+                _t("msg_login_required_title"),
+                _t("msg_login_required_text"),
+            )
+            self.stacked_widget.setCurrentIndex(0)
+            self.bottom_nav.set_active_button(0)
+            return
+
         self.stacked_widget.setCurrentIndex(index)
         self.bottom_nav.set_active_button(index)
+        if index == 0:
+            # 切回主显示时立即按当前源刷新（主控 L2 或探头回退）
+            if self.is_master_online() and getattr(self, "latest_master_summary", None) is not None:
+                self.on_master_summary_ui(self.latest_master_summary, self.master_client_id)
+            else:
+                self._refresh_home_from_probes(self.client_data)
         # 更新操作时间（重置超时计时器）
         self.update_operate_time()
     
@@ -439,9 +477,12 @@ class MainWindow(QMainWindow, UIBase):
             if self.data_updated_callback is not None:
                 self.data_updated_callback(self.current_stat, 0, {})
             
-            # 更新卡片显示
-            self.overview_page.radiation_card.update_data("0.00 uSv/h", "0 cps")
-            self.overview_page.status_card.update_data("0°C", "0 V")
+            # 更新原概览 + 主显示
+            self.overview_page.radiation_card.update_data("0 cps", "")
+            self.overview_page.status_card.update_data("0" + chr(176) + "C", "0 V")
+            if hasattr(self, "home_page"):
+                self.home_page.total_cps_label.setText("0 cps")
+                self.home_page.update_probe_tiles_from_master(None, False)
             
             self.log("All data cleared", 'INFO')
     
@@ -460,29 +501,675 @@ class MainWindow(QMainWindow, UIBase):
         super().save_data(auto_save=auto_save, auto_save_path=auto_save_path)
     
     def data_updated(self, data, total_count_rate=None, client_data=None):
-         hv,rates,temp =data['hv'], data['rates'],data['temp']
-         
-         # 更新辐射卡：只显示计数率(cps)，不显示剂量率
-         self.overview_page.radiation_card.update_data(
-             f'{int(rates)} cps',  # 主值：计数率 (cps)
-             ""  # 空字符串，不显示剂量率
-         )
-         
-         # 更新状态卡：大字体显示温度，小字体显示高压
-         self.overview_page.status_card.update_data(f'{round(temp,1)} ' + chr(176) + 'C', f'{round(hv,1)} V')
-         
-         # 不再处理总计数率和客户端数据显示
-         # 根据用户要求，移除Total Count Rate和Client count数据显示
-    
+        """Update original overview cards; home probe CPS always from probe spectrum."""
+        hv, rates, temp = data['hv'], data['rates'], data['temp']
+        self.overview_page.radiation_card.update_data(f'{int(rates)} cps', "")
+        self.overview_page.status_card.update_data(
+            f'{round(temp,1)} ' + chr(176) + 'C',
+            f'{round(hv,1)} V'
+        )
+        cd = client_data if client_data is not None else self.client_data
+        # 各探头计数率：始终用探头 TCP 谱包（与能谱同源）
+        self._apply_home_probe_cps(cd)
+        # 主控在线：用最新 L2 刷新报警区（探头已无超阈时可软消 0x01）
+        if self.is_master_online() and getattr(self, "latest_master_summary", None) is not None:
+            lang = "zh"
+            try:
+                from core.translation import TranslationManager
+                lang = TranslationManager().current_lang
+            except Exception:
+                pass
+            self._update_home_alarm_from_master(self.latest_master_summary, lang=lang)
+            return
+        # 主控无效：硬报警区显示离线（不跟探头拼通道报警）
+        lang = "zh"
+        try:
+            from core.translation import TranslationManager
+            lang = TranslationManager().current_lang
+        except Exception:
+            pass
+        link_only = bool(getattr(self, "master_client_id", None))
+        self.home_page.set_master_link_status(False, lang=lang, link_only=link_only)
+        self.home_page.master_relay_label.setText("--")
+        self._update_home_alarm_from_master(None, lang=lang, master_offline=True)
+        self._update_home_occupancy(None, lang=lang, master_offline=True)
+
+    def _collect_home_probe_entries(self, client_data=None):
+        """Build home tile entries from probe TCP client_data (exclude master)."""
+        from core.translation import _t
+
+        data = client_data if client_data is not None else getattr(self, "client_data", {}) or {}
+        master_cid = getattr(self, "master_client_id", None)
+        items = []
+        for cid, d in data.items():
+            if master_cid and cid == master_cid:
+                continue
+            items.append((cid, d))
+
+        def _sort_key(pair):
+            cid, d = pair
+            pid = d.get("product_id")
+            try:
+                if pid is not None and int(pid) > 0:
+                    return (0, int(pid), cid)
+            except (TypeError, ValueError):
+                pass
+            return (1, cid)
+
+        items.sort(key=_sort_key)
+        if not items and hasattr(self, "get_online_probe_client_ids"):
+            for cid in self.get_online_probe_client_ids():
+                items.append((cid, {"rates": 0, "alarm": False, "occupancy": False}))
+
+        entries = []
+        total = 0
+        for i, (cid, d) in enumerate(items):
+            cps = int(d.get("rates", 0) or 0)
+            total += cps
+            hit = bool(d.get("alarm", False))
+            if hasattr(self, "get_probe_label"):
+                name = self.get_probe_label(cid)
+            else:
+                name = _t("probe_slot_name", n=i + 1)
+            entries.append({
+                "name": name,
+                "cps": cps,
+                "online": True,
+                "hit": hit,
+            })
+        return entries, total
+
+    def _apply_home_probe_cps(self, client_data=None):
+        """Home page per-probe CPS + total — from probe spectrum only."""
+        from core.translation import TranslationManager
+
+        lang = TranslationManager().current_lang
+        page = self.home_page
+        entries, total = self._collect_home_probe_entries(client_data)
+        if not entries:
+            # 保留上一帧，避免闪灰
+            page.update_probe_tiles_from_probe_list([], lang=lang)
+            if not getattr(page, "_had_tile_data", False):
+                page.total_cps_label.setText("0 cps")
+            return
+        page.total_cps_label.setText("%d cps" % total)
+        # master_online=True：CPS 已是正式显示源，不再标「(探头)」后缀
+        page.update_probe_tiles_from_probe_list(entries, lang=lang, show_as_primary=True)
+
+    def _refresh_home_from_probes(self, client_data=None):
+        """Master offline/invalid L2: probe CPS + suspend channel hard-alarm."""
+        from core.translation import TranslationManager
+
+        lang = TranslationManager().current_lang
+        page = self.home_page
+        link_only = bool(getattr(self, "master_client_id", None)) and not self.is_master_online()
+        page.set_master_link_status(False, lang=lang, link_only=link_only)
+        page.master_relay_label.setText("--")
+        self._apply_home_probe_cps(client_data)
+        self._update_home_alarm_from_master(None, lang=lang, master_offline=True)
+        self._update_home_occupancy(None, lang=lang, master_offline=True)
+
+    def on_master_summary_ui(self, packet, client_id=None):
+        """Refresh home alarm/channel from Master L2; CPS stays on probe spectrum."""
+        from core.translation import _t, TranslationManager
+        import time as _time
+
+        lang = TranslationManager().current_lang
+        page = self.home_page
+        now = _time.time()
+        master_cid = client_id or getattr(self, "master_client_id", None)
+
+        # 本拍已解析到的包：报警状态必须跟本拍 decision，绝不能用旧 0x01 顶住新包
+        display_pkt = None
+        if packet is not None:
+            display_pkt = packet
+            if hasattr(packet, "looks_sane") and packet.looks_sane():
+                self._last_sane_master_packet = packet
+                self._last_sane_master_at = now
+            self._last_any_master_packet = packet
+            self._last_any_master_at = now
+        else:
+            # 仅超时无包时短时保持上一拍；有新包时不用旧包覆盖
+            last_pkt = getattr(self, "_last_any_master_packet", None) or getattr(
+                self, "_last_sane_master_packet", None
+            )
+            last_at = float(
+                getattr(self, "_last_any_master_at", 0)
+                or getattr(self, "_last_sane_master_at", 0)
+                or 0
+            )
+            if last_pkt is not None and (now - last_at) <= 2.0:
+                display_pkt = last_pkt
+
+        online = display_pkt is not None and (
+            packet is not None or self.is_master_online()
+            or (now - float(getattr(self, "_last_any_master_at", 0) or 0)) <= 2.0
+        )
+        sane = bool(
+            display_pkt is not None
+            and hasattr(display_pkt, "looks_sane")
+            and display_pkt.looks_sane()
+        )
+        link_only = bool(master_cid) and display_pkt is not None and not sane
+
+        page.set_master_link_status(
+            online and sane,
+            getattr(display_pkt, "master_id", None) if display_pkt else None,
+            lang=lang,
+            link_only=link_only or (bool(master_cid) and display_pkt is None),
+        )
+
+        # 计数率始终跟探头
+        self._apply_home_probe_cps(self.client_data)
+
+        if display_pkt is None:
+            page.master_relay_label.setText("--")
+            self._update_home_alarm_from_master(None, lang=lang, master_offline=True)
+            self._update_home_occupancy(None, lang=lang, master_offline=True)
+            return
+
+        # decision 边沿日志，便于确认主控是否已离开 0x01
+        prev = getattr(self, "_prev_master_decision", None)
+        cur = int(display_pkt.decision_result)
+        if prev is None or prev != cur:
+            self._prev_master_decision = cur
+            self.log(
+                "Master decision 0x%02X → 0x%02X (%s) hit_mask=0x%04X relay_mask=0x%02X"
+                % (
+                    int(prev if prev is not None else 0xFE),
+                    cur,
+                    display_pkt.decision_text("zh"),
+                    int(display_pkt.hit_probe_mask),
+                    int(getattr(display_pkt, "relay_mask", 0) or 0),
+                ),
+                "INFO",
+            )
+
+        # 继电器 UI 跟 L2 io_status bit4/5/6
+        r0 = int(bool(display_pkt.relay0))
+        r1 = int(bool(display_pkt.relay1))
+        r2 = int(bool(display_pkt.relay2))
+        page.master_relay_label.setText(
+            "%s: 0=%s 1=%s 2=%s"
+            % (
+                _t("card_status_relay"),
+                _t("master_relay_on") if r0 else _t("master_relay_off"),
+                _t("master_relay_on") if r1 else _t("master_relay_off"),
+                _t("master_relay_on") if r2 else _t("master_relay_off"),
+            )
+        )
+        self._sync_master_relay_ui_from_l2(display_pkt)
+        # 有本拍 L2 就刷新报警区（即使 looks_sane=False，decision 仍以本拍为准）
+        self._update_home_alarm_from_master(display_pkt, lang=lang)
+        self._update_home_occupancy(display_pkt, lang=lang)
+
+    def _sync_master_relay_ui_from_l2(self, packet):
+        """设置页主控继电器勾选/状态跟 L2 bit4/5/6（有 pending 命令时跳过，避免打架）。"""
+        if not hasattr(self, "master_relay_status_label"):
+            return
+        pending = float(getattr(self, "_pending_master_relay_cmd", 0) or 0)
+        if pending > 0 and (time.time() - pending) < 2.0:
+            return
+        mask = int(getattr(packet, "relay_mask", 0) or 0)
+        if hasattr(self, "_apply_master_relay_mask_to_ui"):
+            self._apply_master_relay_mask_to_ui(mask)
+
+    def _any_probe_tcp_alarm(self) -> bool:
+        """True if any non-master probe spectrum reports alarm latch/hard bit."""
+        master_cid = getattr(self, "master_client_id", None)
+        for cid, d in (getattr(self, "client_data", None) or {}).items():
+            if master_cid and cid == master_cid:
+                continue
+            if bool(d.get("alarm", False)):
+                return True
+        return False
+
+    def _set_home_status_style(self, label, color, bg, border):
+        label.setStyleSheet("""
+            QLabel {
+                color: %s; font-size: 16px; font-weight: bold;
+                padding: 2px 8px; background-color: %s;
+                border-radius: 8px; border: 1px solid %s;
+            }
+        """ % (color, bg, border))
+
+    def _set_home_alarm_card_border(self, color=None):
+        page = self.home_page
+        if color:
+            page.alarm_card.setStyleSheet("""
+                QFrame {
+                    background-color: #2a2a2a; border-radius: 10px;
+                    border: 2px solid %s;
+                    background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
+                        stop: 0 #2a2a2a, stop: 1 #1f1f1f);
+                }
+            """ % color)
+            page.status_indicator_bar.setStyleSheet(
+                "QFrame { background-color: %s; border-radius: 1px; }" % color
+            )
+        else:
+            page.alarm_card.setStyleSheet("""
+                QFrame {
+                    background-color: #2a2a2a; border-radius: 10px; border: none;
+                    background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
+                        stop: 0 #2a2a2a, stop: 1 #1f1f1f);
+                }
+            """)
+            page.status_indicator_bar.setStyleSheet(
+                "QFrame { background-color: #4caf50; border-radius: 1px; }"
+            )
+
+    def _update_home_alarm_from_master(self, packet, lang="zh", master_offline=False):
+        """Home alarm follows master L2 decision.
+
+        硬报 UI：0x02/0x03 进入；0x05/0x00/0x04 退出（不靠定时猜清除）。
+        0x01 仅黄提示；0x05 显示已确认（mask 仍满时提示辐射仍偏高）。
+        """
+        from core.translation import _t
+        from core.master_summary import format_io_brief, MASTER_DECISION_OVER_THRESHOLD
+        import time as _time
+
+        page = self.home_page
+        current_time = datetime.now().strftime("%H:%M:%S")
+        reset_btn = getattr(page, "channel_reset_btn", None)
+
+        if master_offline or packet is None:
+            self._over_thresh_probes_clear_since = None
+            self._over_thresh_soft_cleared = False
+            if reset_btn is not None:
+                reset_btn.setEnabled(False)
+            page.alarm_title_icon.load(get_icon_svg('alarm_inactive'))
+            page.alarm_indicator.load(get_icon_svg('alarm_inactive'))
+            page.alarm_status_label.setText(_t("master_offline"))
+            self._set_home_status_style(
+                page.alarm_status_label, "#ff9800",
+                "rgba(255, 152, 0, 0.12)", "rgba(255, 152, 0, 0.35)"
+            )
+            page.alarm_desc_label.setText(_t("desc_master_offline"))
+            self._set_home_alarm_card_border("#ff9800")
+            self._sync_channel_hard_alarm_log(False, None)
+            return
+
+        kind = packet.ui_alarm_kind()
+        hit_mask = int(getattr(packet, "hit_probe_mask", 0) or 0)
+        desc = _t("desc_master_alarm", decision=packet.decision_text(lang), time=current_time)
+        if packet.relay_output and kind == "channel_alarm":
+            desc = "%s | %s" % (desc, _t("desc_relay_hold"))
+        if kind == "channel_alarm" and getattr(packet, "ir_degraded", False):
+            desc = "%s | %s" % (desc, _t("desc_ir_degraded"))
+
+        soft_cleared = False
+        # Soft-clear 0x01 when probe TCP alarm and master hit_mask are both clear.
+        probes_clear = (not self._any_probe_tcp_alarm()) and (hit_mask == 0)
+        if (
+            kind == "over_threshold"
+            and int(packet.decision_result) == MASTER_DECISION_OVER_THRESHOLD
+            and probes_clear
+        ):
+            t0 = getattr(self, "_over_thresh_probes_clear_since", None)
+            now = _time.time()
+            if t0 is None:
+                self._over_thresh_probes_clear_since = now
+            elif (now - float(t0)) >= 2.0:
+                soft_cleared = True
+                if not getattr(self, "_over_thresh_soft_cleared", False):
+                    self._over_thresh_soft_cleared = True
+                    self.log(
+                        "Soft-clear over-threshold UI: decision still 0x01, "
+                        "probes clear and hit_mask=0",
+                        "INFO",
+                    )
+                kind = "normal"
+                desc = _t("desc_over_thresh_soft_clear")
+        else:
+            self._over_thresh_probes_clear_since = None
+            self._over_thresh_soft_cleared = False
+
+        pending_reset = (
+            float(getattr(self, "_pending_channel_reset_at", 0) or 0) > 0
+            or bool(getattr(self, "_awaiting_l2_acked", False))
+        )
+        # 仅硬报时可点复位；等待应答 / 等 L2=0x05 期间保持禁用
+        if reset_btn is not None:
+            reset_btn.setEnabled(kind == "channel_alarm" and not pending_reset)
+
+        if kind == "channel_alarm":
+            page.alarm_title_icon.load(get_icon_svg('alarm_active'))
+            page.alarm_indicator.load(get_icon_svg('alarm_active'))
+            if getattr(packet, "ir_degraded", False):
+                page.alarm_status_label.setText(_t("status_channel_alarm_degraded"))
+            else:
+                page.alarm_status_label.setText(_t("status_channel_alarm"))
+            self._set_home_status_style(
+                page.alarm_status_label, "#ff4444",
+                "rgba(255, 68, 68, 0.15)", "rgba(255, 68, 68, 0.4)"
+            )
+            page.alarm_desc_label.setText(desc)
+            self._set_home_alarm_card_border("#ff4444")
+            self._sync_channel_hard_alarm_log(True, packet)
+        elif kind == "acked":
+            page.alarm_title_icon.load(get_icon_svg('alarm_inactive'))
+            page.alarm_indicator.load(get_icon_svg('alarm_inactive'))
+            page.alarm_status_label.setText(_t("status_acked"))
+            self._set_home_status_style(
+                page.alarm_status_label, "#7e57c2",
+                "rgba(126, 87, 194, 0.15)", "rgba(126, 87, 194, 0.4)"
+            )
+            if hit_mask != 0:
+                page.alarm_desc_label.setText(_t("desc_acked_still_hot", mask=hit_mask))
+            else:
+                page.alarm_desc_label.setText(
+                    "%s | %s" % (_t("desc_acked"), desc)
+                )
+            self._set_home_alarm_card_border("#7e57c2")
+            self._sync_channel_hard_alarm_log(False, packet)
+            # 收到 0x05：关硬报 + 写审计
+            if getattr(self, "_awaiting_l2_acked", False) or getattr(
+                self, "_channel_reset_audit_snap", None
+            ):
+                self._write_channel_reset_audit(packet, source="l2_0x05")
+            self._awaiting_l2_acked = False
+            self._pending_channel_reset_at = 0.0
+        elif kind == "passing":
+            page.alarm_title_icon.load(get_icon_svg('alarm_inactive'))
+            page.alarm_indicator.load(get_icon_svg('occupancy_active'))
+            page.alarm_status_label.setText(_t("status_passing"))
+            self._set_home_status_style(
+                page.alarm_status_label, "#2196f3",
+                "rgba(33, 150, 243, 0.15)", "rgba(33, 150, 243, 0.4)"
+            )
+            page.alarm_desc_label.setText(desc)
+            self._set_home_alarm_card_border("#2196f3")
+            self._sync_channel_hard_alarm_log(False, packet)
+        elif kind == "over_threshold":
+            page.alarm_title_icon.load(get_icon_svg('alarm_inactive'))
+            page.alarm_indicator.load(get_icon_svg('alarm_inactive'))
+            page.alarm_status_label.setText(_t("status_over_threshold"))
+            self._set_home_status_style(
+                page.alarm_status_label, "#ff9800",
+                "rgba(255, 152, 0, 0.12)", "rgba(255, 152, 0, 0.35)"
+            )
+            page.alarm_desc_label.setText(desc)
+            self._set_home_alarm_card_border("#ff9800")
+            self._sync_channel_hard_alarm_log(False, packet)
+        elif kind == "fault":
+            page.alarm_title_icon.load(get_icon_svg('alarm_inactive'))
+            page.alarm_indicator.load(get_icon_svg('alarm_inactive'))
+            page.alarm_status_label.setText(_t("status_sys_fault"))
+            self._set_home_status_style(
+                page.alarm_status_label, "#9e9e9e",
+                "rgba(158, 158, 158, 0.15)", "rgba(158, 158, 158, 0.4)"
+            )
+            page.alarm_desc_label.setText(desc)
+            self._set_home_alarm_card_border("#9e9e9e")
+            self._sync_channel_hard_alarm_log(False, packet)
+        else:
+            page.alarm_title_icon.load(get_icon_svg('alarm_inactive'))
+            page.alarm_indicator.load(get_icon_svg('alarm_inactive'))
+            page.alarm_status_label.setText(_t("status_normal"))
+            self._set_home_status_style(
+                page.alarm_status_label, "#4caf50",
+                "rgba(76, 175, 80, 0.1)", "rgba(76, 175, 80, 0.3)"
+            )
+            if soft_cleared:
+                page.alarm_desc_label.setText(desc)
+            else:
+                page.alarm_desc_label.setText(format_io_brief(packet, lang=lang))
+            self._set_home_alarm_card_border(None)
+            self._sync_channel_hard_alarm_log(False, packet)
+
+    def _sync_channel_hard_alarm_log(self, active: bool, packet=None):
+        """边沿写入通道符合硬报事件（alarm_logger client=master_channel）。"""
+        prev = bool(getattr(self, "_channel_hard_alarm_active", False))
+        if prev == bool(active):
+            if active and packet is not None:
+                # 持续硬报时刷新峰值 CPS
+                try:
+                    from core.alarm_logger import get_alarm_logger
+                    get_alarm_logger().log_alarm_event(
+                        client_id="master_channel",
+                        alarm_status=True,
+                        count_rate=float(getattr(packet, "total_cps", 0) or 0),
+                        temperature=0.0,
+                        hv=0.0,
+                        product_id=int(getattr(packet, "master_id", 0) or 0),
+                        sensitivity=0,
+                        alarm_type="ChannelMatch",
+                        message="hit_mask=0x%04X decision=0x%02X"
+                        % (
+                            int(getattr(packet, "hit_probe_mask", 0) or 0),
+                            int(getattr(packet, "decision_result", 0) or 0),
+                        ),
+                    )
+                except Exception:
+                    pass
+            return
+        self._channel_hard_alarm_active = bool(active)
+        try:
+            from core.alarm_logger import get_alarm_logger
+            cps = float(getattr(packet, "total_cps", 0) or 0) if packet else 0.0
+            mask = int(getattr(packet, "hit_probe_mask", 0) or 0) if packet else 0
+            decision = int(getattr(packet, "decision_result", 0) or 0) if packet else 0
+            get_alarm_logger().log_alarm_event(
+                client_id="master_channel",
+                alarm_status=bool(active),
+                count_rate=cps,
+                temperature=0.0,
+                hv=0.0,
+                product_id=int(getattr(packet, "master_id", 0) or 0) if packet else 0,
+                sensitivity=0,
+                alarm_type="ChannelMatch",
+                message="hit_mask=0x%04X decision=0x%02X" % (mask, decision),
+            )
+            self.log(
+                "Channel hard-alarm %s (decision=0x%02X hit_mask=0x%04X cps=%d)"
+                % ("ACTIVE" if active else "CLEAR", decision, mask, int(cps)),
+                "WARNING" if active else "INFO",
+            )
+        except Exception as e:
+            self.log("Channel hard-alarm log failed: %s" % e, "ERROR")
+
+    def request_channel_alarm_reset(self):
+        """用户点「通道报警复位」→ 二次确认 → 主控 0x15。"""
+        from core.translation import _t
+        import time as _time
+
+        master_cid = getattr(self, "master_client_id", None)
+        if not master_cid or not getattr(self, "worker", None):
+            QMessageBox.warning(
+                self, _t("msg_channel_reset_title"), _t("msg_channel_reset_no_master")
+            )
+            return
+
+        reply = QMessageBox.question(
+            self,
+            _t("msg_channel_reset_title"),
+            _t("msg_channel_reset_text"),
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        pkt = getattr(self, "latest_master_summary", None) or getattr(
+            self, "_last_any_master_packet", None
+        )
+        user = None
+        if isinstance(getattr(self, "current_user", None), dict):
+            user = self.current_user.get("username") or self.current_user.get("role")
+        self._channel_reset_audit_snap = {
+            "user": user or "public",
+            "at": _time.time(),
+            "hit_mask": int(getattr(pkt, "hit_probe_mask", 0) or 0) if pkt else 0,
+            "total_cps": int(getattr(pkt, "total_cps", 0) or 0) if pkt else 0,
+            "decision": int(getattr(pkt, "decision_result", 0) or 0) if pkt else 0,
+            "relay": int(getattr(pkt, "relay_mask", 0) or 0) if pkt else 0,
+        }
+
+        ok = self.worker.send_command_to_client(
+            master_cid,
+            "channel_alarm_reset",
+            0,
+            description="Channel alarm manual reset (0x15)",
+        )
+        if not ok:
+            QMessageBox.warning(
+                self, _t("msg_channel_reset_title"), _t("msg_channel_reset_fail")
+            )
+            return
+
+        self._pending_channel_reset_at = _time.time()
+        btn = getattr(self.home_page, "channel_reset_btn", None)
+        if btn is not None:
+            btn.setEnabled(False)
+        self.log(
+            "Channel alarm reset 0x15 sent by %s (hit_mask=0x%04X cps=%d decision=0x%02X)"
+            % (
+                self._channel_reset_audit_snap["user"],
+                self._channel_reset_audit_snap["hit_mask"],
+                self._channel_reset_audit_snap["total_cps"],
+                self._channel_reset_audit_snap["decision"],
+            ),
+            "INFO",
+        )
+        QMessageBox.information(
+            self, _t("msg_channel_reset_title"), _t("msg_channel_reset_sent")
+        )
+        QTimer.singleShot(5000, self._channel_reset_timeout_check)
+
+    def _channel_reset_timeout_check(self):
+        from core.translation import _t
+        import time as _time
+
+        pending = float(getattr(self, "_pending_channel_reset_at", 0) or 0)
+        if pending <= 0:
+            return
+        if (_time.time() - pending) < 4.5:
+            return
+        self._pending_channel_reset_at = 0.0
+        self.log("Channel alarm reset 0x15 ack timeout", "WARNING")
+        # 若仍硬报则重新启用按钮
+        pkt = getattr(self, "latest_master_summary", None) or getattr(
+            self, "_last_any_master_packet", None
+        )
+        btn = getattr(self.home_page, "channel_reset_btn", None)
+        if btn is not None and pkt is not None and getattr(pkt, "is_channel_alarm", lambda: False)():
+            btn.setEnabled(True)
+        QMessageBox.warning(
+            self, _t("msg_channel_reset_title"), _t("msg_channel_reset_timeout")
+        )
+
+    def on_channel_alarm_reset_feedback(self, packet):
+        """主控 CmdFeedback control_code=0x15。"""
+        from core.translation import _t
+
+        pending = float(getattr(self, "_pending_channel_reset_at", 0) or 0)
+        if pending <= 0 and not getattr(self, "_channel_reset_audit_snap", None):
+            # 非本机发起也可记日志
+            pass
+
+        if not packet.status:
+            self._pending_channel_reset_at = 0.0
+            self.log(
+                "Channel alarm reset rejected (status=0 value=0x%04X)"
+                % (int(packet.value) & 0xFFFF),
+                "WARNING",
+            )
+            btn = getattr(self.home_page, "channel_reset_btn", None)
+            pkt = getattr(self, "latest_master_summary", None)
+            if btn is not None and pkt is not None and pkt.is_channel_alarm():
+                btn.setEnabled(True)
+            QMessageBox.warning(
+                self, _t("msg_channel_reset_title"), _t("msg_channel_reset_cmd_fail")
+            )
+            return
+
+        # 成功：value 期望 0xA55A；硬报 UI 等下一拍 L2=0x05 再清
+        val = int(packet.value) & 0xFFFF
+        self._pending_channel_reset_at = 0.0
+        self._awaiting_l2_acked = True
+        self.log(
+            "Channel alarm reset CmdFeedback OK value=0x%04X (expect 0xA55A)"
+            % val,
+            "INFO" if val == 0xA55A else "WARNING",
+        )
+        QMessageBox.information(
+            self, _t("msg_channel_reset_title"), _t("msg_channel_reset_ok")
+        )
+
+    def _write_channel_reset_audit(self, packet, source="l2_0x05"):
+        """操作审计：谁、何时、当时 mask/cps。"""
+        snap = getattr(self, "_channel_reset_audit_snap", None) or {}
+        user = snap.get("user", "public")
+        hit = int(getattr(packet, "hit_probe_mask", 0) or 0) if packet else int(snap.get("hit_mask", 0))
+        cps = int(getattr(packet, "total_cps", 0) or 0) if packet else int(snap.get("total_cps", 0))
+        relay = int(getattr(packet, "relay_mask", 0) or 0) if packet else int(snap.get("relay", 0))
+        self.log(
+            "AUDIT channel_reset %s by=%s hit_mask=0x%04X cps=%d relay_mask=0x%02X"
+            % (source, user, hit, cps, relay),
+            "INFO",
+        )
+        self._channel_reset_audit_snap = None
+
+    def _update_home_occupancy_probe(self, busy, lang="zh"):
+        """Master offline: do not invent occupancy from probes."""
+        from core.translation import _t
+        page = self.home_page
+        page.occupancy_title_icon.load(get_icon_svg('occupancy_inactive'))
+        page.occupancy_indicator.load(get_icon_svg('occupancy_inactive'))
+        page.occupancy_status_label.setText(_t("master_offline"))
+        self._set_home_status_style(
+            page.occupancy_status_label, "#ff9800",
+            "rgba(255, 152, 0, 0.12)", "rgba(255, 152, 0, 0.35)"
+        )
+        page.occupancy_desc_label.setText(_t("desc_master_offline"))
+        page.occupancy_indicator_bar.setStyleSheet(
+            "QFrame { background-color: #ff9800; border-radius: 1px; }"
+        )
+
+    def _update_home_occupancy(self, packet, lang="zh", master_offline=False):
+        from core.translation import _t
+        from core.master_summary import format_io_brief
+        page = self.home_page
+        if master_offline or packet is None:
+            self._update_home_occupancy_probe(False, lang=lang)
+            return
+
+        busy = packet.is_channel_busy()
+        if busy:
+            page.occupancy_title_icon.load(get_icon_svg('occupancy_active'))
+            page.occupancy_indicator.load(get_icon_svg('occupancy_active'))
+            page.occupancy_status_label.setText(_t("status_passing"))
+            self._set_home_status_style(
+                page.occupancy_status_label, "#2196f3",
+                "rgba(33, 150, 243, 0.15)", "rgba(33, 150, 243, 0.4)"
+            )
+            page.occupancy_desc_label.setText(format_io_brief(packet, lang=lang))
+            page.occupancy_indicator_bar.setStyleSheet(
+                "QFrame { background-color: #2196f3; border-radius: 1px; }"
+            )
+        else:
+            page.occupancy_title_icon.load(get_icon_svg('occupancy_inactive'))
+            page.occupancy_indicator.load(get_icon_svg('occupancy_inactive'))
+            page.occupancy_status_label.setText(_t("status_vacant"))
+            self._set_home_status_style(
+                page.occupancy_status_label, "#4caf50",
+                "rgba(76, 175, 80, 0.1)", "rgba(76, 175, 80, 0.3)"
+            )
+            page.occupancy_desc_label.setText(format_io_brief(packet, lang=lang))
+            page.occupancy_indicator_bar.setStyleSheet(
+                "QFrame { background-color: #4caf50; border-radius: 1px; }"
+            )
+
     def update_alarm_status(self, is_alarm_active: bool):
-        """Update alarm indicator on overview page - Restored to previous display form"""
+        """Update alarm indicator on original overview page."""
         self.update_system_status(is_alarm_active)
 
     def update_system_status(self, is_alarm_active: Optional[bool] = None):
         """Update system status indicator on overview page, combining radiation alarms and device faults."""
         current_time = datetime.now().strftime("%H:%M:%S")
         
-        # If is_alarm_active is not provided, try to get it from the primary client's latest packet
+        # Original overview: alarm bit from primary probe spectrum packet
         if is_alarm_active is None:
             is_alarm_active = False
             if self.primary_client_id and self.primary_client_id in self.client_latest_packets:
@@ -699,7 +1386,7 @@ class MainWindow(QMainWindow, UIBase):
                 }
             """)
 
-        # 4. Update Occupancy Status on Overview Page
+        # 4. Update Occupancy Status on Overview Page (original probe bit path)
         from core.translation import _t
         occupancy_enabled = bool(getattr(self.config, 'occupancy_sensor_enabled', False))
         is_occupied = False
@@ -909,12 +1596,57 @@ class MainWindow(QMainWindow, UIBase):
         
         self.occ_flash_state = not self.occ_flash_state
     
+    def enter_public_mode(self):
+        """Exit login session -> public home monitor only."""
+        from core.translation import _t
+        self.current_user = None
+        try:
+            self.user_manager.logout()
+        except Exception:
+            pass
+        self.timeout_manager.stop_timer()
+        self.status_bar.hide_timeout_display()
+        self.status_bar.update_user_info(_t("status_public_mode"), None)
+        self.setWindowTitle(_t("home_title"))
+        self.button_container.setVisible(False)
+        self.stacked_widget.setCurrentIndex(0)
+        self.bottom_nav.set_active_button(0)
+        # Keep a floating login affordance on the toolbar area: show container with only login
+        self.button_container.setVisible(True)
+        self.acquisition_btn.setVisible(False)
+        self.save_data_btn.setVisible(False)
+        self.user_management_btn.setVisible(False)
+        self.logout_btn.setVisible(True)
+        self.logout_btn.setText(_t("btn_login"))
+        try:
+            self.logout_btn.clicked.disconnect()
+        except Exception:
+            pass
+        self.logout_btn.clicked.connect(self.login)
+        self.logout_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #4CAF50; color: white; border: none;
+                border-radius: 12px; font-size: 14px; font-weight: bold; padding: 0 15px;
+            }
+            QPushButton:pressed { background-color: #45a049; }
+        """)
+        # 回到公共主显示时立刻刷一次现有探头/主控数据
+        if self.is_master_online() and getattr(self, "latest_master_summary", None) is not None:
+            self.on_master_summary_ui(self.latest_master_summary, self.master_client_id)
+        else:
+            self._refresh_home_from_probes(self.client_data)
+
     def update_ui_for_user_role(self):
         """根据用户角色更新UI"""
-        if not self.current_user:
+        from core.translation import _t
+        if not self.is_logged_in():
+            self.enter_public_mode()
             return
         
         role = self.current_user['role']
+        self.button_container.setVisible(True)
+        self.acquisition_btn.setVisible(True)
+        self.save_data_btn.setVisible(True)
         
         # 更新用户管理按钮可见性
         # 注意：这里需要检查本地角色，而不是用户管理器中的角色
@@ -1076,6 +1808,23 @@ class MainWindow(QMainWindow, UIBase):
         
         if hasattr(self, 'relay_read_btn'):
             self.relay_read_btn.setEnabled(can_modify_settings)
+
+        if hasattr(self, 'master_relay0_checkbox'):
+            self.master_relay0_checkbox.setEnabled(can_modify_settings)
+        if hasattr(self, 'master_relay1_checkbox'):
+            self.master_relay1_checkbox.setEnabled(can_modify_settings)
+        if hasattr(self, 'master_relay2_checkbox'):
+            self.master_relay2_checkbox.setEnabled(can_modify_settings)
+        if getattr(self, 'master_relay_r1_btn', None) is not None:
+            self.master_relay_r1_btn.setEnabled(can_modify_settings)
+        if getattr(self, 'master_relay_r2_btn', None) is not None:
+            self.master_relay_r2_btn.setEnabled(can_modify_settings)
+        if getattr(self, 'master_relay_apply_btn', None) is not None:
+            self.master_relay_apply_btn.setEnabled(can_modify_settings)
+        if hasattr(self, 'master_relay_read_btn') and self.master_relay_read_btn is not None:
+            self.master_relay_read_btn.setEnabled(can_modify_settings)
+        if getattr(self, 'master_force_gate_btn', None) is not None:
+            self.master_force_gate_btn.setEnabled(can_modify_settings)
         
         if hasattr(self, 'alarm_read_btn'):
             self.alarm_read_btn.setEnabled(can_modify_settings)
@@ -1130,6 +1879,14 @@ class MainWindow(QMainWindow, UIBase):
         action_text = _t(action_name) if action_name.startswith("action_") else action_name
         user_name = self.current_user['username'] if self.current_user else "Unknown"
         perm_str = str(permission_required)
+
+        if not self.is_logged_in():
+            QMessageBox.warning(
+                self,
+                _t("msg_login_required_title"),
+                _t("msg_login_required_text"),
+            )
+            return False
 
         if str(os.environ.get("ALLOW_VIEWER_SETTINGS", "0")).strip() == "1":
             return True
@@ -1199,14 +1956,119 @@ class MainWindow(QMainWindow, UIBase):
         
         # 调用父类方法
         super().set_sensitivity_coefficient()
+
+    def reset_factory_defaults(self, all_probes: bool = False):
+        """一键参数复位 — 需探测器设置权限"""
+        if not self.check_permission_before_action("Factory reset", Permission.MODIFY_DETECTOR_SETTINGS):
+            return False
+        return super().reset_factory_defaults(all_probes=all_probes)
     
     def control_single_relay(self, relay_num, state):
         """控制单个继电器 - 添加权限检查"""
         if not self.check_permission_before_action("Control relay", Permission.MODIFY_DEVICE_CONTROL):
+            cbs = (
+                getattr(self, "relay0_checkbox", None),
+                getattr(self, "relay1_checkbox", None),
+                getattr(self, "relay2_checkbox", None),
+            )
+            if 0 <= int(relay_num) <= 2 and cbs[int(relay_num)] is not None:
+                cb = cbs[int(relay_num)]
+                cb.blockSignals(True)
+                cb.setChecked(not bool(state))
+                cb.blockSignals(False)
             return
         
         # 调用父类方法
         super().control_single_relay(relay_num, state)
+
+    def control_master_relay(self, relay_num, state):
+        """主控单路继电器 - 权限检查；关路0=复位全清；报警中关1/2=强行开闸。"""
+        from core.translation import _t
+
+        if not self.check_permission_before_action("Control master relay", Permission.MODIFY_DEVICE_CONTROL):
+            cbs = (
+                getattr(self, "master_relay0_checkbox", None),
+                getattr(self, "master_relay1_checkbox", None),
+                getattr(self, "master_relay2_checkbox", None),
+            )
+            if 0 <= int(relay_num) <= 2 and cbs[int(relay_num)] is not None:
+                cb = cbs[int(relay_num)]
+                cb.blockSignals(True)
+                cb.setChecked(not bool(state))
+                cb.blockSignals(False)
+            return
+
+        def _revert():
+            cbs = (
+                getattr(self, "master_relay0_checkbox", None),
+                getattr(self, "master_relay1_checkbox", None),
+                getattr(self, "master_relay2_checkbox", None),
+            )
+            if 0 <= int(relay_num) <= 2 and cbs[int(relay_num)] is not None:
+                cb = cbs[int(relay_num)]
+                cb.blockSignals(True)
+                cb.setChecked(not bool(state))
+                cb.blockSignals(False)
+
+        # 关继电器 0 ≡ 通道复位全清（三路清 + decision→0x05）
+        if int(relay_num) == 0 and not bool(state):
+            reply = QMessageBox.question(
+                self,
+                _t("msg_relay0_off_title"),
+                _t("msg_relay0_off_text"),
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            if reply != QMessageBox.Yes:
+                _revert()
+                return False
+
+        # 报警中关 1/2：强行开闸（≠ 复位，decision 可能仍为 0x02/0x03）
+        if int(relay_num) in (1, 2) and not bool(state):
+            pkt = getattr(self, "latest_master_summary", None) or getattr(
+                self, "_last_any_master_packet", None
+            )
+            if pkt is not None and pkt.is_channel_alarm():
+                self.log(
+                    "Force-open gate: closing master relay %d while decision=0x%02X"
+                    % (int(relay_num), int(pkt.decision_result)),
+                    "INFO",
+                )
+
+        return super().control_master_relay(relay_num, state)
+
+    def force_open_master_gate(self):
+        """强行开闸：报警中关继电器 1+2（不发 0x15，硬报可不解除）。"""
+        from core.translation import _t
+
+        if not self.check_permission_before_action(
+            "Force open master gate", Permission.MODIFY_DEVICE_CONTROL
+        ):
+            return False
+        reply = QMessageBox.question(
+            self,
+            _t("msg_force_gate_title"),
+            _t("msg_force_gate_text"),
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return False
+        ok1 = super().control_master_relay(1, False)
+        ok2 = super().control_master_relay(2, False)
+        return bool(ok1 or ok2)
+
+    def apply_master_relay_mask(self):
+        """主控批量继电器 - 权限检查"""
+        if not self.check_permission_before_action("Control master relay mask", Permission.MODIFY_DEVICE_CONTROL):
+            return False
+        return super().apply_master_relay_mask()
+
+    def read_master_relay_status(self):
+        """主控读继电器状态 - 权限检查"""
+        if not self.check_permission_before_action("Read master relay", Permission.MODIFY_DEVICE_CONTROL):
+            return False
+        return super().read_master_relay_status()
     
     def on_tcp_enable_changed(self, state):
         """TCP启用状态改变 - 添加权限检查"""
@@ -1330,9 +2192,7 @@ class MainWindow(QMainWindow, UIBase):
         super().select_auto_save_path()
     
     def logout(self):
-        """退出到普通用户模式（viewer模式）"""
-        # 注意：在logout过程中不更新操作时间，避免重新启动计时器
-        # self.update_operate_time()  # 注释掉这一行
+        """退出登录，回到免登录主显示"""
         from core.translation import _t
         
         reply = QMessageBox.question(
@@ -1344,48 +2204,17 @@ class MainWindow(QMainWindow, UIBase):
         )
         
         if reply == QMessageBox.Yes:
-            # 首先停止超时计时器
             self.timeout_manager.stop_timer()
-            
-            # 重要：重置超时管理器状态
             self.timeout_manager.last_operate_time = 0
             self.timeout_manager.save_state()
-            
-            # 切换到普通用户模式（本地）
-            # 注意：不修改用户管理器中的实际用户角色，保持为ADMIN
-            if self.current_user and self.current_user['role'] == UserRole.ADMIN:
-                # 记录切换前的角色
-                old_role = self.current_user['role']
-                self.current_user['role'] = UserRole.VIEWER
-                
-                # 更新UI为普通用户
-                self.update_ui_for_user_role()
-                
-                # 更新窗口标题
-                if 'username' in self.current_user:
-                    username = self.current_user['username']
-                    self.setWindowTitle(f"Gamma-ray Spectrometer - {username} (User)")
-                
-                # 显示通知
-                QMessageBox.information(
-                    self,
-                    _t("msg_logout_success_title"),
-                    _t("msg_logout_success_text")
-                )
-                
-                # 记录日志
-                self.log(f"Manually switched from {old_role.value} mode to normal user mode", 'INFO')
-                
-                # 确保超时计时器已停止（再次确认）
-                self.timeout_manager.stop_timer()
-                self.status_bar.hide_timeout_display()
-            else:
-                # 如果当前用户不是管理员，显示信息
-                QMessageBox.information(
-                    self,
-                    _t("msg_already_user_title"),
-                    _t("msg_already_user_text")
-                )
+            old = self.current_user.get("username") if self.current_user else "?"
+            self.enter_public_mode()
+            QMessageBox.information(
+                self,
+                _t("msg_logout_success_title"),
+                _t("msg_logout_success_text"),
+            )
+            self.log(f"Logged out ({old}) -> public home monitor", 'INFO')
     
     def _delayed_relogin(self):
         """延迟重新登录，确保旧的窗口完全关闭"""
@@ -1493,30 +2322,18 @@ class MainWindow(QMainWindow, UIBase):
             self.timeout_manager.update_operate_time()
     
     def on_admin_timeout(self):
-        """Admin mode timeout callback - temporarily switch to normal user mode"""
+        """Admin idle timeout -> return to public home monitor."""
         if self.current_user and self.current_user['role'] == UserRole.ADMIN:
-            # IMPORTANT: We should NOT permanently modify the user role in user manager
-            # Instead, we just update the local current_user dictionary for UI purposes
-            # The actual user role in user manager remains ADMIN
-            
-            # Switch current user to normal mode (local only)
-            self.current_user['role'] = UserRole.VIEWER
-
-            # 先关掉可能打开的软件键盘：它是置顶非模态窗口，若不关，
-            # 下面的模态提示框会被它挡住导致界面卡死、点不到“确定”。
             try:
                 from core.software_keyboard import get_keyboard_manager
                 get_keyboard_manager().hide_keyboard()
             except Exception:
                 pass
 
-            # DO NOT update the user in user manager - keep it as ADMIN
-            # This ensures that when user logs out and logs back in, they're still admin
+            self.timeout_manager.last_operate_time = 0
+            self.timeout_manager.save_state()
+            self.enter_public_mode()
 
-            # Update UI for normal user
-            self.update_ui_for_user_role()
-            
-            # Show timeout notification (non-blocking)
             from PyQt5.QtCore import QTimer
             from core.translation import _t
             QTimer.singleShot(100, lambda: QMessageBox.information(
@@ -1524,82 +2341,59 @@ class MainWindow(QMainWindow, UIBase):
                 _t("msg_admin_timeout_title"),
                 _t("msg_admin_timeout_text")
             ))
-            
-            # Log the event
-            self.log("Admin mode inactive timeout, temporarily switched to normal view mode", 'INFO')
-            
-            # Clear timeout state
-            self.timeout_manager.last_operate_time = 0
-            self.timeout_manager.save_state()
-            
-            # Update window title
-            if 'username' in self.current_user:
-                username = self.current_user['username']
-                self.setWindowTitle(f"Gamma-ray Spectrometer - {username} (User - Temp)")
+            self.log("Admin idle timeout -> public home monitor", 'INFO')
     
-    def login(self):
-        """从普通用户模式登录到管理员模式"""
-        # 更新操作时间（重置超时计时器）
-        self.update_operate_time()
-        
+    def login(self, preferred_page: int = None, required_for_page: bool = False):
+        """Login from public/viewer mode. Returns True on success."""
         from core.login_dialog import LoginDialog
-        
-        # 显示登录对话框
-        login_dialog = LoginDialog()
-        if login_dialog.exec_() == LoginDialog.Accepted:
-            # 登录框关闭后再次确保置顶软键盘已收起，避免挡住成功提示
-            try:
-                from core.software_keyboard import get_keyboard_manager
-                get_keyboard_manager().hide_keyboard()
-            except Exception:
-                pass
+        from core.translation import _t
 
-            # 获取登录用户信息
-            current_user = login_dialog.get_current_user_info()
-            
-            if current_user:
-                # 重要：确保用户角色正确（从用户管理器获取真实角色）
-                user_manager = self.user_manager
-                actual_user = user_manager.get_current_user()
-                if actual_user:
-                    # 使用用户管理器中的真实角色
-                    current_user['role'] = actual_user.role
-                    
-                    # 更新当前用户信息
-                    self.current_user = current_user
-                    
-                    # 更新UI为管理员模式
-                    self.update_ui_for_user_role()
-                    
-                    # 更新窗口标题
-                    if 'username' in self.current_user:
-                        username = self.current_user['username']
-                        self.setWindowTitle(f"Gamma-ray Spectrometer - {username} (Admin)")
-                    
-                    # 显示通知
-                    from core.translation import _t
-                    QMessageBox.information(
-                        self,
-                        _t("msg_admin_login_success_title"),
-                        _t("msg_admin_login_success_text")
-                    )
-                    
-                    # 记录日志
-                    self.log(f"Logged in as administrator: {current_user['username']}", 'INFO')
-                else:
-                    from core.translation import _t
-                    QMessageBox.warning(
-                        self,
-                        _t("msg_login_failed_title"),
-                        _t("msg_login_failed_user_manager")
-                    )
-            else:
-                from core.translation import _t
-                QMessageBox.warning(
-                    self,
-                    _t("msg_login_failed_title"),
-                    _t("msg_login_failed_dialog")
-                )
+        login_dialog = LoginDialog()
+        if login_dialog.exec_() != LoginDialog.Accepted:
+            return False
+        try:
+            from core.software_keyboard import get_keyboard_manager
+            get_keyboard_manager().hide_keyboard()
+        except Exception:
+            pass
+
+        current_user = login_dialog.get_current_user_info()
+        if not current_user:
+            QMessageBox.warning(
+                self, _t("msg_login_failed_title"), _t("msg_login_failed_dialog")
+            )
+            return False
+
+        actual_user = self.user_manager.get_current_user()
+        if not actual_user:
+            QMessageBox.warning(
+                self, _t("msg_login_failed_title"), _t("msg_login_failed_user_manager")
+            )
+            return False
+
+        current_user['role'] = actual_user.role
+        self.current_user = current_user
+        self.update_ui_for_user_role()
+
+        role_name = "Admin" if current_user['role'] == UserRole.ADMIN else "User"
+        username = current_user.get('username', '')
+        self.setWindowTitle(f"Gamma-ray Spectrometer - {username} ({role_name})")
+
+        target = preferred_page if preferred_page is not None else 1
+        if target == 0:
+            target = 1  # after login land on original overview by default
+        self.stacked_widget.setCurrentIndex(target)
+        self.bottom_nav.set_active_button(target)
+        self.update_operate_time()
+
+        if not required_for_page:
+            QMessageBox.information(
+                self,
+                _t("msg_admin_login_success_title"),
+                _t("msg_admin_login_success_text"),
+            )
+        self.log(f"Logged in: {username} ({actual_user.role.value})", 'INFO')
+        return True
     
     def on_timeout_timer_updated(self, remaining_seconds: int):
         """超时计时器更新回调"""
@@ -1824,8 +2618,10 @@ class MainWindow(QMainWindow, UIBase):
             self.sensitivity_title_label.setText(_t("label_sensitivity"))
             self.sensitivity_set_btn.setText(_t("btn_set"))
             self.sensitivity_read_btn.setText(_t("btn_read"))
-            self.relay_control_title_label.setText(_t("set_relay_control"))
+            self.relay_control_title_label.setText(_t("set_probe_relay_control"))
             self.relay_read_btn.setText(_t("btn_read_status"))
+            if hasattr(self, 'probe_relay_hint_label'):
+                self.probe_relay_hint_label.setText(_t("tip_probe_relay_hint"))
             
             # Retranslate relay status label dynamically
             if hasattr(self, 'relay_status_label'):
@@ -1840,6 +2636,39 @@ class MainWindow(QMainWindow, UIBase):
             self.alarm_read_btn.setText(_t("btn_read_alarm"))
             self.occupancy_title_label.setText(_t("set_occupancy"))
             self.counter_title_label.setText(_t("set_counter"))
+
+        if hasattr(self, 'master_relay_group'):
+            self.master_relay_group.setTitle(_t("set_master_relay"))
+            if hasattr(self, 'master_relay_control_title'):
+                self.master_relay_control_title.setText(_t("set_master_relay_control"))
+            self.master_relay0_checkbox.setText("Relay 0")
+            self.master_relay1_checkbox.setText("Relay 1")
+            self.master_relay2_checkbox.setText("Relay 2")
+            if getattr(self, 'master_relay_r1_btn', None) is not None:
+                self.master_relay_r1_btn.setText(_t("btn_master_relay_r1"))
+                self.master_relay_r1_btn.setToolTip(_t("tip_master_relay_single"))
+            if getattr(self, 'master_relay_r2_btn', None) is not None:
+                self.master_relay_r2_btn.setText(_t("btn_master_relay_r2"))
+                self.master_relay_r2_btn.setToolTip(_t("tip_master_relay_single"))
+            if getattr(self, 'master_relay_apply_btn', None) is not None:
+                self.master_relay_apply_btn.setText(_t("btn_master_relay_apply"))
+                self.master_relay_apply_btn.setToolTip(_t("tip_master_relay_apply"))
+            if self.master_relay_read_btn is not None:
+                self.master_relay_read_btn.setText(_t("btn_read_status"))
+            if hasattr(self, 'master_relay_hint_label'):
+                self.master_relay_hint_label.setText(_t("tip_master_relay_hint"))
+            if getattr(self, 'master_force_gate_btn', None) is not None:
+                self.master_force_gate_btn.setText(_t("btn_force_open_gate"))
+                self.master_force_gate_btn.setToolTip(_t("tip_force_open_gate"))
+            states = getattr(self, 'master_relay_states', None)
+            if states is not None and len(states) >= 3:
+                r0, r1, r2 = states[0], states[1], states[2]
+                mask = (int(r0) & 1) | ((int(r1) & 1) << 1) | ((int(r2) & 1) << 2)
+                self.master_relay_status_label.setText(
+                    _t("master_relay_status_format", r0=int(r0), r1=int(r1), r2=int(r2), mask=mask)
+                )
+            else:
+                self.master_relay_status_label.setText(_t("set_master_relay_status"))
             
         if hasattr(self, 'log_group'):
             self.log_group.setTitle(_t("set_raw_logging"))
@@ -1864,7 +2693,10 @@ class MainWindow(QMainWindow, UIBase):
             self.acquisition_btn.retranslate_ui()
             
         # Call retranslate_ui on each page if they support it
-        for page in [self.overview_page, self.spectrum_page, self.clients_page, self.alarm_log_page, self.settings_page]:
+        for page in [
+            self.home_page, self.overview_page, self.spectrum_page,
+            self.clients_page, self.alarm_log_page, self.settings_page,
+        ]:
             if hasattr(page, 'retranslate_ui'):
                 page.retranslate_ui()
 

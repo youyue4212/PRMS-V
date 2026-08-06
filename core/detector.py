@@ -553,7 +553,7 @@ class SerialPacketWorker(QObject):
                 # Control codes: 0x07=HV set, 0x08=Threshold set, 0x0C=Sensitivity coefficient set, 0x0E=Product ID set
                 if len(command_data) >= 4:
                     control_code = command_data[3]
-                    if control_code in [0x07, 0x08, 0x0C, 0x0E]:
+                    if control_code in [0x07, 0x08, 0x0C, 0x0E, 0x14]:
                         # Parameter setting command, needs longer wait time for Flash write completion
                         time.sleep(0.15)  # 150ms wait for Flash write
                         self.has_log.emit(f"Parameter setting command 0x{control_code:02X} sent, waiting for Flash write completion...", 'INFO')
@@ -714,6 +714,13 @@ class SerialPacketWorker(QObject):
         checksum = self.calculate_xor_checksum(data)
         data.append(checksum)
         return self.send_command(data, "Reset spectrum data")
+
+    def reset_factory_defaults(self):
+        """Restore probe defaults (HV / trigger / sen_coef). Command 0x14."""
+        data = [0x55, 0xAA, 0x03, 0x14, 0xA5, 0x5A]
+        checksum = self.calculate_xor_checksum(data)
+        data.append(checksum)
+        return self.send_command(data, "Reset factory defaults (0x14)")
 
     def control_multiple_leds(self, led_mask: int):
         """Control multiple LEDs using bitmask (bit0: LED0, bit1: LED1, bit2: LED2, bit3: LED3)"""

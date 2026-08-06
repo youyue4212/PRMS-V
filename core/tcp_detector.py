@@ -16,6 +16,14 @@ from typing import Optional, Dict, List, Tuple
 import struct
 
 from core.config import ConfigManager
+from core.master_summary import (
+    MASTER_PACKET_HEADER,
+    MASTER_PACKET_SIZE,
+    MasterSummaryPacket,
+    explain_master_summary_reject,
+    is_master_frame_candidate,
+    parse_master_summary,
+)
 
 # Reuse packet definitions and constants from detector module
 CMD_FEEDBACK_SIZE = 10
@@ -23,6 +31,7 @@ DEV_MESSAGE_SIZE = 9  # 2+4+1+2 bytes from struct definition
 CMD_FEEDBACK_ID = 0x4346
 SPECTRUM_PACKET_ID = 0x5350
 DEV_MESSAGE_ID = 0x7783  # New packet ID
+# Master L2 summary header 0xA55A (wire 5A A5)
 
 
 def _enable_tcp_keepalive(sock: socket.socket,
@@ -104,6 +113,9 @@ class TcpPacketWorker(QObject):
     """
     cmd_feedback_received = pyqtSignal(CmdFeedback)
     spectrum_packet_received = pyqtSignal(SpectrumPacket, str)  # Added client_id parameter
+    master_summary_received = pyqtSignal(object, str)  # MasterSummaryPacket, client_id
+    # Emitted when a client is identified as master (L2 header seen), even before CRC OK
+    master_link_seen = pyqtSignal(str)  # client_id
     dev_message_received = pyqtSignal(DevMessage)  # New signal for DevMessage
     connection_status_changed = pyqtSignal(bool, str)
     error_occurred = pyqtSignal(str)
@@ -118,6 +130,7 @@ class TcpPacketWorker(QObject):
         self.client_sockets = {}  # Client socket dictionary {client_id: socket}
         self.client_buffers = {}  # Buffer for each client {client_id: bytearray}
         self.client_infos = {}    # Client information dictionary {client_id: ClientInfo}
+        self.master_client_id = None  # last client that sent valid L2 summary
         self.client_counter = 0  # Client counter for generating unique IDs
         self.buffer = bytearray()  # Main buffer (backward compatibility)
         self.is_running = False
@@ -437,7 +450,9 @@ class TcpPacketWorker(QObject):
         Args:
             client_id: ID of the client to send command to
             command_type: Type of command ('set_hv', 'set_threshold', 'set_operation_mode', 
-                          'set_product_id', 'set_sensitivity_coefficient', 'control_single_relay')
+                          'set_product_id', 'set_sensitivity_coefficient', 'control_single_relay',
+                          'control_multiple_relays', 'read_relay_status',
+                          'channel_alarm_reset', 'reset_factory_defaults')
             command_value: Value for the command (float for HV, int for threshold, etc.)
             description: Description for logging
         Returns:
@@ -449,8 +464,26 @@ class TcpPacketWorker(QObject):
         
         # Convert command type to appropriate command data
         command_data = []
+        is_master = bool(self.master_client_id and client_id == self.master_client_id)
         
-        if command_type == 'set_hv':
+        if command_type == 'channel_alarm_reset':
+            # 通道报警人工复位 → 主控: 55 AA 03 15 A5 5A 16
+            if not is_master:
+                self.error_occurred.emit("channel_alarm_reset must target master TCP client")
+                return False
+            command_data = [0x55, 0xAA, 0x03, 0x15, 0xA5, 0x5A]
+            checksum = self.calculate_xor_checksum(command_data)
+            command_data.append(checksum)
+            description = description or "Channel alarm manual reset (0x15)"
+
+        elif command_type == 'reset_factory_defaults':
+            # 55 AA 03 14 A5 5A 17 — restore HV/trigger/sen_coef defaults
+            command_data = [0x55, 0xAA, 0x03, 0x14, 0xA5, 0x5A]
+            checksum = self.calculate_xor_checksum(command_data)
+            command_data.append(checksum)
+            description = description or "Reset factory defaults (0x14)"
+
+        elif command_type == 'set_hv':
             # Set high voltage command
             voltage = float(command_value)
             voltage_raw = int(voltage)
@@ -506,13 +539,13 @@ class TcpPacketWorker(QObject):
             description = f"Set sensitivity coefficient to {coefficient}"
             
         elif command_type == 'control_single_relay':
-            # Control single relay command
+            # 0x06: 55 AA 03 06 [relay_num] [0/1] [xor]  — probe/master same, relay 0-2
             if isinstance(command_value, tuple) and len(command_value) == 2:
                 relay_num, state = command_value
             else:
                 self.error_occurred.emit(f"Invalid relay command format: {command_value}")
                 return False
-                
+            relay_num = int(relay_num)
             if relay_num < 0 or relay_num > 2:
                 self.error_occurred.emit(f"Invalid relay number: {relay_num}, must be 0-2")
                 return False
@@ -520,7 +553,36 @@ class TcpPacketWorker(QObject):
             command_data = [0x55, 0xAA, 0x03, 0x06, relay_num, state_byte]
             checksum = self.calculate_xor_checksum(command_data)
             command_data.append(checksum)
-            description = f"Set relay {relay_num} to {'ON' if state else 'OFF'}"
+            who = "master" if is_master else "probe"
+            description = f"Set {who} relay {relay_num} to {'ON' if state else 'OFF'}"
+
+        elif command_type == 'control_multiple_relays':
+            # 0x11: 55 AA 03 11 [mask] xx [xor]
+            # bit0=R0, bit1=R1, bit2=R2; ack value = actual 3-ch status mask
+            relay_mask = int(command_value) & 0x07
+            command_data = [0x55, 0xAA, 0x03, 0x11, relay_mask, 0x00]
+            checksum = self.calculate_xor_checksum(command_data)
+            command_data.append(checksum)
+            who = "master" if is_master else "probe"
+            description = (
+                "Set %s relay mask 0x%02X (R0=%d R1=%d R2=%d)"
+                % (
+                    who,
+                    relay_mask,
+                    1 if (relay_mask & 0x01) else 0,
+                    1 if (relay_mask & 0x02) else 0,
+                    1 if (relay_mask & 0x04) else 0,
+                )
+            )
+
+        elif command_type == 'read_relay_status':
+            # 0x12: 55 AA 03 12 [flag] 00 [xor]
+            flag_byte = 0x01 if bool(command_value) else 0x00
+            command_data = [0x55, 0xAA, 0x03, 0x12, flag_byte, 0x00]
+            checksum = self.calculate_xor_checksum(command_data)
+            command_data.append(checksum)
+            who = "master" if is_master else "probe"
+            description = f"Read {who} relay status (0x12)"
             
         else:
             self.error_occurred.emit(f"Unknown command type: {command_type}")
@@ -534,8 +596,12 @@ class TcpPacketWorker(QObject):
                 command_bytes = bytes(command_data)
                 self.client_sockets[client_id].sendall(command_bytes)
                 
-                # Wait a bit for command to be processed
-                time.sleep(0.05)
+                # Flash-write commands need longer settle time
+                control_code = command_data[3] if len(command_data) >= 4 else 0
+                if control_code in (0x07, 0x08, 0x0C, 0x0E, 0x14):
+                    time.sleep(0.15)
+                else:
+                    time.sleep(0.05)
                 
                 self.command_sent.emit(f"Sent to {client_id}: {description} - {' '.join(f'0x{b:02X}' for b in command_data)} (attempt {attempt + 1}/{max_retries})")
                 return True
@@ -548,6 +614,20 @@ class TcpPacketWorker(QObject):
                     self.has_log.emit(f"Command send to {client_id} error after {max_retries} attempts: {str(e)}", 'ERROR')
         
         return False
+
+    def reset_factory_defaults(self, client_id: Optional[str] = None) -> bool:
+        """Send 0x14 restore-defaults to one probe client (not master)."""
+        target = client_id
+        if target is None:
+            # Prefer a non-master connected client
+            for cid in self.client_sockets:
+                if cid != self.master_client_id:
+                    target = cid
+                    break
+        if target is None:
+            self.error_occurred.emit("No probe client available for factory reset")
+            return False
+        return self.send_command_to_client(target, 'reset_factory_defaults', None)
     
     # The following methods are identical to SerialPacketWorker
     # since packet parsing is the same regardless of transport
@@ -591,7 +671,7 @@ class TcpPacketWorker(QObject):
         for i in range(len(self.buffer) - 1):
             try:
                 packet_id = struct.unpack('<H', self.buffer[i:i+2])[0]
-                if packet_id in [CMD_FEEDBACK_ID, SPECTRUM_PACKET_ID, DEV_MESSAGE_ID]:
+                if packet_id in [CMD_FEEDBACK_ID, SPECTRUM_PACKET_ID, DEV_MESSAGE_ID, MASTER_PACKET_HEADER]:
                     return (i, packet_id)
             except struct.error:
                 continue
@@ -605,7 +685,7 @@ class TcpPacketWorker(QObject):
         for i in range(len(buffer) - 1):
             try:
                 packet_id = struct.unpack('<H', buffer[i:i+2])[0]
-                if packet_id in [CMD_FEEDBACK_ID, SPECTRUM_PACKET_ID, DEV_MESSAGE_ID]:
+                if packet_id in [CMD_FEEDBACK_ID, SPECTRUM_PACKET_ID, DEV_MESSAGE_ID, MASTER_PACKET_HEADER]:
                     return (i, packet_id)
             except struct.error:
                 continue
@@ -616,6 +696,8 @@ class TcpPacketWorker(QObject):
             return CMD_FEEDBACK_SIZE
         elif packet_id == DEV_MESSAGE_ID:
             return DEV_MESSAGE_SIZE
+        elif packet_id == MASTER_PACKET_HEADER:
+            return MASTER_PACKET_SIZE
         elif packet_id == SPECTRUM_PACKET_ID:
             # Only support new packet format
             header_format = '<HHIHhHIHBBH'  # New format: includes product_id, sen_coef, reserved
@@ -684,6 +766,9 @@ class TcpPacketWorker(QObject):
         except struct.error:
             return None  # Parsing failed
 
+    def parse_master_summary_packet(self, data: bytes) -> Optional[MasterSummaryPacket]:
+        return parse_master_summary(data)
+
     def parse_packets(self):
         self.mutex.lock()
         try:
@@ -719,17 +804,27 @@ class TcpPacketWorker(QObject):
                     parsed_packet = self.parse_spectrum_packet(packet_data)
                 elif packet_id == DEV_MESSAGE_ID:
                     parsed_packet = self.parse_dev_message(packet_data)
+                elif packet_id == MASTER_PACKET_HEADER:
+                    parsed_packet = self.parse_master_summary_packet(packet_data)
                 
                 if parsed_packet:
                     self.buffer = self.buffer[expected_size:]
                     if isinstance(parsed_packet, CmdFeedback):
                         self.stats['cmd_packets'] += 1
+                        try:
+                            parsed_packet.source_client_id = None
+                        except Exception:
+                            pass
                         self.cmd_feedback_received.emit(parsed_packet)
                     elif isinstance(parsed_packet, SpectrumPacket):
                         self.stats['spectrum_packets'] += 1
                         # Emit packet with client_id information
                         # For now, we emit None as client_id (will be updated later)
                         self.spectrum_packet_received.emit(parsed_packet, None)
+                    elif isinstance(parsed_packet, MasterSummaryPacket):
+                        self.stats.setdefault('master_packets', 0)
+                        self.stats['master_packets'] += 1
+                        self.master_summary_received.emit(parsed_packet, None)
                     elif isinstance(parsed_packet, DevMessage):
                         self.stats['dev_messages'] += 1
                         self.dev_message_received.emit(parsed_packet)
@@ -780,11 +875,50 @@ class TcpPacketWorker(QObject):
                     parsed_packet = self.parse_spectrum_packet(packet_data)
                 elif packet_id == DEV_MESSAGE_ID:
                     parsed_packet = self.parse_dev_message(packet_data)
+                elif packet_id == MASTER_PACKET_HEADER:
+                    # Mark master link as soon as header+device_type match
+                    if is_master_frame_candidate(packet_data):
+                        if self.master_client_id != client_id:
+                            self.master_client_id = client_id
+                            self.has_log.emit(
+                                "Master L2 header seen from %s (awaiting CRC)" % client_id, 'INFO'
+                            )
+                            self.master_link_seen.emit(client_id)
+                        elif self.master_client_id is None:
+                            self.master_client_id = client_id
+                            self.master_link_seen.emit(client_id)
+                    parsed_packet = self.parse_master_summary_packet(packet_data)
+                    if parsed_packet is None and is_master_frame_candidate(packet_data):
+                        reason = explain_master_summary_reject(packet_data)
+                        hex_head = ' '.join('%02X' % b for b in packet_data[:8])
+                        self.has_log.emit(
+                            "Master L2 reject from %s: %s | head=%s" % (client_id, reason, hex_head),
+                            'WARNING'
+                        )
+                        # Consume full 60B candidate so we don't grind byte-by-byte on CRC fail
+                        del client_buffer[:MASTER_PACKET_SIZE]
+                        self.stats['errors'] += 1
+                        continue
+                    if (parsed_packet is not None
+                            and isinstance(parsed_packet, MasterSummaryPacket)
+                            and int(getattr(parsed_packet, "checksum", 0) or 0) == 0):
+                        # Accepted with zero CRC workaround — remind once in a while
+                        n = int(self.stats.get('master_packets', 0) or 0)
+                        if n == 0 or (n % 30) == 0:
+                            self.has_log.emit(
+                                "Master L2 accepted with checksum=0 from %s (reflash master CRC fix)"
+                                % client_id,
+                                'WARNING',
+                            )
                 
                 if parsed_packet:
                     del client_buffer[:expected_size]
                     if isinstance(parsed_packet, CmdFeedback):
                         self.stats['cmd_packets'] += 1
+                        try:
+                            parsed_packet.source_client_id = client_id
+                        except Exception:
+                            pass
                         self.cmd_feedback_received.emit(parsed_packet)
                     elif isinstance(parsed_packet, SpectrumPacket):
                         self.stats['spectrum_packets'] += 1
@@ -794,6 +928,29 @@ class TcpPacketWorker(QObject):
                             self.client_infos[client_id].last_active = time.time()
                         # Emit packet with client_id
                         self.spectrum_packet_received.emit(parsed_packet, client_id)
+                    elif isinstance(parsed_packet, MasterSummaryPacket):
+                        self.stats.setdefault('master_packets', 0)
+                        self.stats['master_packets'] += 1
+                        self.master_client_id = client_id
+                        if client_id in self.client_infos:
+                            self.client_infos[client_id].packets_received += 1
+                            self.client_infos[client_id].last_active = time.time()
+                        if self.stats['master_packets'] == 1 or (self.stats['master_packets'] % 30) == 0:
+                            self.has_log.emit(
+                                "Master L2 OK from %s: total_cps=%d probes=%d decision=0x%02X (#%d)"
+                                % (
+                                    client_id,
+                                    int(parsed_packet.total_cps),
+                                    int(parsed_packet.probe_count_cfg),
+                                    int(parsed_packet.decision_result),
+                                    self.stats['master_packets'],
+                                ),
+                                'INFO',
+                            )
+                            if self.stats['master_packets'] == 1:
+                                hx = ' '.join('%02X' % b for b in packet_data)
+                                self.has_log.emit("Master L2 raw60: %s" % hx, 'INFO')
+                        self.master_summary_received.emit(parsed_packet, client_id)
                     elif isinstance(parsed_packet, DevMessage):
                         self.stats['dev_messages'] += 1
                         self.dev_message_received.emit(parsed_packet)
@@ -1021,6 +1178,16 @@ class TcpPacketWorker(QObject):
         checksum = self.calculate_xor_checksum(data)
         data.append(checksum)
         return self.send_command(data, "Reset spectrum data")
+
+    def reset_factory_defaults_broadcast_probes(self) -> int:
+        """Send 0x14 to all non-master clients. Returns number of successful sends."""
+        ok = 0
+        for cid in list(self.client_sockets.keys()):
+            if cid == self.master_client_id:
+                continue
+            if self.send_command_to_client(cid, 'reset_factory_defaults', None):
+                ok += 1
+        return ok
 
     def control_multiple_leds(self, led_mask: int):
         """Control multiple LEDs using bitmask (bit0: LED0, bit1: LED1, bit2: LED2, bit3: LED3)"""
