@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 import time
 from datetime import datetime
 
@@ -117,18 +117,24 @@ class StatusBar(QWidget):
         self.status_label.setFont(status_font)
         self.status_label.setStyleSheet("margin-left: 5px; margin-right: 15px;")
 
-        # Language Switch Button — 触控热区加大
+        # Language Switch Button — 必须覆盖全局 QPushButton(min-height:44/padding)
+        # 否则在 40px 状态栏内文字（尤其 EN）会被裁切
         self.lang_btn = QPushButton()
-        self.lang_btn.setFixedSize(56, 32)
-        lang_font = QFont(FONTS["tip"][0], 11, QFont.Bold)
-        self.lang_btn.setFont(lang_font)
+        self.lang_btn.setFixedHeight(32)
+        self.lang_btn.setMinimumWidth(56)
+        self.lang_btn.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
         self.lang_btn.setStyleSheet("""
             QPushButton {
                 background-color: #333333;
                 color: #ff9800;
                 border: 1px solid #ff9800;
-                border-radius: 6px;
-                padding: 0px;
+                border-radius: 8px;
+                padding: 0 10px;
+                min-height: 32px;
+                max-height: 32px;
+                min-width: 56px;
+                font-size: 12px;
+                font-weight: bold;
             }
             QPushButton:pressed {
                 background-color: #ff9800;
@@ -166,15 +172,15 @@ class StatusBar(QWidget):
 
     def update_user_info(self, username: str, role):
         """Update user information display"""
+        from core.translation import _t
         if role is None:
-            from core.translation import _t
             role_text = username or _t("status_public_mode")
             color = "#607d8b"
         elif role == UserRole.ADMIN:
-            role_text = "Admin"
+            role_text = _t("role_admin")
             color = "#ff9800"  # Orange
         else:
-            role_text = "User"
+            role_text = _t("role_viewer")
             color = "#4caf50"  # Green
         
         # Only show role, not username to avoid duplication like "admin (Admin)"
@@ -276,25 +282,27 @@ class DataCard(QFrame):
         super().__init__()
         
         # 设置固定高度，与ALARM STATUS框保持一致
-        # ALARM STATUS框没有设置固定高度，但根据内容布局，大约为180-200px
-        # 为了确保三个框一样大，我们设置固定高度
         self.setFixedHeight(180)  # 统一高度为180px
-        
-        # 存储larger_font参数
-        self.larger_font = larger_font
-        
+        self.setObjectName("dataCard")
+        # 只用 objectName 限定样式，避免 QFrame 选择器污染子控件（出现字下条框/分层）
         self.setStyleSheet("""
-            QFrame {
+            QFrame#dataCard {
                 background-color: #2a2a2a;
-                border-radius: 12px;
+                border-radius: 10px;
+                border: none;
+            }
+            QFrame#dataCard QLabel {
+                background: transparent;
                 border: none;
             }
         """)
         
+        # 存储larger_font参数
+        self.larger_font = larger_font
+        
         layout = QVBoxLayout()
         
         # 设置内边距和间距，与ALARM STATUS框保持一致
-        # ALARM STATUS框的内边距是(10, 10, 10, 8)，间距是4
         layout.setContentsMargins(10, 10, 10, 8)
         layout.setSpacing(4)
         
@@ -308,8 +316,8 @@ class DataCard(QFrame):
                 font-size: 13px;
                 font-weight: bold;
                 letter-spacing: 0.5px;
-                text-transform: uppercase;
-                margin-bottom: 4px;
+                background: transparent;
+                border: none;
             }
         """)
         layout.addWidget(self.title_label)
@@ -337,6 +345,8 @@ class DataCard(QFrame):
                 font-size: {font_size};
                 margin: 5px 0;
                 min-height: {min_height};
+                background: transparent;
+                border: none;
             }}
         """)
         self.value_label.setAlignment(Qt.AlignCenter)
@@ -352,6 +362,8 @@ class DataCard(QFrame):
                 font-size: 13px;
                 font-weight: normal;
                 margin-top: 2px;
+                background: transparent;
+                border: none;
             }
         """)
         self.second_title_label.setVisible(show_second_title)
@@ -368,6 +380,8 @@ class DataCard(QFrame):
                 font-weight: bold;
                 font-size: 18px;
                 margin-top: 4px;
+                background: transparent;
+                border: none;
             }}
         """)
         self.sub_value_label.setAlignment(Qt.AlignCenter)
@@ -383,7 +397,8 @@ class DataCard(QFrame):
                 font-size: 12px;
                 font-weight: normal;
                 margin-top: 2px;
-                font-style: italic;
+                background: transparent;
+                border: none;
             }
         """)
         self.subtitle_label.setAlignment(Qt.AlignCenter)
@@ -415,6 +430,8 @@ class DataCard(QFrame):
                 font-size: {font_size};
                 margin: 5px 0;
                 min-height: {min_height};
+                background: transparent;
+                border: none;
             }}
         """)
         self.sub_value_label.setStyleSheet(f"""
@@ -423,6 +440,8 @@ class DataCard(QFrame):
                 font-weight: bold;
                 font-size: 16px;
                 margin-top: 4px;
+                background: transparent;
+                border: none;
             }}
         """)
     
@@ -437,6 +456,8 @@ class DataCard(QFrame):
                 font-size: 18px;
                 font-weight: bold;
                 margin: 5px 0;
+                background: transparent;
+                border: none;
             }}
         """)
         self.sub_value_label.setStyleSheet(f"""
@@ -446,6 +467,8 @@ class DataCard(QFrame):
                 font-weight: normal;
                 margin-top: 8px;
                 line-height: 1.2;
+                background: transparent;
+                border: none;
             }}
         """)
 
@@ -639,6 +662,7 @@ class BottomNavBar(QWidget):
                 color: {color};
                 font-weight: bold;
                 background-color: transparent;
+                border: none;
             }}
         """)
         # 为图标添加发光效果 - 在 SVG 中添加发光滤镜
@@ -690,9 +714,10 @@ class BottomNavBar(QWidget):
     
     def _apply_inactive_style(self, container, icon_tag):
         """Apply inactive style to button"""
+        # 未选中：容器与文字均透明，只保留灰色字/图标，避免标签下实色底块
         container.setStyleSheet("""
             #nav_button_container {
-                background-color: #1f1f1f;
+                background-color: transparent;
                 border: none;
                 border-top: 3px solid transparent;
             }
@@ -700,6 +725,8 @@ class BottomNavBar(QWidget):
         container.text_label.setStyleSheet("""
             QLabel {
                 color: #888888;
+                background-color: transparent;
+                border: none;
             }
         """)
         # Update icon with inactive color
@@ -713,7 +740,7 @@ class BottomNavBar(QWidget):
                 border: none;
             }
             QPushButton:pressed {
-                background-color: #2a2a2a;
+                background-color: rgba(255, 255, 255, 0.06);
             }
         """)
     
@@ -766,9 +793,10 @@ class AcquisitionButton(QPushButton):
                 background-color: #ff9800;
                 color: white;
                 border: none;
-                border-radius: 15px;
-                font-size: 16px;
+                border-radius: 8px;
+                font-size: 15px;
                 font-weight: bold;
+                padding: 0 16px;
             }
             QPushButton:pressed {
                 background-color: #f57c00;

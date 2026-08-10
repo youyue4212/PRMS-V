@@ -69,15 +69,9 @@ class AlarmLogPage(QWidget):
         layout.setSpacing(15)
         
         # Title
+        from core.ui_tokens import PAGE_TITLE_QSS
         self.title_label = QLabel(_t("log_title"))
-        self.title_label.setStyleSheet("""
-            QLabel {
-                color: white;
-                font-size: 22px;
-                font-weight: bold;
-                margin-bottom: 10px;
-            }
-        """)
+        self.title_label.setStyleSheet(PAGE_TITLE_QSS)
         layout.addWidget(self.title_label)
         
         # Statistics cards and control buttons row
@@ -357,33 +351,29 @@ class AlarmLogPage(QWidget):
         return card
 
     def _paint_stat_card(self, card, title_label, value_label, bar, color: str, card_id: str = ""):
-        """按语义色刷新卡片外壳与数值胶囊（对齐主页 _set_home_status_style）。"""
-        hex_color = color.lstrip("#")
-        try:
-            r = int(hex_color[0:2], 16)
-            g = int(hex_color[2:4], 16)
-            b = int(hex_color[4:6], 16)
-        except Exception:
-            r, g, b = 76, 175, 80
-
+        """刷新统计卡：纯色数值字 + 底条，与概览卡一致（无胶囊框）。"""
         card.setStyleSheet(f"""
             QFrame#logStatCard {{
                 background-color: #2a2a2a;
                 border-radius: 10px;
                 border: none;
-                background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
-                    stop: 0 #2a2a2a, stop: 1 #1f1f1f);
+            }}
+            QFrame#logStatCard QLabel {{
+                background: transparent;
+                border: none;
             }}
         """)
-        # 有活动报警时整卡细描边提示，平时无边框（与概览一致）
+        # 有活动报警时整卡细描边提示
         if card_id == "active_alarms" and color.lower() in ("#ff4444", "#f44336", "#ef4444"):
             card.setStyleSheet(f"""
                 QFrame#logStatCard {{
                     background-color: #2a2a2a;
                     border-radius: 10px;
                     border: 2px solid {color};
-                    background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
-                        stop: 0 #2a2a2a, stop: 1 #1f1f1f);
+                }}
+                QFrame#logStatCard QLabel {{
+                    background: transparent;
+                    border: none;
                 }}
             """)
 
@@ -393,6 +383,7 @@ class AlarmLogPage(QWidget):
                 font-size: 13px;
                 font-weight: bold;
                 background: transparent;
+                border: none;
             }
         """)
 
@@ -403,14 +394,13 @@ class AlarmLogPage(QWidget):
                 font-size: {font_size};
                 font-weight: bold;
                 margin-top: 2px;
-                padding: 4px 10px;
-                background-color: rgba({r}, {g}, {b}, 0.12);
-                border-radius: 8px;
-                border: 1px solid rgba({r}, {g}, {b}, 0.35);
+                background: transparent;
+                border: none;
             }}
         """)
+        bar.setObjectName("cardAccentBar")
         bar.setStyleSheet(
-            "QFrame { background-color: %s; border-radius: 1px; }" % color
+            "QFrame#cardAccentBar { background-color: %s; border: none; border-radius: 1px; }" % color
         )
         card.setProperty("accent", color)
 

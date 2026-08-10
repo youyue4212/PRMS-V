@@ -172,7 +172,7 @@ class MainWindow(QMainWindow, UIBase):
                 background-color: #2196F3;
                 color: white;
                 border: none;
-                border-radius: 12px;
+                border-radius: 8px;
                 font-size: 14px;
                 font-weight: bold;
                 padding: 0 15px;
@@ -197,7 +197,7 @@ class MainWindow(QMainWindow, UIBase):
                 background-color: #9C27B0;
                 color: white;
                 border: none;
-                border-radius: 12px;
+                border-radius: 8px;
                 font-size: 14px;
                 font-weight: bold;
                 padding: 0 15px;
@@ -222,7 +222,7 @@ class MainWindow(QMainWindow, UIBase):
                 background-color: #4CAF50;
                 color: white;
                 border: none;
-                border-radius: 12px;
+                border-radius: 8px;
                 font-size: 14px;
                 font-weight: bold;
                 padding: 0 15px;
@@ -1067,15 +1067,62 @@ class MainWindow(QMainWindow, UIBase):
     def _set_home_status_style(self, label, color, bg, border):
         page = self.home_page
         if hasattr(page, "apply_status_label_style"):
-            page.apply_status_label_style(label, color, bg, border)
+            # Web 主页：不再画胶囊描边，保持文字一体
+            page.apply_status_label_style(label, color, "transparent", "transparent")
             return
         label.setStyleSheet("""
             QLabel {
                 color: %s; font-size: 16px; font-weight: bold;
-                padding: 2px 8px; background-color: %s;
-                border-radius: 8px; border: 1px solid %s;
+                margin-top: 2px; background: transparent; border: none;
             }
-        """ % (color, bg, border))
+        """ % color)
+
+    def _set_overview_status_text(self, label, color: str):
+        """概览状态字：纯色文字，无胶囊框，避免与计数率/温度卡割裂。"""
+        label.setStyleSheet("""
+            QLabel {
+                color: %s;
+                font-size: 16px;
+                font-weight: bold;
+                margin-top: 2px;
+                background: transparent;
+                border: none;
+            }
+        """ % color)
+
+    def _set_overview_card_shell(self, card, accent=None):
+        card.setObjectName("overviewCard")
+        if accent:
+            card.setStyleSheet("""
+                QFrame#overviewCard {
+                    background-color: #2a2a2a;
+                    border-radius: 10px;
+                    border: 2px solid %s;
+                }
+                QFrame#overviewCard QLabel {
+                    background: transparent;
+                    border: none;
+                }
+            """ % accent)
+        else:
+            card.setStyleSheet("""
+                QFrame#overviewCard {
+                    background-color: #2a2a2a;
+                    border-radius: 10px;
+                    border: none;
+                }
+                QFrame#overviewCard QLabel {
+                    background: transparent;
+                    border: none;
+                }
+            """)
+
+    def _set_overview_accent_bar(self, bar, color: str):
+        bar.setObjectName("cardAccentBar")
+        bar.setStyleSheet(
+            "QFrame#cardAccentBar { background-color: %s; border: none; border-radius: 1px; }"
+            % color
+        )
 
     def _set_home_alarm_card_border(self, color=None):
         page = self.home_page
@@ -1085,22 +1132,22 @@ class MainWindow(QMainWindow, UIBase):
         if color:
             page.alarm_card.setStyleSheet("""
                 QFrame {
-                    background-color: #141519; border-radius: 8px;
+                    background-color: #2a2a2a; border-radius: 10px;
                     border: 2px solid %s;
                 }
             """ % color)
             page.status_indicator_bar.setStyleSheet(
-                "QFrame { background-color: %s; border-radius: 1px; }" % color
+                "QFrame { background-color: %s; border-radius: 1px; border: none; }" % color
             )
         else:
             page.alarm_card.setStyleSheet("""
                 QFrame {
-                    background-color: #141519; border-radius: 8px;
-                    border: 1px solid #252730;
+                    background-color: #2a2a2a; border-radius: 10px;
+                    border: none;
                 }
             """)
             page.status_indicator_bar.setStyleSheet(
-                "QFrame { background-color: #10B981; border-radius: 1px; }"
+                "QFrame { background-color: #4caf50; border-radius: 1px; border: none; }"
             )
 
     def _update_home_alarm_from_master(self, packet, lang="zh", master_offline=False):
@@ -1798,18 +1845,7 @@ class MainWindow(QMainWindow, UIBase):
             # Update status label with red active styling
             from core.translation import _t
             self.overview_page.alarm_status_label.setText(_t("status_alarm"))
-            self.overview_page.alarm_status_label.setStyleSheet("""
-                QLabel {
-                    color: #ff4444;
-                    font-size: 15px;
-                    font-weight: bold;
-                    margin-top: 2px;
-                    padding: 2px 6px;
-                    background-color: rgba(255, 68, 68, 0.15);
-                    border-radius: 8px;
-                    border: 1px solid rgba(255, 68, 68, 0.4);
-                }
-            """)
+            self._set_overview_status_text(self.overview_page.alarm_status_label, "#ff4444")
             
             # Update description with timestamp
             self.overview_page.alarm_desc_label.setText(_t("desc_alarm_at", time=current_time))
@@ -1824,29 +1860,10 @@ class MainWindow(QMainWindow, UIBase):
             """)
             
             # Update status indicator bar to red
-            self.overview_page.status_indicator_bar.setStyleSheet("""
-                QFrame {
-                    background-color: #ff4444;
-                    border-radius: 1px;
-                    margin-top: 5px;
-                }
-            """)
+            self._set_overview_accent_bar(self.overview_page.status_indicator_bar, "#ff4444")
             
             # Update card border color (subtle red border)
-            self.overview_page.alarm_card.setStyleSheet("""
-                QFrame {
-                    background-color: #2a2a2a;
-                    border-radius: 12px;
-                    border: 2px solid #ff4444;
-                    background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
-                        stop: 0 #2a2a2a, stop: 1 #1f1f1f);
-                }
-                QFrame:hover {
-                    border: 2px solid #ff6666;
-                    background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
-                        stop: 0 #2f2f2f, stop: 1 #242424);
-                }
-            """)
+            self._set_overview_card_shell(self.overview_page.alarm_card, "#ff4444")
         elif active_faults:
             # 2. System has active faults (Medium priority: Orange)
             self.stop_alarm_flashing()
@@ -1872,18 +1889,7 @@ class MainWindow(QMainWindow, UIBase):
             
             # Update status label with orange styling
             self.overview_page.alarm_status_label.setText(_t("status_fault"))
-            self.overview_page.alarm_status_label.setStyleSheet("""
-                QLabel {
-                    color: #ff9800;
-                    font-size: 15px;
-                    font-weight: bold;
-                    margin-top: 2px;
-                    padding: 2px 6px;
-                    background-color: rgba(255, 152, 0, 0.15);
-                    border-radius: 8px;
-                    border: 1px solid rgba(255, 152, 0, 0.4);
-                }
-            """)
+            self._set_overview_status_text(self.overview_page.alarm_status_label, "#ff9800")
             
             # 卡片内限高滚动；完整故障列表放 tooltip
             self.overview_page.alarm_desc_label.setText(display_text)
@@ -1898,29 +1904,10 @@ class MainWindow(QMainWindow, UIBase):
             """)
             
             # Update status indicator bar to orange
-            self.overview_page.status_indicator_bar.setStyleSheet("""
-                QFrame {
-                    background-color: #ff9800;
-                    border-radius: 1px;
-                    margin-top: 5px;
-                }
-            """)
+            self._set_overview_accent_bar(self.overview_page.status_indicator_bar, "#ff9800")
             
             # Update card border color (subtle orange border)
-            self.overview_page.alarm_card.setStyleSheet("""
-                QFrame {
-                    background-color: #2a2a2a;
-                    border-radius: 12px;
-                    border: 2px solid #ff9800;
-                    background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
-                        stop: 0 #2a2a2a, stop: 1 #1f1f1f);
-                }
-                QFrame:hover {
-                    border: 2px solid #ffb74d;
-                    background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
-                        stop: 0 #2f2f2f, stop: 1 #242424);
-                }
-            """)
+            self._set_overview_card_shell(self.overview_page.alarm_card, "#ff9800")
         else:
             # 3. System completely normal (Green)
             self.stop_alarm_flashing()
@@ -1932,18 +1919,7 @@ class MainWindow(QMainWindow, UIBase):
             # Update status label with green styling
             from core.translation import _t
             self.overview_page.alarm_status_label.setText(_t("status_normal"))
-            self.overview_page.alarm_status_label.setStyleSheet("""
-                QLabel {
-                    color: #4caf50;
-                    font-size: 15px;
-                    font-weight: bold;
-                    margin-top: 2px;
-                    padding: 2px 6px;
-                    background-color: rgba(76, 175, 80, 0.1);
-                    border-radius: 8px;
-                    border: 1px solid rgba(76, 175, 80, 0.3);
-                }
-            """)
+            self._set_overview_status_text(self.overview_page.alarm_status_label, "#4caf50")
             
             # Update description with timestamp
             self.overview_page.alarm_desc_label.setText(_t("desc_checked_at", time=current_time))
@@ -1958,29 +1934,10 @@ class MainWindow(QMainWindow, UIBase):
             """)
             
             # Update status indicator bar to green
-            self.overview_page.status_indicator_bar.setStyleSheet("""
-                QFrame {
-                    background-color: #4caf50;
-                    border-radius: 1px;
-                    margin-top: 5px;
-                }
-            """)
+            self._set_overview_accent_bar(self.overview_page.status_indicator_bar, "#4caf50")
             
             # Reset card border color (no border like other cards)
-            self.overview_page.alarm_card.setStyleSheet("""
-                QFrame {
-                    background-color: #2a2a2a;
-                    border-radius: 12px;
-                    border: none;
-                    background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
-                        stop: 0 #2a2a2a, stop: 1 #1f1f1f);
-                }
-                QFrame:hover {
-                    border: 2px solid #444444;
-                    background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
-                        stop: 0 #2f2f2f, stop: 1 #242424);
-                }
-            """)
+            self._set_overview_card_shell(self.overview_page.alarm_card, "#444444")
 
         # 4. Update Occupancy Status on Overview Page — 跟主控 L2，不跟探头 bit5
         self._update_overview_occupancy_from_master()
@@ -2034,39 +1991,13 @@ class MainWindow(QMainWindow, UIBase):
             self.overview_page.occupancy_title_icon.load(get_icon_svg('occupancy_inactive'))
             self.overview_page.occupancy_indicator.load(get_icon_svg('occupancy_inactive'))
             self.overview_page.occupancy_status_label.setText(_t("master_offline"))
-            self.overview_page.occupancy_status_label.setStyleSheet("""
-                QLabel {
-                    color: #ff9800;
-                    font-size: 18px;
-                    font-weight: bold;
-                    margin-top: 8px;
-                    padding: 4px 12px;
-                    background-color: rgba(255, 152, 0, 0.12);
-                    border-radius: 10px;
-                    border: 1px solid rgba(255, 152, 0, 0.35);
-                }
-            """)
+            self._set_overview_status_text(self.overview_page.occupancy_status_label, "#ff9800")
             self.overview_page.occupancy_desc_label.setText(_t("desc_master_offline"))
             self.overview_page.occupancy_desc_label.setStyleSheet("""
                 QLabel { color: #888888; font-size: 12px; }
             """)
-            self.overview_page.occupancy_indicator_bar.setStyleSheet("""
-                QFrame { background-color: #ff9800; border: none; }
-            """)
-            self.overview_page.occupancy_card.setStyleSheet("""
-                QFrame {
-                    background-color: #2a2a2a;
-                    border-radius: 12px;
-                    border: none;
-                    background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
-                        stop: 0 #2a2a2a, stop: 1 #1f1f1f);
-                }
-                QFrame:hover {
-                    border: 2px solid #444444;
-                    background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
-                        stop: 0 #2f2f2f, stop: 1 #242424);
-                }
-            """)
+            self._set_overview_accent_bar(self.overview_page.occupancy_indicator_bar, "#ff9800")
+            self._set_overview_card_shell(self.overview_page.occupancy_card, "#444444")
             return
 
         busy = packet.is_channel_busy()
@@ -2081,18 +2012,7 @@ class MainWindow(QMainWindow, UIBase):
             self.start_occupancy_flashing()
             self.overview_page.occupancy_title_icon.load(get_icon_svg('occupancy_active'))
             self.overview_page.occupancy_status_label.setText(_t("status_occupied_alarm"))
-            self.overview_page.occupancy_status_label.setStyleSheet("""
-                QLabel {
-                    color: #ff4444;
-                    font-size: 18px;
-                    font-weight: bold;
-                    margin-top: 8px;
-                    padding: 4px 12px;
-                    background-color: rgba(255, 68, 68, 0.15);
-                    border-radius: 10px;
-                    border: 1px solid rgba(255, 68, 68, 0.4);
-                }
-            """)
+            self._set_overview_status_text(self.overview_page.occupancy_status_label, "#ff4444")
             self.overview_page.occupancy_desc_label.setText(brief or _t("desc_traffic_detected"))
             self.overview_page.occupancy_desc_label.setStyleSheet("""
                 QLabel {
@@ -2102,43 +2022,13 @@ class MainWindow(QMainWindow, UIBase):
                     margin-top: 2px;
                 }
             """)
-            self.overview_page.occupancy_indicator_bar.setStyleSheet("""
-                QFrame {
-                    background-color: #ff4444;
-                    border-radius: 1px;
-                    margin-top: 5px;
-                }
-            """)
-            self.overview_page.occupancy_card.setStyleSheet("""
-                QFrame {
-                    background-color: #2a2a2a;
-                    border-radius: 12px;
-                    border: 2px solid #ff4444;
-                    background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
-                        stop: 0 #2a2a2a, stop: 1 #1f1f1f);
-                }
-                QFrame:hover {
-                    border: 2px solid #ff6666;
-                    background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
-                        stop: 0 #2f2f2f, stop: 1 #242424);
-                }
-            """)
+            self._set_overview_accent_bar(self.overview_page.occupancy_indicator_bar, "#ff4444")
+            self._set_overview_card_shell(self.overview_page.occupancy_card, "#ff4444")
         elif busy:
             self.start_occupancy_flashing()
             self.overview_page.occupancy_title_icon.load(get_icon_svg('occupancy_active'))
             self.overview_page.occupancy_status_label.setText(_t("status_passing"))
-            self.overview_page.occupancy_status_label.setStyleSheet("""
-                QLabel {
-                    color: #2196F3;
-                    font-size: 18px;
-                    font-weight: bold;
-                    margin-top: 8px;
-                    padding: 4px 12px;
-                    background-color: rgba(33, 150, 243, 0.15);
-                    border-radius: 10px;
-                    border: 1px solid rgba(33, 150, 243, 0.4);
-                }
-            """)
+            self._set_overview_status_text(self.overview_page.occupancy_status_label, "#2196F3")
             self.overview_page.occupancy_desc_label.setText(brief or _t("desc_traffic_detected"))
             self.overview_page.occupancy_desc_label.setStyleSheet("""
                 QLabel {
@@ -2148,44 +2038,14 @@ class MainWindow(QMainWindow, UIBase):
                     margin-top: 2px;
                 }
             """)
-            self.overview_page.occupancy_indicator_bar.setStyleSheet("""
-                QFrame {
-                    background-color: #2196F3;
-                    border-radius: 1px;
-                    margin-top: 5px;
-                }
-            """)
-            self.overview_page.occupancy_card.setStyleSheet("""
-                QFrame {
-                    background-color: #2a2a2a;
-                    border-radius: 12px;
-                    border: 2px solid #2196F3;
-                    background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
-                        stop: 0 #2a2a2a, stop: 1 #1f1f1f);
-                }
-                QFrame:hover {
-                    border: 2px solid #64b5f6;
-                    background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
-                        stop: 0 #2f2f2f, stop: 1 #242424);
-                }
-            """)
+            self._set_overview_accent_bar(self.overview_page.occupancy_indicator_bar, "#2196F3")
+            self._set_overview_card_shell(self.overview_page.occupancy_card, "#2196F3")
         else:
             self.stop_occupancy_flashing()
             self.overview_page.occupancy_title_icon.load(get_icon_svg('occupancy_inactive'))
             self.overview_page.occupancy_indicator.load(get_icon_svg('occupancy_inactive'))
             self.overview_page.occupancy_status_label.setText(_t("status_vacant"))
-            self.overview_page.occupancy_status_label.setStyleSheet("""
-                QLabel {
-                    color: #4caf50;
-                    font-size: 18px;
-                    font-weight: bold;
-                    margin-top: 8px;
-                    padding: 4px 12px;
-                    background-color: rgba(76, 175, 80, 0.1);
-                    border-radius: 10px;
-                    border: 1px solid rgba(76, 175, 80, 0.3);
-                }
-            """)
+            self._set_overview_status_text(self.overview_page.occupancy_status_label, "#4caf50")
             self.overview_page.occupancy_desc_label.setText(brief or _t("desc_no_traffic"))
             self.overview_page.occupancy_desc_label.setStyleSheet("""
                 QLabel {
@@ -2195,27 +2055,8 @@ class MainWindow(QMainWindow, UIBase):
                     margin-top: 2px;
                 }
             """)
-            self.overview_page.occupancy_indicator_bar.setStyleSheet("""
-                QFrame {
-                    background-color: #4caf50;
-                    border-radius: 1px;
-                    margin-top: 5px;
-                }
-            """)
-            self.overview_page.occupancy_card.setStyleSheet("""
-                QFrame {
-                    background-color: #2a2a2a;
-                    border-radius: 12px;
-                    border: none;
-                    background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
-                        stop: 0 #2a2a2a, stop: 1 #1f1f1f);
-                }
-                QFrame:hover {
-                    border: 2px solid #444444;
-                    background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
-                        stop: 0 #2f2f2f, stop: 1 #242424);
-                }
-            """)
+            self._set_overview_accent_bar(self.overview_page.occupancy_indicator_bar, "#4caf50")
+            self._set_overview_card_shell(self.overview_page.occupancy_card, "#444444")
     
     def start_alarm_flashing(self):
         """Start flashing the alarm indicator"""
@@ -2301,7 +2142,7 @@ class MainWindow(QMainWindow, UIBase):
         self.logout_btn.setStyleSheet("""
             QPushButton {
                 background-color: #4CAF50; color: white; border: none;
-                border-radius: 12px; font-size: 14px; font-weight: bold; padding: 0 15px;
+                border-radius: 8px; font-size: 14px; font-weight: bold; padding: 0 15px;
             }
             QPushButton:pressed { background-color: #45a049; }
         """)
@@ -2375,10 +2216,10 @@ class MainWindow(QMainWindow, UIBase):
                     background-color: #4CAF50;
                     color: white;
                     border: none;
-                    border-radius: 15px;
-                    font-size: 16px;
+                    border-radius: 8px;
+                    font-size: 14px;
                     font-weight: bold;
-                    padding: 0 20px;
+                    padding: 0 16px;
                 }
                 QPushButton:pressed {
                     background-color: #45a049;
@@ -2399,13 +2240,13 @@ class MainWindow(QMainWindow, UIBase):
             self.logout_btn.setText(_t("btn_logout"))
             self.logout_btn.setStyleSheet("""
                 QPushButton {
-                    background-color: #f44336;
+                    background-color: #ff4444;
                     color: white;
                     border: none;
-                    border-radius: 15px;
-                    font-size: 16px;
+                    border-radius: 8px;
+                    font-size: 14px;
                     font-weight: bold;
-                    padding: 0 20px;
+                    padding: 0 16px;
                 }
                 QPushButton:pressed {
                     background-color: #d32f2f;

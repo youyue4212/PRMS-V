@@ -253,23 +253,32 @@ class HomePage(QWidget):
         if parent is not None and hasattr(parent, "is_logged_in") and not parent.is_logged_in():
             return
 
+        # Ensure every card has a stable identity before swap (placeholders included)
+        for i, e in enumerate(self._probe_entries):
+            if e.get("slot_id") is None:
+                e["slot_id"] = i
+            if not str(e.get("location") or "").strip():
+                e["location"] = self._slot_location(i)
+
         entries = list(self._probe_entries)
         entries[a], entries[b] = entries[b], entries[a]
         self._probe_entries = entries
 
-        # Persist client order
-        order = []
-        for i, e in enumerate(self._probe_entries):
-            cid = e.get("client_id")
-            order.append(str(cid).strip() if cid else ("slot:%d" % i))
+        # Persist identity order (client_id or stable slot_id — never display index)
+        order = [self._entry_order_key(e, i) for i, e in enumerate(self._probe_entries)]
         cfg = getattr(parent, "config", None) if parent is not None else None
         if cfg is not None and hasattr(cfg, "set_probe_display_order"):
             cfg.set_probe_display_order(order)
             cfg.save_settings()
 
-        # Swap location labels so the whole card (including tag) moves
-        locs = [self._slot_location(i) for i in range(n)]
-        locs[a], locs[b] = locs[b], locs[a]
+        # Location tags travel with the card (entry field), then sync to config by display slot
+        locs = []
+        for i, e in enumerate(self._probe_entries):
+            loc = str(e.get("location") or "").strip()
+            if not loc:
+                loc = self._slot_location(i)
+                e["location"] = loc
+            locs.append(loc)
         if cfg is not None and hasattr(cfg, "set_probe_slot_locations"):
             cfg.set_probe_slot_locations(locs)
             cfg.save_settings()
@@ -322,7 +331,53 @@ class HomePage(QWidget):
                     return label
             except Exception:
                 pass
-        return self._probe_name(i)
+        # Drag-reorder moves the card identity; name must follow slot_id, not display index
+        sid = entry.get("slot_id")
+        try:
+            sid = int(sid) if sid is not None else int(i)
+        except (TypeError, ValueError):
+            sid = int(i)
+        return self._probe_name(sid)
+
+    def _entry_order_key(self, entry, display_index=0):
+        cid = (entry or {}).get("client_id")
+        if cid is not None and str(cid).strip():
+            return str(cid).strip()
+        sid = (entry or {}).get("slot_id")
+        try:
+            sid = int(sid) if sid is not None else int(display_index)
+        except (TypeError, ValueError):
+            sid = int(display_index)
+        return "slot:%d" % sid
+
+    def _apply_saved_display_order(self):
+        """Reorder _probe_entries by persisted probe_display_order."""
+        cfg = getattr(self.parent, "config", None) if self.parent is not None else None
+        order = list(getattr(cfg, "probe_display_order", None) or []) if cfg is not None else []
+        if not order or not self._probe_entries:
+            return
+        keyed = []
+        for i, e in enumerate(self._probe_entries):
+            if e.get("slot_id") is None:
+                e["slot_id"] = i
+            keyed.append((self._entry_order_key(e, i), e))
+        by_key = {}
+        for k, e in keyed:
+            if k not in by_key:
+                by_key[k] = e
+        new_list = []
+        used = set()
+        for key in order:
+            e = by_key.get(str(key).strip())
+            if e is not None and id(e) not in used:
+                new_list.append(e)
+                used.add(id(e))
+        for _, e in keyed:
+            if id(e) not in used:
+                new_list.append(e)
+                used.add(id(e))
+        if len(new_list) == len(self._probe_entries):
+            self._probe_entries = new_list
 
     def _mode_label(self):
         from core.translation import _t
@@ -412,8 +467,9 @@ class HomePage(QWidget):
         for i, e in enumerate(self._probe_entries):
             probes.append({
                 # name/location 每次按当前语言重算，避免切英文仍显示「号探头/左侧」
+                # name 跟卡片身份(slot_id/client_id)；location 跟卡片一起走（entry 优先）
                 "name": self._live_probe_name(i, e),
-                "location": self._slot_location(i),
+                "location": str(e.get("location") or "").strip() or self._slot_location(i),
                 "cps": int(e.get("cps", 0) or 0),
                 "threshold": int(e.get("threshold", 1000) or 1000),
                 "isAlarm": bool(e.get("hit", False)),
@@ -441,7 +497,7 @@ class HomePage(QWidget):
         except Exception:
             total = sum(p["cps"] for p in probes)
 
-        health_color = "#10B981"
+        health_color = "#4caf50"
         health_warn = False
         hs = self.health_status_label.text()
         hs_l = hs.lower()
@@ -453,20 +509,20 @@ class HomePage(QWidget):
             or "degrad" in hs_l
             or ("fault" in hs_l and "no " not in hs_l and "offline" not in hs_l)
         ):
-            health_color = "#F59E0B"
+            health_color = "#ff9800"
             health_warn = True
         elif "离线" in hs or "offline" in hs_l:
-            health_color = "#10B981"
+            health_color = "#4caf50"
             health_warn = False
 
-        fault_color = "#10B981"
+        fault_color = "#4caf50"
         fault_warn = False
         fs = self.fault_status_label.text()
         if "故障" in fs and "无" not in fs and "0" not in fs:
-            fault_color = "#F59E0B"
+            fault_color = "#ff9800"
             fault_warn = True
         elif "活动" in fs and not fs.strip().startswith("0"):
-            fault_color = "#F59E0B"
+            fault_color = "#ff9800"
             fault_warn = True
 
         return {
@@ -568,7 +624,12 @@ class HomePage(QWidget):
         """Show offline placeholder tiles (no TCP probes yet)."""
         n = self._expected_placeholder_count()
         self.ensure_probe_tiles(n)
-        for e in self._probe_entries:
+        self._apply_saved_display_order()
+        for i, e in enumerate(self._probe_entries):
+            if e.get("slot_id") is None:
+                e["slot_id"] = i
+            if not str(e.get("location") or "").strip():
+                e["location"] = self._slot_location(i)
             e["cps"] = 0
             e["online"] = False
             e["hit"] = False
@@ -583,6 +644,7 @@ class HomePage(QWidget):
                 "location": self._slot_location(i),
                 "cps": 0, "online": False, "hit": False, "client_id": None,
                 "threshold": 1000,
+                "slot_id": i,
             })
         self._probe_entries = self._probe_entries[:count]
 
@@ -641,6 +703,13 @@ class HomePage(QWidget):
 
         now = time.time()
         n = max(len(entries), 1)
+        # Keep prior identities so reorder (slot_id) survives CPS refresh
+        prev_by_cid = {}
+        for pe in self._probe_entries:
+            cid = pe.get("client_id")
+            if cid is not None and str(cid).strip():
+                prev_by_cid[str(cid).strip()] = pe
+
         self.ensure_probe_tiles(n)
         self._probe_entries = self._probe_entries[:n]
         for i in range(n):
@@ -654,17 +723,29 @@ class HomePage(QWidget):
                 cps = st["last"][0]
                 hit = st["last"][2]
             st["last"] = (cps, online, hit)
+            cid = e.get("client_id")
+            prev = prev_by_cid.get(str(cid).strip()) if cid is not None and str(cid).strip() else None
+            slot_id = prev.get("slot_id") if prev else None
+            if slot_id is None:
+                slot_id = i
+            loc = ""
+            if prev and str(prev.get("location") or "").strip():
+                loc = str(prev.get("location")).strip()
+            if not loc:
+                loc = self._slot_location(i)
             self._probe_entries[i] = {
                 "name": self._live_probe_name(i, {
-                    "client_id": e.get("client_id"),
+                    "client_id": cid,
+                    "slot_id": slot_id,
                     "name": e.get("name"),
                 }),
-                "location": self._slot_location(i),
+                "location": loc,
                 "cps": cps,
                 "online": online,
                 "hit": hit,
-                "client_id": e.get("client_id"),
+                "client_id": cid,
                 "threshold": int(e.get("threshold", 1000) or 1000),
+                "slot_id": slot_id,
             }
         self._had_tile_data = True
         self.schedule_web_flush()

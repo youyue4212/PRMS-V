@@ -77,16 +77,17 @@ class CompactConfirmDialog(QDialog):
         self.setAttribute(Qt.WA_StyledBackground, True)
 
         from core.translation import _t
+        from core.ui_tokens import DANGER, INFO, BG, RADIUS_CARD, RADIUS_BTN, TOUCH_H
         ok_text = ok_text or _t("btn_confirm_yes")
         cancel_text = cancel_text or _t("btn_confirm_no")
 
-        accent = "#c62828" if danger else "#1565c0"
-        pressed = "#8e0000" if danger else "#0d47a1"
+        accent = DANGER if danger else INFO
+        pressed = "#8e0000" if danger else "#1976d2"
         self.setStyleSheet("""
             QDialog {
-                background-color: #1e1e1e;
+                background-color: %s;
                 border: 2px solid %s;
-                border-radius: 10px;
+                border-radius: %dpx;
             }
             QLabel#titleLabel {
                 color: #ffffff;
@@ -100,9 +101,9 @@ class CompactConfirmDialog(QDialog):
                 background: transparent;
             }
             QPushButton {
-                min-height: 44px;
+                min-height: %dpx;
                 border: none;
-                border-radius: 8px;
+                border-radius: %dpx;
                 font-size: 14px;
                 font-weight: bold;
                 padding: 0 16px;
@@ -117,7 +118,7 @@ class CompactConfirmDialog(QDialog):
                 color: white;
             }
             QPushButton#cancelBtn:pressed { background-color: #37474f; }
-        """ % (accent, accent, pressed))
+        """ % (BG, accent, RADIUS_CARD, TOUCH_H, RADIUS_BTN, accent, pressed))
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(14, 12, 14, 12)
@@ -163,12 +164,13 @@ class CompactMessageDialog(QDialog):
         self.setAttribute(Qt.WA_StyledBackground, True)
 
         from core.translation import _t
-        accent = {"warn": "#ef6c00", "error": "#c62828", "info": "#1565c0"}.get(level, "#ef6c00")
+        from core.ui_tokens import WARN, DANGER, INFO, BG, RADIUS_CARD, RADIUS_BTN, TOUCH_H
+        accent = {"warn": WARN, "error": DANGER, "info": INFO}.get(level, WARN)
         self.setStyleSheet("""
             QDialog {
-                background-color: #1e1e1e;
+                background-color: %s;
                 border: 2px solid %s;
-                border-radius: 10px;
+                border-radius: %dpx;
             }
             QLabel#titleLabel {
                 color: #ffffff; font-size: 15px; font-weight: bold; background: transparent;
@@ -177,11 +179,11 @@ class CompactMessageDialog(QDialog):
                 color: #dddddd; font-size: 13px; background: transparent;
             }
             QPushButton {
-                min-height: 44px; border: none; border-radius: 8px;
+                min-height: %dpx; border: none; border-radius: %dpx;
                 font-size: 14px; font-weight: bold;
                 background-color: %s; color: white;
             }
-        """ % (accent, accent))
+        """ % (BG, accent, RADIUS_CARD, TOUCH_H, RADIUS_BTN, accent))
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(14, 12, 14, 12)

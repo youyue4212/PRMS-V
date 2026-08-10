@@ -1,46 +1,47 @@
 dark_stylesheet = """
 QWidget {
-    background-color: #1E1E1E;
+    background-color: #1a1a1a;
     color: #E0E0E0;
-    font-family: 'Segoe UI';
+    font-family: 'Microsoft YaHei', 'Segoe UI', sans-serif;
     font-size: 14px;
 }
 QGraphicsWidget {
-        background-color: #2b2b2b;  /* Dark gray background */
-        border: 1px solid #555555;  /* Subtle border */
-        border-radius: 12px;
-        color: #ffffff;             /* White text */
+        background-color: #2a2a2a;
+        border: 1px solid #555555;
+        border-radius: 10px;
+        color: #ffffff;
         font-size: 10pt;
-        font-family: "Arial";
+        font-family: "Microsoft YaHei", "Arial";
     }
     PlotItem {
-        background: #1e1e1e;        /* Plot background */
+        background: #1a1a1a;
         border: 1px solid #666666;
     }
     AxisItem {
-        color: #cccccc;             /* Axis labels/ticks */
+        color: #cccccc;
     }
     LegendItem {
-        background-color: #333333;  /* Legend background */
+        background-color: #333333;
         border: 1px solid #555555;
     }
 
 QPushButton {
-    background-color: #2F3B44;
+    background-color: #2a2a2a;
     color: #E0E0E0;
-    border: 1px solid #3C4A53;
-    border-radius: 6px;
-    padding: 6px 14px;
+    border: 1px solid #444444;
+    border-radius: 8px;
+    padding: 8px 14px;
+    min-height: 44px;
 }
 
 QPushButton:hover {
-    background-color: #3E4B55;
-    border: 1px solid #5A6A75;
+    background-color: #333333;
+    border: 1px solid #555555;
 }
 
 QPushButton:pressed {
-    background-color: #242D33;
-    border: 1px solid #1E2529;
+    background-color: #1f1f1f;
+    border: 1px solid #333333;
 }
 
 QPushButton:disabled {

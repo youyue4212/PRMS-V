@@ -14,39 +14,44 @@
             user-select: none;
         }
         :root {
-            --hmi-ok: #10B981;
-            --hmi-warn: #F59E0B;
-            --hmi-alarm: #EF4444;
-            --hmi-muted: #8B90A0;
-            --hmi-text: #F1F3F8;
-            --hmi-panel: #141519;
-            --hmi-border: #2A2D38;
-            --touch-min: 48px;
+            --hmi-ok: #4caf50;
+            --hmi-warn: #ff9800;
+            --hmi-alarm: #ff4444;
+            --hmi-info: #2196F3;
+            --hmi-muted: #aaaaaa;
+            --hmi-text: #ffffff;
+            --hmi-panel: #2a2a2a;
+            --hmi-panel-deep: #1f1f1f;
+            --hmi-border: #333333;
+            --hmi-bg: #1a1a1a;
+            --touch-min: 44px;
+            --radius: 8px;
+            --radius-card: 10px;
         }
         body {
-            background-color: #0B0C0E; color: #FFFFFF; height: 100vh;
+            background-color: var(--hmi-bg); color: var(--hmi-text); height: 100vh;
             display: flex; flex-direction: column; overflow: hidden; font-size: 13px;
         }
 
         @keyframes alarmPulse {
-            0% { background-color: rgba(239, 68, 68, 0.25); border-color: #EF4444; box-shadow: 0 0 20px rgba(239, 68, 68, 0.6); }
-            50% { background-color: rgba(239, 68, 68, 0.05); border-color: rgba(239, 68, 68, 0.4); box-shadow: 0 0 5px rgba(239, 68, 68, 0.1); }
-            100% { background-color: rgba(239, 68, 68, 0.25); border-color: #EF4444; box-shadow: 0 0 20px rgba(239, 68, 68, 0.6); }
+            0% { background-color: rgba(255, 68, 68, 0.25); border-color: var(--hmi-alarm); box-shadow: 0 0 20px rgba(255, 68, 68, 0.6); }
+            50% { background-color: rgba(255, 68, 68, 0.05); border-color: rgba(255, 68, 68, 0.4); box-shadow: 0 0 5px rgba(255, 68, 68, 0.1); }
+            100% { background-color: rgba(255, 68, 68, 0.25); border-color: var(--hmi-alarm); box-shadow: 0 0 20px rgba(255, 68, 68, 0.6); }
         }
         @keyframes cardAlarmFlash {
-            0% { border-color: #EF4444; box-shadow: 0 0 25px rgba(239, 68, 68, 0.8); }
-            50% { border-color: #7F1D1D; box-shadow: 0 0 5px rgba(239, 68, 68, 0.2); }
-            100% { border-color: #EF4444; box-shadow: 0 0 25px rgba(239, 68, 68, 0.8); }
+            0% { border-color: var(--hmi-alarm); box-shadow: 0 0 25px rgba(255, 68, 68, 0.8); }
+            50% { border-color: #7F1D1D; box-shadow: 0 0 5px rgba(255, 68, 68, 0.2); }
+            100% { border-color: var(--hmi-alarm); box-shadow: 0 0 25px rgba(255, 68, 68, 0.8); }
         }
         @keyframes textGlowRed {
-            0% { color: #FF4D4D; text-shadow: 0 0 20px #FF0000; }
+            0% { color: #ff6666; text-shadow: 0 0 20px #ff4444; }
             50% { color: #990000; text-shadow: 0 0 4px #550000; }
-            100% { color: #FF4D4D; text-shadow: 0 0 20px #FF0000; }
+            100% { color: #ff6666; text-shadow: 0 0 20px #ff4444; }
         }
         @keyframes btnPulse {
-            0% { box-shadow: 0 0 8px rgba(239, 68, 68, 0.4); }
-            50% { box-shadow: 0 0 20px rgba(239, 68, 68, 0.8); }
-            100% { box-shadow: 0 0 8px rgba(239, 68, 68, 0.4); }
+            0% { box-shadow: 0 0 8px rgba(255, 68, 68, 0.4); }
+            50% { box-shadow: 0 0 20px rgba(255, 68, 68, 0.8); }
+            100% { box-shadow: 0 0 8px rgba(255, 68, 68, 0.4); }
         }
         @keyframes iconPulse {
             0% { transform: scale(1); opacity: 1; }
@@ -67,7 +72,7 @@
             border-bottom: 1px solid var(--hmi-border); flex-shrink: 0; overflow: hidden;
             box-sizing: border-box;
         }
-        .header.global-alarm { background: #3B0707; border-bottom-color: #EF4444; }
+        .header.global-alarm { background: #3B0707; border-bottom-color: var(--hmi-alarm); }
         .header-left, .header-right {
             display: flex; flex-direction: row; flex-wrap: nowrap;
             align-items: center; gap: 10px; min-width: 0; height: 50px;
@@ -81,7 +86,7 @@
         }
         .mode-badge {
             flex-shrink: 0; white-space: nowrap;
-            background: #1E293B; color: #38BDF8; padding: 3px 10px;
+            background: #1E293B; color: var(--hmi-info); padding: 3px 10px;
             border-radius: 12px; font-size: 11px; font-weight: 600;
             border: 1px solid #0284C7; line-height: 1.2;
         }
@@ -157,11 +162,11 @@
         body.can-reorder .original-probe-card { cursor: grab; touch-action: none; }
         .original-probe-card.dragging {
             opacity: 0.55; transform: scale(0.98);
-            box-shadow: 0 0 0 2px #3B82F6;
+            box-shadow: 0 0 0 2px var(--hmi-info);
             z-index: 5;
         }
         .original-probe-card.drag-over {
-            border-color: #38BDF8 !important;
+            border-color: var(--hmi-info) !important;
             box-shadow: 0 0 0 2px rgba(56,189,248,0.55);
         }
 
@@ -197,7 +202,7 @@
             flex: 0 0 auto;
             min-height: 0;
             max-height: 148px;
-            background: #141519; border: 1px solid #252730; border-radius: 8px;
+            background: var(--hmi-panel); border: 1px solid var(--hmi-border); border-radius: 8px;
             padding: 10px 14px; display: flex; flex-direction: row;
             align-items: center; justify-content: space-between; gap: 14px;
         }
@@ -218,37 +223,37 @@
             line-height: 1.2;
         }
         .master-alarm-banner.alarm .alarm-title-text { color: #FF3333; }
-        .master-alarm-banner.warn .alarm-title-text { color: #F59E0B; }
+        .master-alarm-banner.warn .alarm-title-text { color: var(--hmi-warn); }
         .alarm-icon-badge {
             display: inline-flex; align-items: center; justify-content: center;
             width: 56px; height: 56px; min-width: 56px; padding: 0; border-radius: 50%;
             font-size: 28px; font-weight: 900; line-height: 1;
             font-family: "Segoe UI Symbol", "Segoe UI Emoji", "Microsoft YaHei", sans-serif;
-            background: rgba(16, 185, 129, 0.22); color: #10B981;
+            background: rgba(16, 185, 129, 0.22); color: var(--hmi-ok);
             border: 3px solid rgba(16, 185, 129, 0.75);
             flex-shrink: 0; box-shadow: 0 0 12px rgba(16, 185, 129, 0.25);
         }
         .master-alarm-banner.alarm .alarm-icon-badge {
             width: 64px; height: 64px; min-width: 64px; font-size: 34px;
             background: rgba(239, 68, 68, 0.28); color: #FF4D4D;
-            border-color: #EF4444; border-radius: 12px;
+            border-color: var(--hmi-alarm); border-radius: 12px;
             box-shadow: 0 0 22px rgba(239, 68, 68, 0.55);
             animation: iconPulse 0.8s infinite;
         }
         .master-alarm-banner.warn .alarm-icon-badge {
             width: 60px; height: 60px; min-width: 60px; font-size: 30px;
-            background: rgba(245, 158, 11, 0.25); color: #F59E0B;
-            border-color: #F59E0B; border-radius: 12px;
+            background: rgba(245, 158, 11, 0.25); color: var(--hmi-warn);
+            border-color: var(--hmi-warn); border-radius: 12px;
             box-shadow: 0 0 16px rgba(245, 158, 11, 0.4);
         }
         /* SVG warning glyph inside badge when alarming */
         .alarm-icon-badge svg { width: 70%; height: 70%; display: block; }
         .master-alarm-banner.alarm .alarm-icon-badge {
-            background: rgba(239, 68, 68, 0.25); color: #FF4D4D; border-color: #EF4444;
+            background: rgba(239, 68, 68, 0.25); color: #FF4D4D; border-color: var(--hmi-alarm);
             animation: iconPulse 0.8s infinite;
         }
         .master-alarm-banner.warn .alarm-icon-badge {
-            background: rgba(245, 158, 11, 0.25); color: #F59E0B; border-color: #F59E0B;
+            background: rgba(245, 158, 11, 0.25); color: var(--hmi-warn); border-color: var(--hmi-warn);
         }
         .alarm-sub-text { font-size: 13px; color: var(--hmi-muted); margin-top: 0; font-weight: 500; max-width: 100%; line-height: 1.3; }
         .master-alarm-banner.alarm .alarm-sub-text { color: #FFAAAA; font-weight: bold; }
@@ -258,13 +263,13 @@
             gap: 14px; padding-left: 4px;
         }
         .gate-frame {
-            width: 78px; height: 70px; border: 3px solid #F59E0B; border-bottom: none;
+            width: 78px; height: 70px; border: 3px solid var(--hmi-warn); border-bottom: none;
             border-radius: 8px 8px 0 0; position: relative;
             display: flex; align-items: flex-end; justify-content: center;
             background: radial-gradient(circle, rgba(245,158,11,0.12) 0%, transparent 70%);
         }
         .person-avatar {
-            font-size: 34px; font-weight: 800; color: #F59E0B; line-height: 1;
+            font-size: 34px; font-weight: 800; color: var(--hmi-warn); line-height: 1;
             font-family: "Segoe UI Symbol", "Segoe UI Emoji", "Microsoft YaHei", sans-serif;
             position: absolute; bottom: 8px; letter-spacing: 0;
         }
@@ -277,7 +282,7 @@
             font-family: "Segoe UI Emoji", "Segoe UI Symbol", "Microsoft YaHei", sans-serif;
         }
         .passage-state-badge.active {
-            background: #F59E0B; color: #000; border-color: #F59E0B;
+            background: var(--hmi-warn); color: #000; border-color: var(--hmi-warn);
             box-shadow: 0 0 12px rgba(245,158,11,0.4);
         }
 
@@ -299,13 +304,13 @@
         }
 
         .original-probe-card {
-            background: var(--hmi-panel); border: 2px solid #272936; border-radius: 8px;
+            background: var(--hmi-panel); border: 2px solid var(--hmi-border); border-radius: var(--radius-card);
             padding: 12px 14px;
             display: flex; flex-direction: column; justify-content: space-between;
             cursor: pointer; transition: border-color 0.2s;
             min-height: 0; max-height: none; height: 100%; overflow: hidden;
         }
-        .original-probe-card:hover { border-color: #3B82F6; }
+        .original-probe-card:hover { border-color: var(--hmi-info); }
         .original-probe-card.alarm { background: #210A0C; animation: cardAlarmFlash 0.8s infinite; }
         .original-probe-card.offline { border-color: #555; opacity: 0.85; }
         .probe-head {
@@ -349,10 +354,10 @@
         .status-indicator > span:not(.dot) { letter-spacing: 0.5px; }
         .status-indicator { display: flex; align-items: center; gap: 6px; font-weight: 600; }
         .dot { width: 10px; height: 10px; border-radius: 50%; background: #00FF66; box-shadow: 0 0 8px #00FF66; flex-shrink: 0; }
-        .dot.alarm { background: #EF4444; box-shadow: 0 0 8px #EF4444; animation: iconPulse 0.8s infinite; }
+        .dot.alarm { background: var(--hmi-alarm); box-shadow: 0 0 8px var(--hmi-alarm); animation: iconPulse 0.8s infinite; }
         .dot.offline { background: #666; box-shadow: none; }
         .status-text-green { color: #00FF66; }
-        .status-text-red { color: #EF4444; font-weight: bold; }
+        .status-text-red { color: var(--hmi-alarm); font-weight: bold; }
 
         .sidebar-section {
             display: flex;
@@ -381,7 +386,7 @@
             margin-top: 0;
         }
         .side-card {
-            background: #141519; border: 1px solid #252730; border-radius: 8px;
+            background: var(--hmi-panel); border: 1px solid var(--hmi-border); border-radius: 8px;
             padding: 14px 16px; display: flex; flex-direction: column; gap: 10px;
             justify-content: flex-start;
             box-sizing: border-box;
@@ -396,16 +401,16 @@
             margin-top: auto;
         }
 .side-card.warn { border-color: rgba(245, 158, 11, 0.85); border-width: 2px; }
-        .side-card.danger { border-color: #EF4444; border-width: 2px; }
+        .side-card.danger { border-color: var(--hmi-alarm); border-width: 2px; }
         .clickable-card { cursor: default; transition: border-color 0.2s ease; position: relative; padding-bottom: 0; }
         body.nav-enabled .clickable-card { cursor: pointer; }
         body.nav-enabled .clickable-card:hover {
-            border-color: #3B82F6; background: #191B22;
+            border-color: var(--hmi-info); background: #191B22;
         }
         /* Public mode: fault card still opens read-only alarm log */
         body.alarm-log-enabled #card_fault { cursor: pointer; }
         body.alarm-log-enabled #card_fault:hover {
-            border-color: #3B82F6; background: #191B22;
+            border-color: var(--hmi-info); background: #191B22;
         }
         .detail-link { display: none !important; }
 
@@ -430,13 +435,13 @@
             min-width: 0; font-size: 13px;
             font-variant-numeric: tabular-nums;
         }
-        .kv-val.green { color: #10B981; }
-        .kv-val.amber { color: #F59E0B; }
-        .kv-val.red { color: #EF4444; }
+        .kv-val.green { color: var(--hmi-ok); }
+        .kv-val.amber { color: var(--hmi-warn); }
+        .kv-val.red { color: var(--hmi-alarm); }
         .detail-link {
             position: absolute; right: 14px; bottom: 10px;
             background: transparent; border: none; padding: 6px 2px;
-            color: #3B82F6; font-size: 13px; font-weight: 700;
+            color: var(--hmi-info); font-size: 13px; font-weight: 700;
             cursor: pointer; letter-spacing: 0.2px;
             min-height: 32px;
         }
@@ -486,8 +491,8 @@
         .info-item:has(#healthDesc) > span:first-child {
             min-width: 36px;
         }
-        .info-value.green { color: #10B981; }
-        .info-value.amber { color: #F59E0B; }
+        .info-value.green { color: var(--hmi-ok); }
+        .info-value.amber { color: var(--hmi-warn); }
         .info-value.red-flash { color: #FF4D4D; font-weight: bold; animation: textGlowRed 0.8s infinite; }
 
         .reset-btn {
@@ -500,14 +505,14 @@
         .reset-btn.normal { background: #1C1E26; border: 1px solid #2D303E; color: #6B7280; opacity: 0.8; }
         .reset-btn.normal:hover { background: #252836; color: #9CA3AF; border-color: #3B3E52; }
         .reset-btn.active {
-            background: linear-gradient(135deg, #DC2626 0%, #B91C1C 100%);
-            border: 1px solid #EF4444; color: #FFFFFF;
+            background: linear-gradient(135deg, var(--hmi-alarm) 0%, #c62828 100%);
+            border: 1px solid var(--hmi-alarm); color: #FFFFFF;
             box-shadow: 0 0 15px rgba(239, 68, 68, 0.4); animation: btnPulse 1.2s infinite;
         }
         .reset-btn:disabled { cursor: not-allowed; opacity: 0.55; }
 
         .debug-bar {
-            background: #141519; border: 1px solid #252730; border-radius: 8px;
+            background: var(--hmi-panel); border: 1px solid var(--hmi-border); border-radius: 8px;
             padding: 12px; display: flex; flex-direction: column; gap: 8px; margin-top: auto;
         }
         body.embedded .sidebar-section {
@@ -544,7 +549,7 @@
             border-radius: 8px; font-size: 18px; cursor: pointer; font-weight: bold;
             -webkit-tap-highlight-color: transparent; touch-action: manipulation;
         }
-        .close-btn:active { background: #EF4444; color: #FFF; }
+        .close-btn:active { background: var(--hmi-alarm); color: #FFF; }
         .modal-body { padding: 20px; display: flex; flex-direction: column; gap: 12px; max-height: 60vh; overflow-y: auto; }
         .detail-row {
             display: flex; justify-content: space-between; align-items: center;
@@ -610,7 +615,7 @@
             <div class="side-card" id="card_alarm">
                 <div class="side-card-title">
                     <span id="resetCardTitle">报警与复位控制</span>
-                    <span id="sideHeaderTag" style="color:#10B981;">● 正常</span>
+                    <span id="sideHeaderTag" style="color:var(--hmi-ok);">● 正常</span>
                 </div>
                 <div class="info-list">
                     <div class="info-item"><span id="labelRadStatus">辐射状态</span><span class="info-value green" id="sideRadStat">全组正常</span></div>
@@ -625,7 +630,7 @@
             <div class="side-card clickable-card" id="card_health" onclick="openPage('health')">
                 <div class="side-card-title">
                     <span id="healthCardTitle">设备健康</span>
-                    <span id="healthStatusTag" style="color:#10B981;">正常</span>
+                    <span id="healthStatusTag" style="color:var(--hmi-ok);">正常</span>
                 </div>
                 <div class="kv-list">
                     <div class="kv-row"><span class="kv-key" id="kvProbeComm">探头通信</span><span class="kv-val green" id="healthProbeComm">2/2 在线</span></div>
@@ -637,7 +642,7 @@
             <div class="side-card clickable-card" id="card_fault" onclick="openPage('fault')">
                 <div class="side-card-title">
                     <span id="faultCardTitle">故障摘要</span>
-                    <span id="faultCountTag" style="color:#10B981;">0 活动故障</span>
+                    <span id="faultCountTag" style="color:var(--hmi-ok);">0 活动故障</span>
                 </div>
                 <div class="kv-list">
                     <div class="kv-row"><span class="kv-key" id="kvLastFault">最近故障</span><span class="kv-val" id="lastFaultText">无未处理故障</span></div>
@@ -871,7 +876,7 @@
                 $('resetIcon').innerText = '\u21ba';
                 $('resetBtnText').innerText = UI.resetBtn;
                 $('sideHeaderTag').innerText = UI.sideTagOk;
-                $('sideHeaderTag').style.color = '#10B981';
+                $('sideHeaderTag').style.color = 'var(--hmi-ok)';
                 $('alarmLatchStatus').innerText = UI.latchNone;
                 $('alarmLatchStatus').style.color = '#DDD';
             }
@@ -903,10 +908,10 @@
             if (state === 'alarm') {
                 banner.classList.add('alarm');
                 header.classList.add('global-alarm');
-                $('alarmIcon').innerHTML = "<svg viewBox='0 0 24 24' fill='none' xmlns='http://www.w3.org/2000/svg'><path d='M12 3L22 20H2L12 3Z' fill='#EF4444' stroke='#FFAAAA' stroke-width='1.2'/><path d='M12 9V14' stroke='#fff' stroke-width='2.2' stroke-linecap='round'/><circle cx='12' cy='17.2' r='1.2' fill='#fff'/></svg>";
+                $('alarmIcon').innerHTML = "<svg viewBox='0 0 24 24' fill='none' xmlns='http://www.w3.org/2000/svg'><path d='M12 3L22 20H2L12 3Z' fill='var(--hmi-alarm)' stroke='#FFAAAA' stroke-width='1.2'/><path d='M12 9V14' stroke='#fff' stroke-width='2.2' stroke-linecap='round'/><circle cx='12' cy='17.2' r='1.2' fill='#fff'/></svg>";
             } else if (state === 'warn' || state === 'offline') {
                 banner.classList.add('warn');
-                $('alarmIcon').innerHTML = "<svg viewBox='0 0 24 24' fill='none' xmlns='http://www.w3.org/2000/svg'><path d='M12 3L22 20H2L12 3Z' fill='#F59E0B' stroke='#FDE68A' stroke-width='1.2'/><path d='M12 9V14' stroke='#111' stroke-width='2.2' stroke-linecap='round'/><circle cx='12' cy='17.2' r='1.2' fill='#111'/></svg>";
+                $('alarmIcon').innerHTML = "<svg viewBox='0 0 24 24' fill='none' xmlns='http://www.w3.org/2000/svg'><path d='M12 3L22 20H2L12 3Z' fill='var(--hmi-warn)' stroke='#FDE68A' stroke-width='1.2'/><path d='M12 9V14' stroke='#111' stroke-width='2.2' stroke-linecap='round'/><circle cx='12' cy='17.2' r='1.2' fill='#111'/></svg>";
             } else {
                 $('alarmIcon').innerHTML = "<svg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'><circle cx='12' cy='12' r='10' fill='#059669'/><path d='M7 12.5l3 3 7-7' stroke='#fff' stroke-width='2.4' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>";
             }
@@ -1041,7 +1046,7 @@
                     if (ls) {
                         ls.innerText = state.alarm.latchText;
                         if (state.alarm.clearModeLatch && state.alarm.latched) ls.style.color = '#FF4D4D';
-                        else if (state.alarm.latched) ls.style.color = '#F59E0B';
+                        else if (state.alarm.latched) ls.style.color = 'var(--hmi-warn)';
                         else ls.style.color = '#DDD';
                     }
                 }
@@ -1051,7 +1056,7 @@
                 var hs = state.health.status || '';
                 if (state.health.warn && hs && hs.indexOf('\u26a0') < 0) hs = '\u26a0 ' + hs;
                 $('healthStatusTag').innerText = hs;
-                $('healthStatusTag').style.color = state.health.color || '#10B981';
+                $('healthStatusTag').style.color = state.health.color || 'var(--hmi-ok)';
                 var rows = state.health.rows || {};
                 function setKv(id, text, tone) {
                     var el = $(id);
@@ -1066,7 +1071,7 @@
             }
             if (state.fault) {
                 $('faultCountTag').innerText = state.fault.status || '';
-                $('faultCountTag').style.color = state.fault.color || '#10B981';
+                $('faultCountTag').style.color = state.fault.color || 'var(--hmi-ok)';
                 var frows = state.fault.rows || {};
                 var lastEl = $('lastFaultText');
                 if (lastEl) {

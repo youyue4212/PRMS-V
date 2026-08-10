@@ -11,6 +11,7 @@ from PyQt5.QtGui import QFont
 
 from core.ui_components import DataCard, FONTS, PADDING
 from core.icons import get_icon_svg
+from core.ui_tokens import PAGE_TITLE_QSS, TOUCH_H, RADIUS_BTN, WARN, OK
 import time
 
 # Original overview page card height
@@ -45,18 +46,11 @@ class OverviewPage(QWidget):
         super().__init__()
         self.parent = parent
         layout = QVBoxLayout()
-        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(8)
 
         self.title = QLabel("Gamma Spectrum System")
-        self.title.setStyleSheet("""
-            QLabel {
-                color: white;
-                font-size: 18px !important;
-                font-weight: bold !important;
-                margin-bottom: 8px;
-            }
-        """)
+        self.title.setStyleSheet(PAGE_TITLE_QSS)
         layout.addWidget(self.title)
 
         cards_layout = QHBoxLayout()
@@ -83,15 +77,18 @@ class OverviewPage(QWidget):
 
         # Alarm card
         self.alarm_card = QFrame()
+        self.alarm_card.setObjectName("overviewCard")
         self.alarm_card.setFixedHeight(OVERVIEW_CARD_HEIGHT)
         self.alarm_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.alarm_card.setStyleSheet("""
-            QFrame {
+            QFrame#overviewCard {
                 background-color: #2a2a2a;
                 border-radius: 10px;
                 border: none;
-                background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
-                    stop: 0 #2a2a2a, stop: 1 #1f1f1f);
+            }
+            QFrame#overviewCard QLabel {
+                background: transparent;
+                border: none;
             }
         """)
         alarm_layout = QVBoxLayout()
@@ -105,7 +102,7 @@ class OverviewPage(QWidget):
         title_layout.addWidget(self.alarm_title_icon)
         self.alarm_title_label = QLabel("Alarm")
         self.alarm_title_label.setStyleSheet(
-            "color: #cccccc; font-size: 13px; font-weight: bold;"
+            "color: #cccccc; font-size: 13px; font-weight: bold; background: transparent; border: none;"
         )
         title_layout.addWidget(self.alarm_title_label)
         title_layout.addStretch()
@@ -120,39 +117,40 @@ class OverviewPage(QWidget):
         self.alarm_status_label.setAlignment(Qt.AlignCenter)
         self.alarm_status_label.setStyleSheet("""
             QLabel {
-                color: #4caf50; font-size: 15px; font-weight: bold;
-                margin-top: 2px; padding: 2px 6px;
-                background-color: rgba(76, 175, 80, 0.1);
-                border-radius: 8px;
-                border: 1px solid rgba(76, 175, 80, 0.3);
+                color: #4caf50; font-size: 16px; font-weight: bold;
+                margin-top: 2px; background: transparent; border: none;
             }
         """)
         alarm_layout.addWidget(self.alarm_status_label, 0, Qt.AlignCenter)
 
         self.alarm_desc_scroll, self.alarm_desc_label = _make_card_scroll_label(38)
         self.alarm_desc_label.setText("No alarm")
-        self.alarm_desc_label.setStyleSheet("color: #aaaaaa; font-size: 11px;")
+        self.alarm_desc_label.setStyleSheet("color: #aaaaaa; font-size: 11px; background: transparent; border: none;")
         alarm_layout.addWidget(self.alarm_desc_scroll)
 
         self.status_indicator_bar = QFrame()
+        self.status_indicator_bar.setObjectName("cardAccentBar")
         self.status_indicator_bar.setFixedHeight(2)
         self.status_indicator_bar.setStyleSheet(
-            "QFrame { background-color: #4caf50; border-radius: 1px; margin-top: 3px; }"
+            "QFrame#cardAccentBar { background-color: #4caf50; border: none; border-radius: 1px; }"
         )
         alarm_layout.addWidget(self.status_indicator_bar)
         self.alarm_card.setLayout(alarm_layout)
 
         # Occupancy card
         self.occupancy_card = QFrame()
+        self.occupancy_card.setObjectName("overviewCard")
         self.occupancy_card.setFixedHeight(OVERVIEW_CARD_HEIGHT)
         self.occupancy_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.occupancy_card.setStyleSheet("""
-            QFrame {
+            QFrame#overviewCard {
                 background-color: #2a2a2a;
                 border-radius: 10px;
                 border: none;
-                background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
-                    stop: 0 #2a2a2a, stop: 1 #1f1f1f);
+            }
+            QFrame#overviewCard QLabel {
+                background: transparent;
+                border: none;
             }
         """)
         occupancy_layout = QVBoxLayout()
@@ -166,7 +164,7 @@ class OverviewPage(QWidget):
         occ_title_layout.addWidget(self.occupancy_title_icon)
         self.occupancy_title_label = QLabel("Channel")
         self.occupancy_title_label.setStyleSheet(
-            "color: #cccccc; font-size: 13px; font-weight: bold;"
+            "color: #cccccc; font-size: 13px; font-weight: bold; background: transparent; border: none;"
         )
         occ_title_layout.addWidget(self.occupancy_title_label)
         occ_title_layout.addStretch()
@@ -181,24 +179,22 @@ class OverviewPage(QWidget):
         self.occupancy_status_label.setAlignment(Qt.AlignCenter)
         self.occupancy_status_label.setStyleSheet("""
             QLabel {
-                color: #4caf50; font-size: 15px; font-weight: bold;
-                margin-top: 2px; padding: 2px 6px;
-                background-color: rgba(76, 175, 80, 0.1);
-                border-radius: 8px;
-                border: 1px solid rgba(76, 175, 80, 0.3);
+                color: #4caf50; font-size: 16px; font-weight: bold;
+                margin-top: 2px; background: transparent; border: none;
             }
         """)
         occupancy_layout.addWidget(self.occupancy_status_label, 0, Qt.AlignCenter)
 
         self.occupancy_desc_scroll, self.occupancy_desc_label = _make_card_scroll_label(38)
         self.occupancy_desc_label.setText("No traffic")
-        self.occupancy_desc_label.setStyleSheet("color: #aaaaaa; font-size: 11px;")
+        self.occupancy_desc_label.setStyleSheet("color: #aaaaaa; font-size: 11px; background: transparent; border: none;")
         occupancy_layout.addWidget(self.occupancy_desc_scroll)
 
         self.occupancy_indicator_bar = QFrame()
+        self.occupancy_indicator_bar.setObjectName("cardAccentBar")
         self.occupancy_indicator_bar.setFixedHeight(2)
         self.occupancy_indicator_bar.setStyleSheet(
-            "QFrame { background-color: #4caf50; border-radius: 1px; margin-top: 3px; }"
+            "QFrame#cardAccentBar { background-color: #4caf50; border: none; border-radius: 1px; }"
         )
         occupancy_layout.addWidget(self.occupancy_indicator_bar)
         self.occupancy_card.setLayout(occupancy_layout)
@@ -258,14 +254,7 @@ class SpectrumPage(QWidget):
         layout.setContentsMargins(20, 20, 20, 20)
         
         self.title = QLabel("能谱与谱图分析")
-        self.title.setStyleSheet("""
-            QLabel {
-                color: white;
-                font-size: 22px !important;
-                font-weight: bold !important;
-                margin-bottom: 20px;
-            }
-        """)
+        self.title.setStyleSheet(PAGE_TITLE_QSS)
         layout.addWidget(self.title)
         
         # Create a splitter layout for better resizing
@@ -274,11 +263,9 @@ class SpectrumPage(QWidget):
         splitter = QSplitter(Qt.Vertical)
         splitter.setStyleSheet("""
             QSplitter::handle {
-                background-color: #444444;
-                height: 2px;
-            }
-            QSplitter::handle:hover {
-                background-color: #666666;
+                background-color: #333333;
+                height: 1px;
+                margin: 4px 0;
             }
         """)
         
@@ -316,14 +303,7 @@ class SettingsPage(QWidget):
         main_layout.setContentsMargins(20, 20, 20, 20)
         
         self.title = QLabel("系统设置")
-        self.title.setStyleSheet("""
-            QLabel {
-                color: white;
-                font-size: 22px !important;
-                font-weight: bold !important;
-                margin-bottom: 20px;
-            }
-        """)
+        self.title.setStyleSheet(PAGE_TITLE_QSS)
         main_layout.addWidget(self.title)
 
         # Create scroll area for settings content
@@ -437,22 +417,22 @@ class ClientsPage(QWidget):
         
         # Unlock Button
         self.unlock_btn = QPushButton("输入工程师密码解锁")
-        self.unlock_btn.setFixedHeight(42)
+        self.unlock_btn.setFixedHeight(TOUCH_H)
         self.unlock_btn.setMinimumWidth(220)
         self.unlock_btn.setMaximumWidth(320)
-        self.unlock_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #ff9800;
+        self.unlock_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {WARN};
                 color: white;
                 border: none;
-                border-radius: 15px;
+                border-radius: {RADIUS_BTN}px;
                 font-size: 15px;
                 font-weight: bold;
                 margin-top: 12px;
-            }
-            QPushButton:pressed {
+            }}
+            QPushButton:pressed {{
                 background-color: #e65100;
-            }
+            }}
         """)
         self.unlock_btn.clicked.connect(self.parent.login)
         lock_layout.addWidget(self.unlock_btn, 0, Qt.AlignCenter)
@@ -468,14 +448,7 @@ class ClientsPage(QWidget):
         
         # Title
         self.clients_title = QLabel("已连接的探测器")
-        self.clients_title.setStyleSheet("""
-            QLabel {
-                color: white;
-                font-size: 18px !important;
-                font-weight: bold !important;
-                margin-bottom: 4px;
-            }
-        """)
+        self.clients_title.setStyleSheet(PAGE_TITLE_QSS)
         content_layout.addWidget(self.clients_title)
         
         # Client count summary
@@ -512,20 +485,21 @@ class ClientsPage(QWidget):
         
         # Add refresh button
         self.refresh_btn = QPushButton("刷新")
-        self.refresh_btn.setFixedHeight(36)
-        self.refresh_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #4caf50;
+        self.refresh_btn.setFixedHeight(TOUCH_H)
+        self.refresh_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {OK};
                 color: white;
                 border: none;
-                border-radius: 15px;
-                font-size: 16px;
+                border-radius: {RADIUS_BTN}px;
+                font-size: 15px;
                 font-weight: bold;
                 padding: 0 20px;
-            }
-            QPushButton:pressed {
+                min-width: 140px;
+            }}
+            QPushButton:pressed {{
                 background-color: #45a049;
-            }
+            }}
         """)
         self.refresh_btn.clicked.connect(self.refresh_client_display)
         content_layout.addWidget(self.refresh_btn, 0, Qt.AlignCenter)
@@ -654,7 +628,7 @@ class ClientsPage(QWidget):
         widget.setStyleSheet("""
             QFrame {
                 background-color: #2a2a2a;
-                border-radius: 12px;
+                border-radius: 10px;
                 border: 1px solid #333333;
             }
         """)
@@ -809,7 +783,7 @@ class ClientsPage(QWidget):
         widget.setStyleSheet("""
             QFrame {
                 background-color: #2a2a2a;
-                border-radius: 12px;
+                border-radius: 10px;
                 border: 1px solid #333333;
             }
         """)
