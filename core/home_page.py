@@ -94,6 +94,8 @@ class HomePage(QWidget):
         self._reset_alarm_active = False
         self._reset_enabled = False
         self._alarm_kind = "normal"
+        self._alarm_latch_text = ""
+        self._alarm_clear_mode_latch = False
         self._health_rows = {}
         self._fault_rows = {}
         self._passage_busy = False
@@ -337,6 +339,9 @@ class HomePage(QWidget):
             "sideTagAlarm": _t("side_tag_alarm"),
             "latchNone": _t("latch_none"),
             "latchPending": _t("latch_pending", n=1),
+            "latchAutoHold": _t("latch_auto_hold"),
+            "latchModeAuto": _t("latch_mode_auto"),
+            "latchModeLatch": _t("latch_mode_latch"),
             "healthTitle": _t("card_health_title"),
             "faultTitle": _t("card_fault_summary_title"),
             "kvProbeComm": _t("kv_probe_comm"),
@@ -401,11 +406,18 @@ class HomePage(QWidget):
                 "clientId": e.get("client_id") or "",
             })
         if not probes and not self._had_tile_data:
+            n = self._expected_placeholder_count()
             probes = [
-                {"name": self._probe_name(0), "location": self._slot_location(0), "cps": 0,
-                 "threshold": 1000, "isAlarm": False, "online": False, "clientId": ""},
-                {"name": self._probe_name(1), "location": self._slot_location(1), "cps": 0,
-                 "threshold": 1000, "isAlarm": False, "online": False, "clientId": ""},
+                {
+                    "name": self._probe_name(i),
+                    "location": self._slot_location(i),
+                    "cps": 0,
+                    "threshold": 1000,
+                    "isAlarm": False,
+                    "online": False,
+                    "clientId": "",
+                }
+                for i in range(n)
             ]
 
         total_txt = self.total_cps_label.text().replace(" cps", "").replace("CPS", "").strip()
@@ -455,6 +467,10 @@ class HomePage(QWidget):
                 "desc": self.alarm_desc_label.text(),
                 "sideRad": self.side_rad_stat.text() or self.alarm_status_label.text(),
                 "latched": bool(self._reset_alarm_active),
+                "latchText": getattr(self, "_alarm_latch_text", None)
+                or self.alarm_latch_status.text()
+                or "",
+                "clearModeLatch": bool(getattr(self, "_alarm_clear_mode_latch", False)),
                 "resetEnabled": bool(self._reset_enabled),
             },
             "passage": {
@@ -521,6 +537,27 @@ class HomePage(QWidget):
         self.browser.page().runJavaScript(js)
 
     # ---- API used by main_window ----
+    def _expected_placeholder_count(self):
+        """Empty-load tile count follows Settings → expected_probe_count."""
+        try:
+            cfg = getattr(self.parent, "config", None) if self.parent is not None else None
+            n = int(getattr(cfg, "expected_probe_count", 2) or 0) if cfg is not None else 2
+        except (TypeError, ValueError):
+            n = 0
+        if n <= 0:
+            n = 2
+        return max(1, min(n, 16))
+
+    def _apply_empty_probe_placeholders(self):
+        """Show offline placeholder tiles (no TCP probes yet)."""
+        n = self._expected_placeholder_count()
+        self.ensure_probe_tiles(n)
+        for e in self._probe_entries:
+            e["cps"] = 0
+            e["online"] = False
+            e["hit"] = False
+        self.schedule_web_flush()
+
     def ensure_probe_tiles(self, count):
         count = max(0, min(int(count or 0), 16))
         while len(self._probe_entries) < count:
@@ -555,12 +592,7 @@ class HomePage(QWidget):
         if summary is None:
             if self._had_tile_data:
                 return
-            self.ensure_probe_tiles(2)
-            for e in self._probe_entries:
-                e["cps"] = 0
-                e["online"] = False
-                e["hit"] = False
-            self.schedule_web_flush()
+            self._apply_empty_probe_placeholders()
             return
 
         now = time.time()
@@ -587,12 +619,7 @@ class HomePage(QWidget):
         if not entries:
             if self._had_tile_data:
                 return
-            self.ensure_probe_tiles(1)
-            for e in self._probe_entries:
-                e["cps"] = 0
-                e["online"] = False
-                e["hit"] = False
-            self.schedule_web_flush()
+            self._apply_empty_probe_placeholders()
             return
 
         now = time.time()

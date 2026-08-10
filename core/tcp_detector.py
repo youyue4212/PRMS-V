@@ -452,7 +452,8 @@ class TcpPacketWorker(QObject):
             command_type: Type of command ('set_hv', 'set_threshold', 'set_operation_mode', 
                           'set_product_id', 'set_sensitivity_coefficient', 'control_single_relay',
                           'control_multiple_relays', 'read_relay_status',
-                          'channel_alarm_reset', 'reset_factory_defaults')
+                          'channel_alarm_reset', 'channel_alarm_clear_mode',
+                          'reset_factory_defaults')
             command_value: Value for the command (float for HV, int for threshold, etc.)
             description: Description for logging
         Returns:
@@ -475,6 +476,28 @@ class TcpPacketWorker(QObject):
             checksum = self.calculate_xor_checksum(command_data)
             command_data.append(checksum)
             description = description or "Channel alarm manual reset (0x15)"
+
+        elif command_type == 'channel_alarm_clear_mode':
+            # 消警模式 0x16：00=自动，01=锁存，FF=读；确认字节 A5
+            # 设自动 55 AA 03 16 00 A5 4F；设锁存 … 01 A5 4E；读 … FF A5 B0
+            if not is_master:
+                self.error_occurred.emit("channel_alarm_clear_mode must target master TCP client")
+                return False
+            try:
+                mode = int(command_value)
+            except (TypeError, ValueError):
+                mode = 0xFF
+            if mode not in (0, 1, 0xFF):
+                mode = 0xFF
+            command_data = [0x55, 0xAA, 0x03, 0x16, mode & 0xFF, 0xA5]
+            checksum = self.calculate_xor_checksum(command_data)
+            command_data.append(checksum)
+            if mode == 0:
+                description = description or "Set alarm clear mode AUTO (0x16)"
+            elif mode == 1:
+                description = description or "Set alarm clear mode LATCH (0x16)"
+            else:
+                description = description or "Read alarm clear mode (0x16)"
 
         elif command_type == 'reset_factory_defaults':
             # 55 AA 03 14 A5 5A 17 — restore HV/trigger/sen_coef defaults

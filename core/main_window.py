@@ -1114,12 +1114,16 @@ class MainWindow(QMainWindow, UIBase):
             )
             page.alarm_desc_label.setText(_t("desc_master_offline"))
             self._set_home_alarm_card_border("#ff9800")
+            self._apply_home_latch_status(page, hard_alarm=False, latch_mode=False, offline=True)
             if hasattr(page, "sync_side_rad_from_alarm"):
                 page.sync_side_rad_from_alarm(_t("master_offline"), False)
             self._sync_channel_hard_alarm_log(False, None)
             return
 
         kind = packet.ui_alarm_kind()
+        latch_mode = bool(getattr(packet, "alarm_latch_mode", False))
+        self._master_alarm_latch_mode = latch_mode
+        self._sync_alarm_clear_mode_ui(latch_mode)
         hit_mask = int(getattr(packet, "hit_probe_mask", 0) or 0)
         desc = _t("desc_master_alarm", decision=packet.decision_text(lang), time=current_time)
         if packet.relay_output and kind == "channel_alarm":
@@ -1163,6 +1167,9 @@ class MainWindow(QMainWindow, UIBase):
             reset_btn.setEnabled(kind == "channel_alarm" and not pending_reset)
         if hasattr(page, "set_channel_reset_alarm_active"):
             page.set_channel_reset_alarm_active(kind == "channel_alarm")
+        self._apply_home_latch_status(
+            page, hard_alarm=(kind == "channel_alarm"), latch_mode=latch_mode
+        )
 
         if kind == "channel_alarm":
             page.alarm_title_icon.load(get_icon_svg('alarm_active'))
@@ -1307,6 +1314,138 @@ class MainWindow(QMainWindow, UIBase):
             )
         except Exception as e:
             self.log("Channel hard-alarm log failed: %s" % e, "ERROR")
+
+    def _apply_home_latch_status(self, page, hard_alarm=False, latch_mode=False, offline=False):
+        """Home「报警锁存」文案：跟 L2 sys_mode.bit2 + 是否硬报。"""
+        from core.translation import _t
+
+        if offline:
+            text = _t("latch_none")
+            color = "#DDD"
+        elif hard_alarm and latch_mode:
+            text = _t("latch_pending", n=1)
+            color = "#FF4D4D"
+        elif hard_alarm and not latch_mode:
+            text = _t("latch_auto_hold")
+            color = "#F59E0B"
+        elif latch_mode:
+            text = _t("latch_mode_latch")
+            color = "#DDD"
+        else:
+            text = _t("latch_mode_auto")
+            color = "#DDD"
+        if hasattr(page, "alarm_latch_status"):
+            page.alarm_latch_status.setText(text)
+            try:
+                page.alarm_latch_status.setStyleSheet("color: %s;" % color)
+            except Exception:
+                pass
+        page._alarm_latch_text = text
+        page._alarm_clear_mode_latch = bool(latch_mode)
+        if hasattr(page, "schedule_web_flush"):
+            page.schedule_web_flush()
+
+    def _sync_alarm_clear_mode_ui(self, latch_mode: bool):
+        """Keep settings combo aligned with L2 sys_mode.bit2."""
+        combo = getattr(self, "alarm_clear_mode_combo", None)
+        if combo is None:
+            return
+        want = 1 if latch_mode else 0
+        if int(combo.currentData()) == want:
+            return
+        combo.blockSignals(True)
+        idx = combo.findData(want)
+        if idx >= 0:
+            combo.setCurrentIndex(idx)
+        combo.blockSignals(False)
+
+    def on_alarm_clear_mode_combo_changed(self, _index=None):
+        """Settings: switch master alarm clear mode via 0x16."""
+        combo = getattr(self, "alarm_clear_mode_combo", None)
+        if combo is None:
+            return
+        mode = int(combo.currentData())
+        if not self.check_permission_before_action(
+            "Set alarm clear mode", Permission.MODIFY_DETECTOR_SETTINGS
+        ):
+            # revert to last known L2 mode
+            self._sync_alarm_clear_mode_ui(
+                bool(getattr(self, "_master_alarm_latch_mode", False))
+            )
+            return
+        self.set_master_alarm_clear_mode(latch=(mode == 1))
+
+    def set_master_alarm_clear_mode(self, latch: bool):
+        """PC → 主控 0x16 切换消警模式（0=自动，1=锁存）。"""
+        from core.translation import _t
+
+        if not getattr(self, "is_tcp_mode", False):
+            QMessageBox.warning(
+                self, _t("msg_clear_mode_title"), _t("msg_clear_mode_need_master")
+            )
+            return False
+        master_cid = getattr(self, "master_client_id", None)
+        if not master_cid or not hasattr(self, "worker") or self.worker is None:
+            QMessageBox.warning(
+                self, _t("msg_clear_mode_title"), _t("msg_clear_mode_need_master")
+            )
+            return False
+        if not hasattr(self.worker, "send_command_to_client"):
+            return False
+        mode = 1 if latch else 0
+        ok = self.worker.send_command_to_client(
+            master_cid,
+            "channel_alarm_clear_mode",
+            mode,
+            description="Set alarm clear mode %s (0x16)" % ("LATCH" if latch else "AUTO"),
+        )
+        if ok:
+            self._pending_alarm_clear_mode_at = time.time()
+            self.log(
+                "Alarm clear mode 0x16 set → %s" % ("LATCH" if latch else "AUTO"),
+                "INFO",
+            )
+        return bool(ok)
+
+    def read_master_alarm_clear_mode(self):
+        """PC → 主控 0x16 FF 读消警模式。"""
+        master_cid = getattr(self, "master_client_id", None)
+        if not master_cid or not hasattr(self, "worker") or self.worker is None:
+            return False
+        if not hasattr(self.worker, "send_command_to_client"):
+            return False
+        return bool(
+            self.worker.send_command_to_client(
+                master_cid,
+                "channel_alarm_clear_mode",
+                0xFF,
+                description="Read alarm clear mode (0x16)",
+            )
+        )
+
+    def on_alarm_clear_mode_feedback(self, packet):
+        """主控 CmdFeedback control_code=0x16。"""
+        from core.translation import _t
+
+        self._pending_alarm_clear_mode_at = 0.0
+        if int(getattr(packet, "status", 0) or 0) != 1:
+            self.log("Alarm clear mode 0x16 rejected", "WARNING")
+            QMessageBox.warning(
+                self, _t("msg_clear_mode_title"), _t("msg_clear_mode_fail")
+            )
+            return
+        mode = int(getattr(packet, "value", 0) or 0) & 0xFF
+        latch = mode == 1
+        self._master_alarm_latch_mode = latch
+        self._sync_alarm_clear_mode_ui(latch)
+        page = getattr(self, "home_page", None)
+        if page is not None:
+            hard = bool(getattr(page, "_reset_alarm_active", False))
+            self._apply_home_latch_status(page, hard_alarm=hard, latch_mode=latch)
+        self.log(
+            "Alarm clear mode ack → %s (value=%d)" % ("LATCH" if latch else "AUTO", mode),
+            "INFO",
+        )
 
     def request_channel_alarm_reset(self):
         """用户点「通道报警复位」→ 二次确认 → 主控 0x15。"""
@@ -2177,7 +2316,11 @@ class MainWindow(QMainWindow, UIBase):
             self.master_relay_read_btn.setEnabled(can_modify_settings)
         if getattr(self, 'master_force_gate_btn', None) is not None:
             self.master_force_gate_btn.setEnabled(can_modify_settings)
-        
+        if getattr(self, 'alarm_clear_mode_combo', None) is not None:
+            self.alarm_clear_mode_combo.setEnabled(can_modify_settings)
+        if getattr(self, 'alarm_clear_mode_read_btn', None) is not None:
+            self.alarm_clear_mode_read_btn.setEnabled(can_modify_settings)
+
         if hasattr(self, 'alarm_read_btn'):
             self.alarm_read_btn.setEnabled(can_modify_settings)
 
@@ -2688,15 +2831,7 @@ class MainWindow(QMainWindow, UIBase):
             self.timeout_manager.last_operate_time = 0
             self.timeout_manager.save_state()
             self.enter_public_mode()
-
-            from PyQt5.QtCore import QTimer
-            from core.translation import _t
-            QTimer.singleShot(100, lambda: QMessageBox.information(
-                self,
-                _t("msg_admin_timeout_title"),
-                _t("msg_admin_timeout_text")
-            ))
-            self.log("Admin idle timeout -> public home monitor", 'INFO')
+            self.log("Admin idle timeout -> public home monitor (silent)", 'INFO')
     
     def login(self, preferred_page: int = None, required_for_page: bool = False):
         """Login from public/viewer mode. Returns True on success."""
@@ -3028,6 +3163,22 @@ class MainWindow(QMainWindow, UIBase):
             if getattr(self, 'master_force_gate_btn', None) is not None:
                 self.master_force_gate_btn.setText(_t("btn_force_open_gate"))
                 self.master_force_gate_btn.setToolTip(_t("tip_force_open_gate"))
+            if getattr(self, 'alarm_clear_mode_label', None) is not None:
+                self.alarm_clear_mode_label.setText(_t("set_alarm_clear_mode"))
+            if getattr(self, 'alarm_clear_mode_combo', None) is not None:
+                combo = self.alarm_clear_mode_combo
+                cur = combo.currentData()
+                combo.blockSignals(True)
+                combo.clear()
+                combo.addItem(_t("latch_mode_auto"), 0)
+                combo.addItem(_t("latch_mode_latch"), 1)
+                idx = combo.findData(cur if cur is not None else 0)
+                if idx >= 0:
+                    combo.setCurrentIndex(idx)
+                combo.setToolTip(_t("tip_alarm_clear_mode"))
+                combo.blockSignals(False)
+            if getattr(self, 'alarm_clear_mode_read_btn', None) is not None:
+                self.alarm_clear_mode_read_btn.setText(_t("btn_read_clear_mode"))
             states = getattr(self, 'master_relay_states', None)
             if states is not None and len(states) >= 3:
                 r0, r1, r2 = states[0], states[1], states[2]

@@ -1480,6 +1480,18 @@ class UIBase():
         self.master_relay_hint_label.setWordWrap(True)
         master_relay_layout.addWidget(self.master_relay_hint_label, 2, 0, 1, 6)
 
+        self.alarm_clear_mode_label = QLabel(_t("set_alarm_clear_mode"))
+        self.alarm_clear_mode_combo = QComboBox()
+        self.alarm_clear_mode_combo.addItem(_t("latch_mode_auto"), 0)
+        self.alarm_clear_mode_combo.addItem(_t("latch_mode_latch"), 1)
+        self.alarm_clear_mode_combo.setToolTip(_t("tip_alarm_clear_mode"))
+        self.alarm_clear_mode_combo.currentIndexChanged.connect(self.on_alarm_clear_mode_combo_changed)
+        self.alarm_clear_mode_read_btn = QPushButton(_t("btn_read_clear_mode"))
+        self.alarm_clear_mode_read_btn.clicked.connect(self.read_master_alarm_clear_mode)
+        master_relay_layout.addWidget(self.alarm_clear_mode_label, 3, 0)
+        master_relay_layout.addWidget(self.alarm_clear_mode_combo, 3, 1, 1, 3)
+        master_relay_layout.addWidget(self.alarm_clear_mode_read_btn, 3, 4)
+
         settings_layout.addWidget(self.master_relay_group)
 
 
@@ -2181,16 +2193,25 @@ class UIBase():
         master_cid = self._get_master_client_id() if hasattr(self, "_get_master_client_id") else None
         pending_relay_age = time.time() - float(getattr(self, "_pending_master_relay_cmd", 0) or 0)
         pending_reset_age = time.time() - float(getattr(self, "_pending_channel_reset_at", 0) or 0)
+        pending_clear_mode_age = time.time() - float(
+            getattr(self, "_pending_alarm_clear_mode_at", 0) or 0
+        )
         from_master = bool(master_cid and src and src == master_cid)
         if not from_master and master_cid and not src:
-            if 0 <= pending_relay_age <= 3.0 or 0 <= pending_reset_age <= 5.0:
+            if (
+                0 <= pending_relay_age <= 3.0
+                or 0 <= pending_reset_age <= 5.0
+                or 0 <= pending_clear_mode_age <= 5.0
+            ):
                 from_master = True
 
         # 通道报警人工复位 0x15（仅主控）
         if from_master and packet.control_code == 0x15:
             if hasattr(self, "on_channel_alarm_reset_feedback"):
                 self.on_channel_alarm_reset_feedback(packet)
-
+        elif from_master and packet.control_code == 0x16:
+            if hasattr(self, "on_alarm_clear_mode_feedback"):
+                self.on_alarm_clear_mode_feedback(packet)
         elif from_master and packet.control_code in (0x06, 0x11, 0x12) and hasattr(self, "master_relay_status_label"):
             if not packet.status:
                 from core.translation import _t
@@ -3035,6 +3056,10 @@ class UIBase():
             self.prune_disconnected_probe_labels(online)
         if hasattr(self, "update_system_status"):
             self.update_system_status()
+        page = getattr(self, "home_page", None)
+        if page is not None and not getattr(page, "_had_tile_data", False):
+            if hasattr(page, "_apply_empty_probe_placeholders"):
+                page._apply_empty_probe_placeholders()
         self.log(
             f"Expected probe count={n} via {source}; online_now={len(online)}",
             'INFO'
@@ -4212,6 +4237,7 @@ class UIBase():
             0x13: "获取报警状态",
             0x14: "恢复默认参数",
             0x15: "通道报警人工复位",
+            0x16: "消警模式设置/读取",
             0xF0: "错误命令"
         }
         return control_code_descriptions.get(control_code, f"未知命令 (0x{control_code:02X})")

@@ -1020,6 +1020,15 @@
                     $('sideRadStat').className = state.alarm.latched ? 'info-value red-flash' : 'info-value green';
                 }
                 setResetStyle(!!state.alarm.latched, state.alarm.resetEnabled !== false && !!state.alarm.latched);
+                if (state.alarm.latchText) {
+                    var ls = $('alarmLatchStatus');
+                    if (ls) {
+                        ls.innerText = state.alarm.latchText;
+                        if (state.alarm.clearModeLatch && state.alarm.latched) ls.style.color = '#FF4D4D';
+                        else if (state.alarm.latched) ls.style.color = '#F59E0B';
+                        else ls.style.color = '#DDD';
+                    }
+                }
             }
             if (state.passage) setPassage(!!state.passage.busy, state.passage.text);
             if (state.health) {

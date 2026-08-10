@@ -30,6 +30,7 @@ MASTER_IO_RELAY_OUTPUT = MASTER_IO_RELAY0  # 兼容旧名 = 继电器 0
 # sys_mode bits
 MASTER_MODE_IR_DEGRADED = 1 << 0
 MASTER_MODE_ONLINE_LOW_WARN = 1 << 1
+MASTER_MODE_ALARM_LATCH = 1 << 2  # 1=锁存消警（须 0x15）；0=自动（约 3s 条件消失可自灭）
 
 MASTER_DECISION_NORMAL = 0x00
 MASTER_DECISION_OVER_THRESHOLD = 0x01
@@ -150,6 +151,11 @@ class MasterSummaryPacket:
     @property
     def online_low_warn(self) -> bool:
         return bool(self.sys_mode & MASTER_MODE_ONLINE_LOW_WARN)
+
+    @property
+    def alarm_latch_mode(self) -> bool:
+        """True = 锁存消警（须人工 0x15）；False = 自动消警。"""
+        return bool(self.sys_mode & MASTER_MODE_ALARM_LATCH)
 
     def is_channel_alarm(self) -> bool:
         """
