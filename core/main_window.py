@@ -77,6 +77,7 @@ def _format_fault_description(messages: list, max_lines: int = _FAULT_DESC_MAX_L
 
 # 导入用户管理模块
 from core.user_manager import get_user_manager, UserRole, Permission
+from core.industrial_dialogs import ask_confirm, show_warn, show_info, show_error
 
 # 导入超时管理器模块
 from core.timeout_manager import get_timeout_manager
@@ -154,10 +155,10 @@ class MainWindow(QMainWindow, UIBase):
         self.button_container = QWidget()
         self.button_container.setStyleSheet("background-color: #1a1a1a;")
         button_layout = QHBoxLayout()
-        button_layout.setContentsMargins(20, 5, 20, 5)  # 大幅减少边距，适应小屏幕
+        button_layout.setContentsMargins(20, 6, 20, 6)
         
-        # 使用更小的按钮高度
-        button_height = 35  # 从40减少到35
+        # 工控触控目标约 44px
+        button_height = 44
         
         self.acquisition_btn = AcquisitionButton()
         self.acquisition_btn.clicked.connect(self.clear_data)
@@ -401,13 +402,15 @@ class MainWindow(QMainWindow, UIBase):
         return bool(self.current_user and self.current_user.get("username"))
 
     def switch_page(self, index):
-        """Switch between pages. Index 0 (home) is public; others require login."""
-        if index != 0 and not self.is_logged_in():
+        """切换页面。主显示(0)与报警日志(4)公共只读可进；其它页需登录。"""
+        public_ok = index in (0, 4)
+        if not public_ok and not self.is_logged_in():
             # 需要登录；取消则静默回主显示，不再弹「需要登录」
             if self.login(preferred_page=index, required_for_page=True):
                 return
             self.stacked_widget.setCurrentIndex(0)
             self.bottom_nav.set_active_button(0)
+            self._apply_public_chrome(0)
             return
 
         self.stacked_widget.setCurrentIndex(index)
@@ -417,14 +420,35 @@ class MainWindow(QMainWindow, UIBase):
             self.status_bar.setVisible(index != 0)
             if index != 0 and hasattr(self.status_bar, "set_clock_visible"):
                 self.status_bar.set_clock_visible(True)
+        if not self.is_logged_in():
+            self._apply_public_chrome(index)
         if index == 0:
             # 切回主显示时立即按当前源刷新（主控 L2 或探头回退）
             if self.is_master_online() and getattr(self, "latest_master_summary", None) is not None:
                 self.on_master_summary_ui(self.latest_master_summary, self.master_client_id)
             else:
                 self._refresh_home_from_probes(self.client_data)
+        if hasattr(self, "alarm_log_page") and hasattr(self.alarm_log_page, "update_auth_controls"):
+            self.alarm_log_page.update_auth_controls()
         # 更新操作时间（重置超时计时器）
         self.update_operate_time()
+
+    def _apply_public_chrome(self, index: int):
+        """公共模式 UI：主显示藏底栏；报警日志显示底栏便于返回。"""
+        if self.is_logged_in():
+            return
+        self.button_container.setVisible(False)
+        self.acquisition_btn.setVisible(False)
+        self.save_data_btn.setVisible(False)
+        self.user_management_btn.setVisible(False)
+        # 报警日志页：显示底栏 + 状态栏（可点回主显示）
+        show_nav = (index == 4)
+        self.bottom_nav.setVisible(show_nav)
+        if hasattr(self, "status_bar"):
+            self.status_bar.setVisible(show_nav)
+            if show_nav:
+                from core.translation import _t
+                self.status_bar.update_user_info(_t("status_public_readonly_log"), None)
     
     def clear_data(self):
         """Clear all data (spectrum, time series, etc.)"""
@@ -438,55 +462,51 @@ class MainWindow(QMainWindow, UIBase):
         
         if self.is_acquiring:
             # 如果正在采集，询问用户是否要先停止采集
-            reply = QMessageBox.question(
+            if not ask_confirm(
                 self,
                 _t("msg_acq_running_title"),
                 _t("msg_acq_running_text"),
-                QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
-            
-            if reply == QMessageBox.Yes:
-                # 停止采集（不会断开TCP连接，只是停止数据处理）
-                self.stop_acquisition()
-                self.log("Acquisition stopped for data clearing (TCP connection remains)", 'INFO')
-                
-                # 等待一小段时间确保采集完全停止
-                import time
-                time.sleep(0.5)
-            else:
-                # 用户取消
+                danger=True,
+            ):
                 return
-        
+            # 停止采集（不会断开TCP连接，只是停止数据处理）
+            self.stop_acquisition()
+            self.log("Acquisition stopped for data clearing (TCP connection remains)", 'INFO')
+            import time
+            time.sleep(0.5)
+
         # 确认清除数据
-        reply = QMessageBox.question(
+        if not ask_confirm(
             self,
             _t("msg_clear_data_title"),
             _t("msg_clear_data_text"),
-            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
-        
-        if reply == QMessageBox.Yes:
-            # 重置所有数据
-            self.reset_plots()
+            danger=True,
+        ):
+            return
+
+        # 重置所有数据
+        self.reset_plots()
             
-            # 重置当前状态数据
-            self.current_stat = {'hv': 0, 'rates': 0, 'temp': 0}
-            self.client_data = {}
-            self.client_time_series = {}
-            self.client_spectrum_data = {}
-            self.primary_client_id = None
-            self.total_count_rate = 0
+        # 重置当前状态数据
+        self.current_stat = {'hv': 0, 'rates': 0, 'temp': 0}
+        self.client_data = {}
+        self.client_time_series = {}
+        self.client_spectrum_data = {}
+        self.primary_client_id = None
+        self.total_count_rate = 0
             
-            # 如果有数据更新回调，通知UI清零
-            if self.data_updated_callback is not None:
-                self.data_updated_callback(self.current_stat, 0, {})
-            
-            # 更新原概览 + 主显示
-            self.overview_page.radiation_card.update_data("0 cps", "")
-            self.overview_page.status_card.update_data("0" + chr(176) + "C", "0 V")
-            if hasattr(self, "home_page"):
-                self.home_page.total_cps_label.setText("0")
-                self.home_page.update_probe_tiles_from_master(None, False)
-            
-            self.log("All data cleared", 'INFO')
+        # 如果有数据更新回调，通知UI清零
+        if self.data_updated_callback is not None:
+            self.data_updated_callback(self.current_stat, 0, {})
+
+        # 更新原概览 + 主显示
+        self.overview_page.radiation_card.update_data("0 cps", "")
+        self.overview_page.status_card.update_data("0" + chr(176) + "C", "0 V")
+        if hasattr(self, "home_page"):
+            self.home_page.total_cps_label.setText("0")
+            self.home_page.update_probe_tiles_from_master(None, False)
+
+        self.log("All data cleared", 'INFO')
     
     def save_data(self, auto_save=False, auto_save_path=""):
         """Save current data to file"""
@@ -926,6 +946,7 @@ class MainWindow(QMainWindow, UIBase):
     def on_master_summary_ui(self, packet, client_id=None):
         """Refresh home alarm/channel from Master L2; CPS stays on probe spectrum."""
         from core.translation import _t, TranslationManager
+        from core.master_summary import MASTER_OFFLINE_TIMEOUT_SEC
         import time as _time
 
         lang = TranslationManager().current_lang
@@ -952,12 +973,12 @@ class MainWindow(QMainWindow, UIBase):
                 or getattr(self, "_last_sane_master_at", 0)
                 or 0
             )
-            if last_pkt is not None and (now - last_at) <= 2.0:
+            if last_pkt is not None and (now - last_at) <= MASTER_OFFLINE_TIMEOUT_SEC:
                 display_pkt = last_pkt
 
         online = display_pkt is not None and (
             packet is not None or self.is_master_online()
-            or (now - float(getattr(self, "_last_any_master_at", 0) or 0)) <= 2.0
+            or (now - float(getattr(self, "_last_any_master_at", 0) or 0)) <= MASTER_OFFLINE_TIMEOUT_SEC
         )
         sane = bool(
             display_pkt is not None
@@ -1142,7 +1163,6 @@ class MainWindow(QMainWindow, UIBase):
             if t0 is None:
                 self._over_thresh_probes_clear_since = now
             elif (now - float(t0)) >= 2.0:
-                soft_cleared = True
                 if not getattr(self, "_over_thresh_soft_cleared", False):
                     self._over_thresh_soft_cleared = True
                     self.log(
@@ -1150,7 +1170,8 @@ class MainWindow(QMainWindow, UIBase):
                         "probes clear and hit_mask=0",
                         "INFO",
                     )
-                kind = "normal"
+                # 不伪装成 normal：保留超阈语义，仅弱化显示
+                kind = "soft_cleared"
                 desc = _t("desc_over_thresh_soft_clear")
         else:
             self._over_thresh_probes_clear_since = None
@@ -1207,8 +1228,10 @@ class MainWindow(QMainWindow, UIBase):
             ):
                 self._write_channel_reset_audit(packet, source="l2_0x05")
             self._awaiting_l2_acked = False
+            self._awaiting_l2_acked_at = 0.0
             self._pending_channel_reset_at = 0.0
         elif kind == "passing":
+            self._release_channel_reset_await_if_cleared(packet, source="l2_passing")
             page.alarm_title_icon.load(get_icon_svg('alarm_inactive'))
             page.alarm_indicator.load(get_icon_svg('occupancy_active'))
             page.alarm_status_label.setText(_t("status_passing"))
@@ -1220,6 +1243,7 @@ class MainWindow(QMainWindow, UIBase):
             self._set_home_alarm_card_border("#2196f3")
             self._sync_channel_hard_alarm_log(False, packet)
         elif kind == "over_threshold":
+            self._release_channel_reset_await_if_cleared(packet, source="l2_over_threshold")
             page.alarm_title_icon.load(get_icon_svg('alarm_inactive'))
             page.alarm_indicator.load(get_icon_svg('alarm_inactive'))
             page.alarm_status_label.setText(_t("status_over_threshold"))
@@ -1230,7 +1254,20 @@ class MainWindow(QMainWindow, UIBase):
             page.alarm_desc_label.setText(desc)
             self._set_home_alarm_card_border("#ff9800")
             self._sync_channel_hard_alarm_log(False, packet)
+        elif kind == "soft_cleared":
+            self._release_channel_reset_await_if_cleared(packet, source="l2_soft_cleared")
+            page.alarm_title_icon.load(get_icon_svg('alarm_inactive'))
+            page.alarm_indicator.load(get_icon_svg('alarm_inactive'))
+            page.alarm_status_label.setText(_t("status_over_thresh_soft"))
+            self._set_home_status_style(
+                page.alarm_status_label, "#ffb74d",
+                "rgba(255, 183, 77, 0.14)", "rgba(255, 183, 77, 0.4)"
+            )
+            page.alarm_desc_label.setText(desc)
+            self._set_home_alarm_card_border("#ffb74d")
+            self._sync_channel_hard_alarm_log(False, packet)
         elif kind == "fault":
+            self._release_channel_reset_await_if_cleared(packet, source="l2_fault")
             page.alarm_title_icon.load(get_icon_svg('alarm_inactive'))
             page.alarm_indicator.load(get_icon_svg('alarm_inactive'))
             page.alarm_status_label.setText(_t("status_sys_fault"))
@@ -1242,6 +1279,7 @@ class MainWindow(QMainWindow, UIBase):
             self._set_home_alarm_card_border("#9e9e9e")
             self._sync_channel_hard_alarm_log(False, packet)
         else:
+            self._release_channel_reset_await_if_cleared(packet, source="l2_normal")
             page.alarm_title_icon.load(get_icon_svg('alarm_inactive'))
             page.alarm_indicator.load(get_icon_svg('alarm_inactive'))
             page.alarm_status_label.setText(_t("status_normal"))
@@ -1249,17 +1287,14 @@ class MainWindow(QMainWindow, UIBase):
                 page.alarm_status_label, "#4caf50",
                 "rgba(76, 175, 80, 0.1)", "rgba(76, 175, 80, 0.3)"
             )
-            if soft_cleared:
-                page.alarm_desc_label.setText(desc)
-            else:
-                page.alarm_desc_label.setText(format_io_brief(packet, lang=lang))
+            page.alarm_desc_label.setText(format_io_brief(packet, lang=lang))
             self._set_home_alarm_card_border(None)
             self._sync_channel_hard_alarm_log(False, packet)
 
         if hasattr(page, "sync_side_rad_from_alarm") and kind != "channel_alarm":
             page.sync_side_rad_from_alarm(
                 page.alarm_status_label.text(),
-                kind in ("over_threshold", "fault"),
+                kind in ("over_threshold", "soft_cleared", "fault"),
             )
 
     def _sync_channel_hard_alarm_log(self, active: bool, packet=None):
@@ -1380,15 +1415,11 @@ class MainWindow(QMainWindow, UIBase):
         from core.translation import _t
 
         if not getattr(self, "is_tcp_mode", False):
-            QMessageBox.warning(
-                self, _t("msg_clear_mode_title"), _t("msg_clear_mode_need_master")
-            )
+            show_warn(self, _t("msg_clear_mode_title"), _t("msg_clear_mode_need_master"))
             return False
         master_cid = getattr(self, "master_client_id", None)
         if not master_cid or not hasattr(self, "worker") or self.worker is None:
-            QMessageBox.warning(
-                self, _t("msg_clear_mode_title"), _t("msg_clear_mode_need_master")
-            )
+            show_warn(self, _t("msg_clear_mode_title"), _t("msg_clear_mode_need_master"))
             return False
         if not hasattr(self.worker, "send_command_to_client"):
             return False
@@ -1430,9 +1461,7 @@ class MainWindow(QMainWindow, UIBase):
         self._pending_alarm_clear_mode_at = 0.0
         if int(getattr(packet, "status", 0) or 0) != 1:
             self.log("Alarm clear mode 0x16 rejected", "WARNING")
-            QMessageBox.warning(
-                self, _t("msg_clear_mode_title"), _t("msg_clear_mode_fail")
-            )
+            show_warn(self, _t("msg_clear_mode_title"), _t("msg_clear_mode_fail"))
             return
         mode = int(getattr(packet, "value", 0) or 0) & 0xFF
         latch = mode == 1
@@ -1448,25 +1477,37 @@ class MainWindow(QMainWindow, UIBase):
         )
 
     def request_channel_alarm_reset(self):
-        """用户点「通道报警复位」→ 二次确认 → 主控 0x15。"""
+        """用户点「通道报警复位」→ 登录审计 → 管理员校验 → 二次确认 → 主控 0x15。"""
         from core.translation import _t
         import time as _time
 
         master_cid = getattr(self, "master_client_id", None)
         if not master_cid or not getattr(self, "worker", None):
-            QMessageBox.warning(
-                self, _t("msg_channel_reset_title"), _t("msg_channel_reset_no_master")
-            )
+            show_warn(self, _t("msg_channel_reset_title"), _t("msg_channel_reset_no_master"))
             return
 
-        reply = QMessageBox.question(
+        # 公共监视模式不可直接发复位：先登录以便审计落人
+        if not self.is_logged_in():
+            show_info(self, _t("msg_channel_reset_title"), _t("msg_channel_reset_need_login"))
+            if not self.login(preferred_page=0, required_for_page=False):
+                return
+            if not self.is_logged_in():
+                return
+
+        # 危险操作：仅管理员（VIEWER 登录后也不能发 0x15）
+        role = None
+        if isinstance(getattr(self, "current_user", None), dict):
+            role = self.current_user.get("role")
+        if role != UserRole.ADMIN:
+            show_warn(self, _t("msg_channel_reset_title"), _t("msg_channel_reset_need_admin"))
+            return
+
+        if not ask_confirm(
             self,
             _t("msg_channel_reset_title"),
             _t("msg_channel_reset_text"),
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No,
-        )
-        if reply != QMessageBox.Yes:
+            danger=True,
+        ):
             return
 
         pkt = getattr(self, "latest_master_summary", None) or getattr(
@@ -1491,12 +1532,14 @@ class MainWindow(QMainWindow, UIBase):
             description="Channel alarm manual reset (0x15)",
         )
         if not ok:
-            QMessageBox.warning(
-                self, _t("msg_channel_reset_title"), _t("msg_channel_reset_fail")
-            )
+            self._channel_reset_audit_snap = None
+            self._pending_channel_reset_at = 0.0
+            self._awaiting_l2_acked = False
+            show_error(self, _t("msg_channel_reset_title"), _t("msg_channel_reset_fail"))
             return
 
         self._pending_channel_reset_at = _time.time()
+        self._awaiting_l2_acked = False
         btn = getattr(self.home_page, "channel_reset_btn", None)
         if btn is not None:
             btn.setEnabled(False)
@@ -1530,13 +1573,47 @@ class MainWindow(QMainWindow, UIBase):
         btn = getattr(self.home_page, "channel_reset_btn", None)
         if btn is not None and pkt is not None and getattr(pkt, "is_channel_alarm", lambda: False)():
             btn.setEnabled(True)
-        QMessageBox.warning(
-            self, _t("msg_channel_reset_title"), _t("msg_channel_reset_timeout")
+        show_warn(self, _t("msg_channel_reset_title"), _t("msg_channel_reset_timeout"))
+
+    def _channel_reset_l2_timeout_check(self):
+        """CmdFeedback 成功后若长时间等不到 L2=0x05，释放复位按钮避免卡死。"""
+        import time as _time
+        from core.translation import _t
+
+        if not getattr(self, "_awaiting_l2_acked", False):
+            return
+        t0 = float(getattr(self, "_awaiting_l2_acked_at", 0) or 0)
+        if t0 <= 0 or (_time.time() - t0) < 7.5:
+            return
+
+        self._awaiting_l2_acked = False
+        self._awaiting_l2_acked_at = 0.0
+        pkt = getattr(self, "latest_master_summary", None) or getattr(
+            self, "_last_any_master_packet", None
         )
+        # 主控已非硬报：视为跳过 0x05 的消警，补写审计
+        if pkt is not None and not pkt.is_channel_alarm():
+            if getattr(self, "_channel_reset_audit_snap", None):
+                self._write_channel_reset_audit(pkt, source="l2_cleared_without_0x05")
+            self.log(
+                "Channel reset: L2 left hard-alarm without 0x05; released await",
+                "INFO",
+            )
+        else:
+            self.log(
+                "Channel reset: wait L2=0x05 timeout; re-enable reset if still alarming",
+                "WARNING",
+            )
+            if getattr(self, "_channel_reset_audit_snap", None):
+                self._channel_reset_audit_snap = None
+            btn = getattr(self.home_page, "channel_reset_btn", None)
+            if btn is not None and pkt is not None and pkt.is_channel_alarm():
+                btn.setEnabled(True)
 
     def on_channel_alarm_reset_feedback(self, packet):
         """主控 CmdFeedback control_code=0x15。"""
         from core.translation import _t
+        import time as _time
 
         pending = float(getattr(self, "_pending_channel_reset_at", 0) or 0)
         if pending <= 0 and not getattr(self, "_channel_reset_audit_snap", None):
@@ -1545,6 +1622,9 @@ class MainWindow(QMainWindow, UIBase):
 
         if not packet.status:
             self._pending_channel_reset_at = 0.0
+            self._awaiting_l2_acked = False
+            self._awaiting_l2_acked_at = 0.0
+            self._channel_reset_audit_snap = None
             self.log(
                 "Channel alarm reset rejected (status=0 value=0x%04X)"
                 % (int(packet.value) & 0xFFFF),
@@ -1554,20 +1634,20 @@ class MainWindow(QMainWindow, UIBase):
             pkt = getattr(self, "latest_master_summary", None)
             if btn is not None and pkt is not None and pkt.is_channel_alarm():
                 btn.setEnabled(True)
-            QMessageBox.warning(
-                self, _t("msg_channel_reset_title"), _t("msg_channel_reset_cmd_fail")
-            )
+            show_warn(self, _t("msg_channel_reset_title"), _t("msg_channel_reset_cmd_fail"))
             return
 
         # 成功：value 期望 0xA55A；硬报 UI 等下一拍 L2=0x05 再清
         val = int(packet.value) & 0xFFFF
         self._pending_channel_reset_at = 0.0
         self._awaiting_l2_acked = True
+        self._awaiting_l2_acked_at = _time.time()
         self.log(
             "Channel alarm reset CmdFeedback OK value=0x%04X (expect 0xA55A)"
             % val,
             "INFO" if val == 0xA55A else "WARNING",
         )
+        QTimer.singleShot(8000, self._channel_reset_l2_timeout_check)
         # 成功不弹框：硬报 UI 等下一拍 L2=0x05 自动清除
 
     def _write_channel_reset_audit(self, packet, source="l2_0x05"):
@@ -1583,6 +1663,16 @@ class MainWindow(QMainWindow, UIBase):
             "INFO",
         )
         self._channel_reset_audit_snap = None
+
+    def _release_channel_reset_await_if_cleared(self, packet, source="l2_cleared_without_0x05"):
+        """复位后主控未走 0x05 已离开硬报：补审计并释放 awaiting，避免按钮卡死。"""
+        if not getattr(self, "_awaiting_l2_acked", False):
+            return
+        if getattr(self, "_channel_reset_audit_snap", None):
+            self._write_channel_reset_audit(packet, source=source)
+        self._awaiting_l2_acked = False
+        self._awaiting_l2_acked_at = 0.0
+        self._pending_channel_reset_at = 0.0
 
     def _update_home_occupancy_probe(self, busy, lang="zh"):
         """Master offline: do not invent occupancy from probes."""
@@ -1609,7 +1699,21 @@ class MainWindow(QMainWindow, UIBase):
             return
 
         busy = packet.is_channel_busy()
-        if busy:
+        hard = bool(getattr(packet, "is_channel_alarm", lambda: False)())
+        if hard:
+            # 硬报占用：与通行蓝区分，避免误判为普通过人
+            page.occupancy_title_icon.load(get_icon_svg('occupancy_active'))
+            page.occupancy_indicator.load(get_icon_svg('occupancy_active'))
+            page.occupancy_status_label.setText(_t("status_occupied_alarm"))
+            self._set_home_status_style(
+                page.occupancy_status_label, "#ff4444",
+                "rgba(255, 68, 68, 0.15)", "rgba(255, 68, 68, 0.4)"
+            )
+            page.occupancy_desc_label.setText(format_io_brief(packet, lang=lang))
+            page.occupancy_indicator_bar.setStyleSheet(
+                "QFrame { background-color: #ff4444; border-radius: 1px; }"
+            )
+        elif busy:
             page.occupancy_title_icon.load(get_icon_svg('occupancy_active'))
             page.occupancy_indicator.load(get_icon_svg('occupancy_active'))
             page.occupancy_status_label.setText(_t("status_passing"))
@@ -1653,21 +1757,18 @@ class MainWindow(QMainWindow, UIBase):
         self.bottom_nav.set_alarm_log_badge(show)
 
     def update_alarm_status(self, is_alarm_active: bool):
-        """Update alarm indicator on original overview page."""
-        self.update_system_status(is_alarm_active)
+        """探头报警位回调：仅刷新日志相关；概览通道硬报强制跟主控 L2。"""
+        self.update_system_status(None)
 
     def update_system_status(self, is_alarm_active: Optional[bool] = None):
         """Update system status indicator on overview page, combining radiation alarms and device faults."""
         current_time = datetime.now().strftime("%H:%M:%S")
         master_pkt = getattr(self, "latest_master_summary", None)
-        master_hard_alarm = bool(master_pkt is not None and self.is_master_online() and master_pkt.is_channel_alarm())
+        master_online = bool(self.is_master_online() and master_pkt is not None)
+        master_hard_alarm = bool(master_online and master_pkt.is_channel_alarm())
 
-        # Original overview fallback: probe alarm bit only when no valid master hard-alarm source
-        if is_alarm_active is None:
-            is_alarm_active = master_hard_alarm
-            if (not is_alarm_active) and self.primary_client_id and self.primary_client_id in self.client_latest_packets:
-                latest_packet = self.client_latest_packets[self.primary_client_id]
-                is_alarm_active = (latest_packet.device_status & 0b10000) != 0
+        # 主控在线：概览硬报只跟 L2；离线：不跟探头拼通道红闪
+        is_alarm_active = master_hard_alarm if master_online else False
 
         # Get all active faults from diagnostics manager
         active_faults = self.diagnostics_manager.get_all_active_faults()
@@ -1684,7 +1785,8 @@ class MainWindow(QMainWindow, UIBase):
             self.log(f"[FAULT CLEARED] Client: {client_id} | Code: {code} | {name} has been resolved", "INFO")
             
         self.prev_fault_keys = current_fault_keys
-        self._refresh_alarm_log_nav_badge(radiation_alarm=bool(is_alarm_active))
+        # 底栏角标：主控硬报 或 日志器仍有活动辐射边沿
+        self._refresh_alarm_log_nav_badge(radiation_alarm=bool(master_hard_alarm))
 
         if is_alarm_active:
             # 1. Radiation alarm active (Highest priority: Flashing Red)
@@ -1898,7 +2000,13 @@ class MainWindow(QMainWindow, UIBase):
             )
             return
         busy = packet.is_channel_busy()
-        if busy:
+        hard = bool(getattr(packet, "is_channel_alarm", lambda: False)())
+        if hard:
+            self.occupancy_status_label.setText(_t("status_occupied_alarm"))
+            self.occupancy_status_label.setStyleSheet(
+                "background-color: #ffcdd2; color: #000000;"
+            )
+        elif busy:
             self.occupancy_status_label.setText(_t("status_passing"))
             self.occupancy_status_label.setStyleSheet(
                 "background-color: #bbdefb; color: #000000;"
@@ -1962,13 +2070,60 @@ class MainWindow(QMainWindow, UIBase):
             return
 
         busy = packet.is_channel_busy()
+        hard = bool(getattr(packet, "is_channel_alarm", lambda: False)())
         try:
             from core.translation import TranslationManager
             brief = format_io_brief(packet, lang=TranslationManager().current_lang)
         except Exception:
             brief = format_io_brief(packet, lang="zh")
 
-        if busy:
+        if hard:
+            self.start_occupancy_flashing()
+            self.overview_page.occupancy_title_icon.load(get_icon_svg('occupancy_active'))
+            self.overview_page.occupancy_status_label.setText(_t("status_occupied_alarm"))
+            self.overview_page.occupancy_status_label.setStyleSheet("""
+                QLabel {
+                    color: #ff4444;
+                    font-size: 18px;
+                    font-weight: bold;
+                    margin-top: 8px;
+                    padding: 4px 12px;
+                    background-color: rgba(255, 68, 68, 0.15);
+                    border-radius: 10px;
+                    border: 1px solid rgba(255, 68, 68, 0.4);
+                }
+            """)
+            self.overview_page.occupancy_desc_label.setText(brief or _t("desc_traffic_detected"))
+            self.overview_page.occupancy_desc_label.setStyleSheet("""
+                QLabel {
+                    color: #ff8888;
+                    font-size: 14px;
+                    font-weight: bold;
+                    margin-top: 2px;
+                }
+            """)
+            self.overview_page.occupancy_indicator_bar.setStyleSheet("""
+                QFrame {
+                    background-color: #ff4444;
+                    border-radius: 1px;
+                    margin-top: 5px;
+                }
+            """)
+            self.overview_page.occupancy_card.setStyleSheet("""
+                QFrame {
+                    background-color: #2a2a2a;
+                    border-radius: 12px;
+                    border: 2px solid #ff4444;
+                    background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
+                        stop: 0 #2a2a2a, stop: 1 #1f1f1f);
+                }
+                QFrame:hover {
+                    border: 2px solid #ff6666;
+                    background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
+                        stop: 0 #2f2f2f, stop: 1 #242424);
+                }
+            """)
+        elif busy:
             self.start_occupancy_flashing()
             self.overview_page.occupancy_title_icon.load(get_icon_svg('occupancy_active'))
             self.overview_page.occupancy_status_label.setText(_t("status_passing"))
@@ -2130,7 +2285,7 @@ class MainWindow(QMainWindow, UIBase):
         self.setWindowTitle(_t("home_title"))
         self.stacked_widget.setCurrentIndex(0)
         self.bottom_nav.set_active_button(0)
-        # 主显示保持整洁：隐藏登录条与底部 Tab
+        # 主显示保持整洁：藏顶栏按钮；底栏仅报警日志页再显示
         self.button_container.setVisible(False)
         self.bottom_nav.setVisible(False)
         self.acquisition_btn.setVisible(False)
@@ -2157,6 +2312,8 @@ class MainWindow(QMainWindow, UIBase):
             self._refresh_home_from_probes(self.client_data)
         if hasattr(self, "home_page") and hasattr(self.home_page, "schedule_web_flush"):
             self.home_page.schedule_web_flush()
+        if hasattr(self, "alarm_log_page") and hasattr(self.alarm_log_page, "update_auth_controls"):
+            self.alarm_log_page.update_auth_controls()
 
     def update_ui_for_user_role(self):
         """根据用户角色更新UI"""
@@ -2279,6 +2436,8 @@ class MainWindow(QMainWindow, UIBase):
         
         # 更新设置页面控件状态
         self.update_settings_controls_for_role(role)
+        if hasattr(self, "alarm_log_page") and hasattr(self.alarm_log_page, "update_auth_controls"):
+            self.alarm_log_page.update_auth_controls()
     
     def update_settings_controls_for_role(self, role):
         """根据用户角色更新设置页面控件状态"""
@@ -2415,7 +2574,7 @@ class MainWindow(QMainWindow, UIBase):
         perm_str = str(permission_required)
 
         if not self.is_logged_in():
-            QMessageBox.warning(
+            show_warn(
                 self,
                 _t("msg_login_required_title"),
                 _t("msg_login_required_text"),
@@ -2426,22 +2585,17 @@ class MainWindow(QMainWindow, UIBase):
             return True
         # 首先检查当前用户的本地角色
         if self.current_user and self.current_user['role'] == UserRole.VIEWER:
-            # 如果是普通用户，检查是否有权限
-            # 注意：这里使用用户管理器检查权限，但用户管理器中的角色可能是ADMIN
-            # 所以我们需要额外检查本地角色
             if not self.user_manager.has_permission(permission_required):
-                QMessageBox.warning(
+                show_warn(
                     self,
                     _t("msg_perm_title"),
                     _t("msg_perm_denied", action=action_text, perm=perm_str, user=user_name)
                 )
                 return False
-            # 即使用户管理器说有权限，如果本地角色是VIEWER，也要检查VIEWER是否有这个权限
-            # 获取VIEWER角色的权限列表
             from core.user_manager import Permission as Perm
             viewer_permissions = Perm.get_permissions_for_role(UserRole.VIEWER)
             if permission_required not in viewer_permissions:
-                QMessageBox.warning(
+                show_warn(
                     self,
                     _t("msg_perm_title"),
                     _t("msg_perm_viewer", action=action_text, perm=perm_str)
@@ -2449,9 +2603,8 @@ class MainWindow(QMainWindow, UIBase):
                 return False
             return True
         else:
-            # 管理员或其他角色，使用用户管理器的权限检查
             if not self.user_manager.has_permission(permission_required):
-                QMessageBox.warning(
+                show_warn(
                     self,
                     _t("msg_perm_title"),
                     _t("msg_perm_denied_user", action=action_text, perm=perm_str, user=user_name)
@@ -2546,14 +2699,12 @@ class MainWindow(QMainWindow, UIBase):
 
         # 关继电器 0 ≡ 通道复位全清（三路清 + decision→0x05）
         if int(relay_num) == 0 and not bool(state):
-            reply = QMessageBox.question(
+            if not ask_confirm(
                 self,
                 _t("msg_relay0_off_title"),
                 _t("msg_relay0_off_text"),
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No,
-            )
-            if reply != QMessageBox.Yes:
+                danger=True,
+            ):
                 _revert()
                 return False
 
@@ -2579,14 +2730,12 @@ class MainWindow(QMainWindow, UIBase):
             "Force open master gate", Permission.MODIFY_DEVICE_CONTROL
         ):
             return False
-        reply = QMessageBox.question(
+        if not ask_confirm(
             self,
             _t("msg_force_gate_title"),
             _t("msg_force_gate_text"),
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No,
-        )
-        if reply != QMessageBox.Yes:
+            danger=True,
+        ):
             return False
         ok1 = super().control_master_relay(1, False)
         ok2 = super().control_master_relay(2, False)
@@ -2729,21 +2878,20 @@ class MainWindow(QMainWindow, UIBase):
         """退出登录，回到免登录主显示"""
         from core.translation import _t
         
-        reply = QMessageBox.question(
+        if not ask_confirm(
             self,
             _t("msg_logout_title"),
             _t("msg_logout_confirm"),
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No
-        )
-        
-        if reply == QMessageBox.Yes:
-            self.timeout_manager.stop_timer()
-            self.timeout_manager.last_operate_time = 0
-            self.timeout_manager.save_state()
-            old = self.current_user.get("username") if self.current_user else "?"
-            self.enter_public_mode()
-            self.log(f"Logged out ({old}) -> public home monitor", 'INFO')
+            danger=False,
+        ):
+            return
+
+        self.timeout_manager.stop_timer()
+        self.timeout_manager.last_operate_time = 0
+        self.timeout_manager.save_state()
+        old = self.current_user.get("username") if self.current_user else "?"
+        self.enter_public_mode()
+        self.log(f"Logged out ({old}) -> public home monitor", 'INFO')
     
     def _delayed_relogin(self):
         """延迟重新登录，确保旧的窗口完全关闭"""
@@ -2779,6 +2927,13 @@ class MainWindow(QMainWindow, UIBase):
         """关闭事件 - 添加用户登出"""
         # 停止超时计时器
         self.timeout_manager.stop_timer()
+
+        # 刷盘并停止报警 Excel 后台写线程，避免退出丢末尾事件
+        try:
+            from core.alarm_logger import get_alarm_logger
+            get_alarm_logger().shutdown(timeout=10.0)
+        except Exception as e:
+            print(f"Alarm Excel shutdown: {e}")
         
         # 只有在不是从logout()方法调用时才执行用户登出
         # 因为logout()方法已经处理了用户登出
@@ -2791,8 +2946,13 @@ class MainWindow(QMainWindow, UIBase):
     
     def eventFilter(self, obj, event):
         """事件过滤器：超时计时 + 左上角隐藏入口长按（兼容树莓派触摸）。"""
-        # 捕获鼠标点击和键盘输入事件
-        if event.type() in [QEvent.MouseButtonPress, QEvent.KeyPress]:
+        # 鼠标/键盘/触摸均刷新管理员空闲计时（部分板子 Touch 不合成 Mouse）
+        if event.type() in (
+            QEvent.MouseButtonPress,
+            QEvent.KeyPress,
+            QEvent.TouchBegin,
+            QEvent.TouchUpdate,
+        ):
             self.update_operate_time()
 
         self._handle_secret_corner_event(obj, event)
@@ -2852,6 +3012,7 @@ class MainWindow(QMainWindow, UIBase):
     
     def on_admin_timeout(self):
         """Admin idle timeout -> return to public home monitor."""
+        from core.translation import _t
         if self.current_user and self.current_user['role'] == UserRole.ADMIN:
             try:
                 from core.software_keyboard import get_keyboard_manager
@@ -2862,7 +3023,39 @@ class MainWindow(QMainWindow, UIBase):
             self.timeout_manager.last_operate_time = 0
             self.timeout_manager.save_state()
             self.enter_public_mode()
-            self.log("Admin idle timeout -> public home monitor (silent)", 'INFO')
+            self._show_transient_notice(_t("msg_admin_timeout_notice"), msec=4000)
+            self.log("Admin idle timeout -> public home monitor", 'INFO')
+
+    def _show_transient_notice(self, text, msec=3500):
+        """顶栏短时提示，不挡监测主区（非模态）。"""
+        bar = getattr(self, "status_bar", None)
+        if bar is None or not hasattr(bar, "user_label"):
+            return
+        bar.setVisible(True)
+        bar.user_label.setVisible(True)
+        bar.user_label.setText(text)
+        bar.user_label.setStyleSheet("""
+            QLabel {
+                margin-left: 10px;
+                padding: 3px 10px;
+                border-radius: 4px;
+                background-color: #5d4037;
+                color: #ffe0b2;
+                font-weight: bold;
+            }
+        """)
+
+        def _restore():
+            if self.is_logged_in() and isinstance(getattr(self, "current_user", None), dict):
+                user = self.current_user
+                on_home = self.stacked_widget.currentIndex() == 0
+                bar.setVisible(not on_home)
+                bar.update_user_info(user.get("username"), user.get("role"))
+            else:
+                bar.user_label.setVisible(False)
+                bar.setVisible(False)
+
+        QTimer.singleShot(int(msec), _restore)
     
     def login(self, preferred_page: int = None, required_for_page: bool = False):
         """Login from public/viewer mode. Returns True on success."""
@@ -2880,16 +3073,12 @@ class MainWindow(QMainWindow, UIBase):
 
         current_user = login_dialog.get_current_user_info()
         if not current_user:
-            QMessageBox.warning(
-                self, _t("msg_login_failed_title"), _t("msg_login_failed_dialog")
-            )
+            show_warn(self, _t("msg_login_failed_title"), _t("msg_login_failed_dialog"))
             return False
 
         actual_user = self.user_manager.get_current_user()
         if not actual_user:
-            QMessageBox.warning(
-                self, _t("msg_login_failed_title"), _t("msg_login_failed_user_manager")
-            )
+            show_warn(self, _t("msg_login_failed_title"), _t("msg_login_failed_user_manager"))
             return False
 
         current_user['role'] = actual_user.role
@@ -2934,9 +3123,10 @@ class MainWindow(QMainWindow, UIBase):
         """
         if not (self.current_user and self.current_user['role'] == UserRole.ADMIN):
             if not silent:
-                QMessageBox.information(
-                    self, "需要管理员权限",
-                    "切换到 Ubuntu 桌面需要管理员权限，请先以管理员登录。"
+                show_info(
+                    self,
+                    _t("msg_login_required_title"),
+                    _t("msg_desktop_need_admin"),
                 )
             return
         self._restore_fullscreen_on_show = True

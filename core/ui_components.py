@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 import time
 from datetime import datetime
 
@@ -43,7 +43,7 @@ class StatusBar(QWidget):
     def __init__(self):
         super().__init__()
         self._hide_clock = False
-        self.setFixedHeight(32)  # 稍微增加高度以容纳更好的字体显示
+        self.setFixedHeight(40)  # 工控触控：状态栏略加高
         self.setStyleSheet("""
             QWidget {
                 background-color: #1a1a1a;
@@ -52,7 +52,7 @@ class StatusBar(QWidget):
         """)
 
         layout = QHBoxLayout()
-        layout.setContentsMargins(20, 6, 20, 6)  # 使用参考文档的窗口内边距
+        layout.setContentsMargins(12, 4, 12, 4)
 
         # Time label
         self.time_label = QLabel()
@@ -117,17 +117,17 @@ class StatusBar(QWidget):
         self.status_label.setFont(status_font)
         self.status_label.setStyleSheet("margin-left: 5px; margin-right: 15px;")
 
-        # Language Switch Button
+        # Language Switch Button — 触控热区加大
         self.lang_btn = QPushButton()
-        self.lang_btn.setFixedSize(50, 20)
-        lang_font = QFont(FONTS["tip"][0], 10, QFont.Bold)
+        self.lang_btn.setFixedSize(56, 32)
+        lang_font = QFont(FONTS["tip"][0], 11, QFont.Bold)
         self.lang_btn.setFont(lang_font)
         self.lang_btn.setStyleSheet("""
             QPushButton {
                 background-color: #333333;
                 color: #ff9800;
                 border: 1px solid #ff9800;
-                border-radius: 4px;
+                border-radius: 6px;
                 padding: 0px;
             }
             QPushButton:pressed {
@@ -245,12 +245,13 @@ class StatusBar(QWidget):
         self.timeout_label.setText(time_str)
         self.timeout_label.setStyleSheet(f"""
             QLabel {{
-                margin-left: 10px;
-                padding: 3px 8px;
-                border-radius: 4px;
+                margin-left: 8px;
+                padding: 4px 10px;
+                border-radius: 6px;
                 background-color: {color};
                 color: white;
                 font-weight: bold;
+                min-height: 24px;
             }}
         """)
         self.timeout_label.setVisible(True)
@@ -752,7 +753,7 @@ class AcquisitionButton(QPushButton):
     def __init__(self):
         from core.translation import _t
         super().__init__(_t("btn_clear"))
-        self.setFixedHeight(40)
+        self.setFixedHeight(44)
         self.update_style()
     
     def retranslate_ui(self):

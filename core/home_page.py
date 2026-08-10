@@ -215,9 +215,10 @@ class HomePage(QWidget):
         parent = self.parent
         if parent is None or not hasattr(parent, "switch_page"):
             return
-        # Public monitor: card taps must not navigate / prompt login
+        # 公共监视：仅允许只读报警日志(4)；其它页仍要登录
         if hasattr(parent, "is_logged_in") and not parent.is_logged_in():
-            return
+            if int(page_index) != 4:
+                return
         parent.switch_page(page_index)
 
     def _on_js_reset(self):
@@ -310,6 +311,19 @@ class HomePage(QWidget):
         except Exception:
             return "Probe %d" % (i + 1)
 
+    def _live_probe_name(self, i, entry=None):
+        """Always resolve name in current UI language (never keep stale zh cache)."""
+        entry = entry or {}
+        cid = entry.get("client_id")
+        if cid and self.parent is not None and hasattr(self.parent, "get_probe_label"):
+            try:
+                label = self.parent.get_probe_label(cid)
+                if label:
+                    return label
+            except Exception:
+                pass
+        return self._probe_name(i)
+
     def _mode_label(self):
         from core.translation import _t
         parent = self.parent
@@ -389,7 +403,7 @@ class HomePage(QWidget):
     def _alarm_web_kind(self):
         if self._alarm_kind == "channel_alarm":
             return "alarm"
-        if self._alarm_kind in ("over_threshold", "fault", "offline", "acked"):
+        if self._alarm_kind in ("over_threshold", "soft_cleared", "fault", "offline", "acked"):
             return "warn"
         return "normal"
 
@@ -397,7 +411,8 @@ class HomePage(QWidget):
         probes = []
         for i, e in enumerate(self._probe_entries):
             probes.append({
-                "name": e.get("name") or self._probe_name(i),
+                # name/location 每次按当前语言重算，避免切英文仍显示「号探头/左侧」
+                "name": self._live_probe_name(i, e),
                 "location": self._slot_location(i),
                 "cps": int(e.get("cps", 0) or 0),
                 "threshold": int(e.get("threshold", 1000) or 1000),
@@ -409,7 +424,7 @@ class HomePage(QWidget):
             n = self._expected_placeholder_count()
             probes = [
                 {
-                    "name": self._probe_name(i),
+                    "name": self._live_probe_name(i),
                     "location": self._slot_location(i),
                     "cps": 0,
                     "threshold": 1000,
@@ -497,6 +512,7 @@ class HomePage(QWidget):
             "lang": self._ui_lang(),
             "ui": self._ui_strings(),
             "canNavigate": self._can_navigate(),
+            "canOpenAlarmLog": True,
             "canReorder": self._can_navigate(),
         }
 
@@ -610,7 +626,8 @@ class HomePage(QWidget):
             st["last"] = (int(cps), online, hit)
             self._probe_entries[i].update({
                 "cps": int(cps), "online": online, "hit": hit,
-                "name": self._probe_entries[i].get("name") or self._probe_name(i),
+                "name": self._live_probe_name(i, self._probe_entries[i]),
+                "location": self._slot_location(i),
             })
         self._had_tile_data = True
         self.schedule_web_flush()
@@ -638,7 +655,10 @@ class HomePage(QWidget):
                 hit = st["last"][2]
             st["last"] = (cps, online, hit)
             self._probe_entries[i] = {
-                "name": e.get("name") or self._probe_name(i),
+                "name": self._live_probe_name(i, {
+                    "client_id": e.get("client_id"),
+                    "name": e.get("name"),
+                }),
                 "location": self._slot_location(i),
                 "cps": cps,
                 "online": online,
@@ -698,6 +718,10 @@ class HomePage(QWidget):
         from core.translation import _t
         self.title.setText(_t("home_title_full"))
         self.channel_reset_btn.setText(_t("btn_channel_alarm_reset"))
+        # 切语言后立即刷新探头名/位置缓存，再推 Web
+        for i, e in enumerate(self._probe_entries):
+            e["name"] = self._live_probe_name(i, e)
+            e["location"] = self._slot_location(i)
         self.schedule_web_flush()
 
 

@@ -117,33 +117,36 @@
             padding: 3px 8px; background: #222430; border: 1px solid #323545; border-radius: 4px;
         }
         .lang-btn {
-            min-width: 42px; height: 24px; padding: 0 8px;
+            min-width: 48px; height: 40px; min-height: var(--touch-min);
+            padding: 0 12px;
             background: #333333; color: #ff9800; border: 1px solid #ff9800;
-            border-radius: 4px; font-size: 11px; font-weight: bold; cursor: pointer;
-            line-height: 22px;
+            border-radius: 6px; font-size: 13px; font-weight: bold; cursor: pointer;
+            line-height: 38px;
+            -webkit-tap-highlight-color: transparent;
+            touch-action: manipulation;
         }
-        .lang-btn:hover { background: #ff9800; color: #111; }
+        .lang-btn:active { background: #ff9800; color: #111; }
         .ghost-login {
-            width: 34px;
-            height: 28px;
-            min-width: 34px;
-            min-height: 28px;
+            width: 44px;
+            height: 44px;
+            min-width: var(--touch-min);
+            min-height: var(--touch-min);
             border-radius: 8px;
             padding: 0;
             border: 1px solid rgba(255,255,255,0.14);
             background: rgba(34,36,48,0.75);
             color: rgba(170,176,190,0.8);
-            font-size: 14px;
-            line-height: 26px;
+            font-size: 18px;
+            line-height: 42px;
             text-align: center;
             cursor: pointer;
-            opacity: 0.75;
+            opacity: 0.85;
             flex-shrink: 0;
             margin-left: 2px;
             -webkit-tap-highlight-color: transparent;
             touch-action: manipulation;
         }
-        .ghost-login:hover, .ghost-login:active {
+        .ghost-login:active {
             opacity: 1;
             color: #E5E7EB;
             border-color: rgba(56,189,248,0.5);
@@ -399,6 +402,11 @@
         body.nav-enabled .clickable-card:hover {
             border-color: #3B82F6; background: #191B22;
         }
+        /* Public mode: fault card still opens read-only alarm log */
+        body.alarm-log-enabled #card_fault { cursor: pointer; }
+        body.alarm-log-enabled #card_fault:hover {
+            border-color: #3B82F6; background: #191B22;
+        }
         .detail-link { display: none !important; }
 
         .kv-list {
@@ -531,10 +539,12 @@
         }
         .modal-title { font-size: 16px; font-weight: bold; color: #FFF; }
         .close-btn {
-            background: #2A2D3A; border: none; color: #AAA; width: 28px; height: 28px;
-            border-radius: 50%; font-size: 14px; cursor: pointer; font-weight: bold;
+            background: #2A2D3A; border: none; color: #AAA;
+            width: 44px; height: 44px; min-width: var(--touch-min); min-height: var(--touch-min);
+            border-radius: 8px; font-size: 18px; cursor: pointer; font-weight: bold;
+            -webkit-tap-highlight-color: transparent; touch-action: manipulation;
         }
-        .close-btn:hover { background: #EF4444; color: #FFF; }
+        .close-btn:active { background: #EF4444; color: #FFF; }
         .modal-body { padding: 20px; display: flex; flex-direction: column; gap: 12px; max-height: 60vh; overflow-y: auto; }
         .detail-row {
             display: flex; justify-content: space-between; align-items: center;
@@ -661,11 +671,12 @@
         let bridge = null;
         let embedded = false;
         var canNavigate = false;
+        var canOpenAlarmLog = true;
         let probes = [
-            { id: 1, name: '1 号探头', location: '左侧 · 上', cps: 0, threshold: 1000, isAlarm: false, online: true, clientId: null },
-            { id: 2, name: '2 号探头', location: '右侧 · 上', cps: 0, threshold: 1000, isAlarm: false, online: true, clientId: null },
-            { id: 3, name: '3 号探头', location: '左侧 · 下', cps: 0, threshold: 1000, isAlarm: false, online: true, clientId: null },
-            { id: 4, name: '4 号探头', location: '右侧 · 下', cps: 0, threshold: 1000, isAlarm: false, online: true, clientId: null }
+            { id: 1, name: 'Probe 1', location: 'Left · Upper', cps: 0, threshold: 1000, isAlarm: false, online: true, clientId: null },
+            { id: 2, name: 'Probe 2', location: 'Right · Upper', cps: 0, threshold: 1000, isAlarm: false, online: true, clientId: null },
+            { id: 3, name: 'Probe 3', location: 'Left · Lower', cps: 0, threshold: 1000, isAlarm: false, online: true, clientId: null },
+            { id: 4, name: 'Probe 4', location: 'Right · Lower', cps: 0, threshold: 1000, isAlarm: false, online: true, clientId: null }
         ];
         let activeCount = 2;
         let isPassing = false;
@@ -930,10 +941,13 @@
         }
 
         function openPage(pageType) {
+            if (pageType === 'fault') {
+                if (!(canOpenAlarmLog || canNavigate)) return;
+                if (bridge && bridge.openFault) { bridge.openFault(); return; }
+            }
             if (!canNavigate) return;
             if (bridge) {
                 if (pageType === 'health' && bridge.openHealth) { bridge.openHealth(); return; }
-                if (pageType === 'fault' && bridge.openFault) { bridge.openFault(); return; }
             }
         }
         function closePage() { $('pageModal').classList.remove('active'); }
@@ -981,8 +995,10 @@
             if (state.ui) applyUiLabels(state.ui);
             canNavigate = !!state.canNavigate;
             canReorder = !!state.canReorder;
+            canOpenAlarmLog = (state.canOpenAlarmLog !== false);
             document.body.classList.toggle('nav-enabled', canNavigate);
             document.body.classList.toggle('can-reorder', canReorder);
+            document.body.classList.toggle('alarm-log-enabled', canOpenAlarmLog);
             var ghost = $('ghostLogin');
             if (ghost) ghost.style.display = canNavigate ? 'none' : '';
             if (state.modeLabel) { var mb0 = $('modeBadge'); if (mb0) mb0.innerText = state.modeLabel; }

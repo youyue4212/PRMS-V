@@ -6,7 +6,7 @@ import json
 import os
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
-    QPushButton, QMessageBox, QFrame, QCheckBox, QApplication
+    QPushButton, QFrame, QCheckBox, QApplication
 )
 from PyQt5.QtCore import Qt, pyqtSignal, QSettings
 from PyQt5.QtGui import QFont, QIcon
@@ -54,29 +54,32 @@ class LoginDialog(QDialog):
     def setup_ui(self):
         """Setup UI - Clean and direct layout"""
         self.setWindowTitle(_t("login_title"))
-        self.setFixedSize(500, 450)
+        # 7 寸屏自适应；无边框，贴近工控确认框风格
+        from core.industrial_dialogs import fit_dialog_to_screen, _screen_geo
+        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
+        sw, sh = _screen_geo(self)
+        compact = sh <= 600 or sw <= 1024
         
-        # Set dialog style
+        # Set dialog style — 固定输入高度，避免 min-height+padding 把布局撑爆再被压叠
         self.setStyleSheet("""
             QDialog {
                 background-color: #1a1a1a;
-                border: 2px solid #444444;
+                border: 2px solid #2196F3;
                 border-radius: 12px;
             }
             QLabel {
                 color: #ffffff;
                 font-family: 'Microsoft YaHei', sans-serif;
                 font-weight: bold;
-                background-color: #1a1a1a;
+                background-color: transparent;
             }
             QLineEdit {
                 background-color: #2a2a2a;
                 color: #ffffff;
                 border: 2px solid #444444;
                 border-radius: 8px;
-                padding: 10px;
+                padding: 4px 10px;
                 font-family: 'Microsoft YaHei', sans-serif;
-                min-height: 40px;
                 selection-background-color: #2196F3;
             }
             QLineEdit:focus {
@@ -91,32 +94,30 @@ class LoginDialog(QDialog):
                 color: white;
                 border: none;
                 border-radius: 8px;
-                padding: 10px 24px;
+                padding: 6px 20px;
                 font-weight: bold;
                 font-family: 'Microsoft YaHei', sans-serif;
-                min-height: 40px;
-                min-width: 90px;
-            }
-            QPushButton:hover {
-                background-color: #1976D2;
+                min-width: 100px;
             }
             QPushButton:pressed {
                 background-color: #0D47A1;
             }
             QPushButton#cancel_btn {
-                background-color: #666666;
+                background-color: #455a64;
             }
-            QPushButton#cancel_btn:hover {
-                background-color: #555555;
+            QPushButton#cancel_btn:pressed {
+                background-color: #37474f;
             }
             QCheckBox {
                 font-family: 'Microsoft YaHei', sans-serif;
                 font-weight: bold;
-                background-color: #1a1a1a;  /* 明确设置背景色为深灰色 */
+                background-color: transparent;
+                spacing: 10px;
             }
             QCheckBox::indicator {
-                width: 18px;
-                height: 18px;
+                width: 26px;
+                height: 26px;
+                border-radius: 4px;
             }
             QCheckBox::indicator:checked {
                 background-color: #2196F3;
@@ -124,14 +125,14 @@ class LoginDialog(QDialog):
             }
             QCheckBox::indicator:unchecked {
                 background-color: #2a2a2a;
-                border: 2px solid #444444;
+                border: 2px solid #666666;
             }
         """)
         
-        # Main layout
+        # Main layout — 紧凑竖排，禁止 stretch 挤扁输入框
         main_layout = QVBoxLayout()
-        main_layout.setContentsMargins(30, 25, 30, 30)  # 减少顶部边距从30到25，让整体上移
-        main_layout.setSpacing(10)  # 进一步减少间距从10到8
+        main_layout.setContentsMargins(16, 12, 16, 12)
+        main_layout.setSpacing(6)
         
         # Title
         title_label = QLabel(_t("login_title"))
@@ -140,100 +141,96 @@ class LoginDialog(QDialog):
         if len(FONTS["title"]) > 2 and "bold" in FONTS["title"][2]:
             title_font.setBold(True)
         title_label.setFont(title_font)
-        title_label.setStyleSheet("color: #e0e0e0; font-weight: bold;")  # 更柔和的白色
+        title_label.setStyleSheet("color: #e0e0e0; font-weight: bold;")
         main_layout.addWidget(title_label)
-        
-        subtitle_label = QLabel(_t("login_subtitle"))
-        subtitle_label.setAlignment(Qt.AlignCenter)
-        subtitle_font = QFont(FONTS["subtitle"][0], FONTS["subtitle"][1] - 2)
-        if len(FONTS["subtitle"]) > 2 and "bold" in FONTS["subtitle"][2]:
-            subtitle_font.setBold(True)
-        subtitle_label.setFont(subtitle_font)
-        subtitle_label.setStyleSheet("color: #aaaaaa;")  # 更深的灰色
-        main_layout.addWidget(subtitle_label)
+
+        # 矮屏省高度：不显示副标题
+        if not compact:
+            subtitle_label = QLabel(_t("login_subtitle"))
+            subtitle_label.setAlignment(Qt.AlignCenter)
+            subtitle_font = QFont(FONTS["subtitle"][0], FONTS["subtitle"][1] - 2)
+            if len(FONTS["subtitle"]) > 2 and "bold" in FONTS["subtitle"][2]:
+                subtitle_font.setBold(True)
+            subtitle_label.setFont(subtitle_font)
+            subtitle_label.setStyleSheet("color: #aaaaaa;")
+            main_layout.addWidget(subtitle_label)
         
         # Separator
         separator = QFrame()
         separator.setFrameShape(QFrame.HLine)
         separator.setFrameShadow(QFrame.Sunken)
-        separator.setStyleSheet("background-color: #444444; margin: 5px 0;")
-        separator.setFixedHeight(2)
+        separator.setStyleSheet("background-color: #444444;")
+        separator.setFixedHeight(1)
         main_layout.addWidget(separator)
         
-        # Add spacing after separator to move username label down a bit more
-        main_layout.addSpacing(10)  # 增加间距从8到10，让username标签再下移一点
-        
+        field_h = 40 if compact else 44
+        btn_h = 40 if compact else 44
+
         # Username
         username_label = QLabel(_t("login_username"))
         username_font = QFont(FONTS["data_key"][0], FONTS["data_key"][1])
         username_label.setFont(username_font)
-        username_label.setStyleSheet("color: #e0e0e0; font-weight: bold; margin-bottom: 2px;")  # 减少间距从5px到2px，让输入框上移
+        username_label.setStyleSheet("color: #e0e0e0; font-weight: bold;")
         main_layout.addWidget(username_label)
         
         self.username_input = QLineEdit()
         self.username_input.setPlaceholderText(_t("login_username_placeholder"))
         self.username_input.setText("")
+        self.username_input.setFixedHeight(field_h)
         username_input_font = QFont(FONTS["data_value"][0], FONTS["data_value"][1])
         if len(FONTS["data_value"]) > 2 and "bold" in FONTS["data_value"][2]:
             username_input_font.setBold(True)
         self.username_input.setFont(username_input_font)
         main_layout.addWidget(self.username_input)
         
-        # Spacing - 减少间距从8到4，让password往上移动一些
-        main_layout.addSpacing(4)
-        
         # Password
         password_label = QLabel(_t("login_password"))
         password_font = QFont(FONTS["data_key"][0], FONTS["data_key"][1])
         password_label.setFont(password_font)
-        password_label.setStyleSheet("color: #e0e0e0; font-weight: bold; margin-bottom: 2px;")  # 减少间距从5px到2px，让输入框上移
+        password_label.setStyleSheet("color: #e0e0e0; font-weight: bold;")
         main_layout.addWidget(password_label)
         
         self.password_input = QLineEdit()
         self.password_input.setPlaceholderText(_t("login_password_placeholder"))
         self.password_input.setEchoMode(QLineEdit.Password)
         self.password_input.setText("")
+        self.password_input.setFixedHeight(field_h)
         password_input_font = QFont(FONTS["data_value"][0], FONTS["data_value"][1])
         if len(FONTS["data_value"]) > 2 and "bold" in FONTS["data_value"][2]:
             password_input_font.setBold(True)
         self.password_input.setFont(password_input_font)
         main_layout.addWidget(self.password_input)
         
-        # Spacing - 增加间距从5到8，让remember password往下移动一点点
-        main_layout.addSpacing(8)
-        
-        # Remember password - use same font size as password label
+        # Remember password
         self.remember_checkbox = QCheckBox(_t("login_remember"))
         self.remember_checkbox.setChecked(False)
-        # Use data_key font size (12px) instead of tip font size (10px)
+        self.remember_checkbox.setFixedHeight(32)
         checkbox_font = QFont(FONTS["data_key"][0], FONTS["data_key"][1])
         if len(FONTS["data_key"]) > 2 and "bold" in FONTS["data_key"][2]:
             checkbox_font.setBold(True)
         self.remember_checkbox.setFont(checkbox_font)
-        self.remember_checkbox.setStyleSheet("color: #e0e0e0;")  # 更柔和的白色
+        self.remember_checkbox.setStyleSheet("color: #e0e0e0;")
         main_layout.addWidget(self.remember_checkbox)
-        
-        # Stretch
-        main_layout.addStretch(1)
         
         # Buttons
         button_layout = QHBoxLayout()
-        button_layout.setSpacing(15)
+        button_layout.setSpacing(12)
+        button_layout.setContentsMargins(0, 4, 0, 0)
         
         self.cancel_btn = QPushButton(_t("btn_cancel"))
         self.cancel_btn.setObjectName("cancel_btn")
+        self.cancel_btn.setFixedHeight(btn_h)
         self.cancel_btn.clicked.connect(self.reject)
         cancel_btn_font = QFont(FONTS["btn"][0], FONTS["btn"][1])
         self.cancel_btn.setFont(cancel_btn_font)
-        button_layout.addWidget(self.cancel_btn)
-        
-        button_layout.addStretch(1)
+        button_layout.addWidget(self.cancel_btn, 1)
         
         self.login_btn = QPushButton(_t("btn_login"))
+        self.login_btn.setFixedHeight(btn_h)
         self.login_btn.clicked.connect(self.on_login_clicked)
         login_btn_font = QFont(FONTS["btn"][0], FONTS["btn"][1])
         self.login_btn.setFont(login_btn_font)
-        button_layout.addWidget(self.login_btn)
+        button_layout.addWidget(self.login_btn, 1)
         
         main_layout.addLayout(button_layout)
         
@@ -242,6 +239,15 @@ class LoginDialog(QDialog):
         
         # Set layout
         self.setLayout(main_layout)
+
+        # 按内容估高，再适配屏幕（登录框允许更高，避免输入框重叠）
+        self.adjustSize()
+        need_h = max(self.sizeHint().height() + 8, 340 if compact else 380)
+        fit_dialog_to_screen(
+            self, 420, need_h,
+            compact_max_w=440, compact_max_h=420,
+            max_h_ratio=0.92,
+        )
         
         # Enter key
         self.username_input.returnPressed.connect(self.password_input.setFocus)
@@ -341,7 +347,8 @@ class LoginDialog(QDialog):
         password = self.password_input.text().strip()
         
         if not username:
-            QMessageBox.warning(self, _t("msg_input_error"), _t("msg_enter_username"))
+            from core.industrial_dialogs import show_warn
+            show_warn(self, _t("msg_input_error"), _t("msg_enter_username"))
             self.username_input.setFocus()
             return
         
@@ -364,9 +371,11 @@ class LoginDialog(QDialog):
                 # Close dialog（accept 内会再次确保键盘已隐藏）
                 self.accept()
             else:
-                QMessageBox.critical(self, _t("msg_login_failed"), _t("msg_get_user_failed"))
+                from core.industrial_dialogs import show_error
+                show_error(self, _t("msg_login_failed"), _t("msg_get_user_failed"))
         else:
-            QMessageBox.warning(self, _t("msg_login_failed"), message)
+            from core.industrial_dialogs import show_warn
+            show_warn(self, _t("msg_login_failed"), message)
             self.password_input.clear()
             self.password_input.setFocus()
     
