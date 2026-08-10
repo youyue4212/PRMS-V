@@ -572,16 +572,36 @@ class ClientsPage(QWidget):
             self.client_summary_label.setText(_t("clients_no_conn"))
         else:
             self.client_summary_label.setText(_t("clients_conn_count", count=client_count))
+
+        # Dedicated master card
+        master_key = "__master__"
+        master_data = self._collect_master_diag_data()
+        if master_data is not None:
+            if master_key not in self.client_widgets:
+                master_widget = self.create_master_widget(master_data)
+                self.client_widgets[master_key] = master_widget
+                self.scroll_layout.insertWidget(0, master_widget)
+            else:
+                self.update_master_widget(self.client_widgets[master_key], master_data)
+        elif master_key in self.client_widgets:
+            widget = self.client_widgets.pop(master_key)
+            self.scroll_layout.removeWidget(widget)
+            widget.deleteLater()
         
         # Remove old client widgets
         for client_id, widget in list(self.client_widgets.items()):
+            if client_id == master_key:
+                continue
             if client_id not in client_data:
                 self.scroll_layout.removeWidget(widget)
                 widget.deleteLater()
                 del self.client_widgets[client_id]
         
-        # Add/update client widgets
+        # Add/update client widgets (exclude master TCP id — shown as dedicated card)
+        master_cid = getattr(self.parent, "master_client_id", None)
         for client_id, data in client_data.items():
+            if master_cid and client_id == master_cid:
+                continue
             if client_id not in self.client_widgets:
                 client_widget = self.create_client_widget(client_id, data)
                 self.client_widgets[client_id] = client_widget
@@ -597,7 +617,188 @@ class ClientsPage(QWidget):
                     self.scroll_layout.removeItem(item)
                     break
             self.scroll_layout.addStretch()
-    
+
+    def _collect_master_diag_data(self):
+        if not hasattr(self.parent, "master_client_id"):
+            return None
+        pkt = getattr(self.parent, "latest_master_summary", None)
+        master_cid = getattr(self.parent, "master_client_id", None)
+        online = bool(pkt is not None and getattr(self.parent, "is_master_online", lambda: False)())
+        link_only = bool(master_cid) and not online
+        faults = []
+        dm = getattr(self.parent, "diagnostics_manager", None)
+        if dm is not None:
+            faults = sorted((dm.active_faults.get("master", {}) or {}).keys())
+        if not (master_cid or pkt is not None or faults):
+            return None
+        return {
+            "client_id": master_cid or "master",
+            "online": online,
+            "link_only": link_only,
+            "master_id": getattr(pkt, "master_id", None) if pkt is not None else None,
+            "decision": getattr(pkt, "decision_result", None) if pkt is not None else None,
+            "decision_text": pkt.decision_text("zh") if pkt is not None else None,
+            "ir_degraded": bool(getattr(pkt, "ir_degraded", False)) if pkt is not None else False,
+            "hit_mask": int(getattr(pkt, "hit_probe_mask", 0) or 0) if pkt is not None else 0,
+            "online_mask": int(getattr(pkt, "online_mask", 0) or 0) if pkt is not None else 0,
+            "faults": faults,
+        }
+
+    def create_master_widget(self, data: dict) -> QFrame:
+        from core.translation import _t
+        widget = QFrame()
+        # Match probe card shell (same size/colors)
+        widget.setMinimumHeight(140)
+        widget.setMaximumHeight(160)
+        widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        widget.setStyleSheet("""
+            QFrame {
+                background-color: #2a2a2a;
+                border-radius: 12px;
+                border: 1px solid #333333;
+            }
+        """)
+        layout = QHBoxLayout(widget)
+        layout.setContentsMargins(15, 10, 15, 10)
+        layout.setSpacing(15)
+
+        left = QVBoxLayout()
+        left.setSpacing(3)
+        title = QLabel(_t("master_diag_title"))
+        title.setStyleSheet("color: white; font-size: 16px; font-weight: bold;")
+        left.addWidget(title)
+        client_id_label = QLabel("")
+        client_id_label.setStyleSheet("color: white; font-size: 14px; font-weight: normal;")
+        left.addWidget(client_id_label)
+        link_label = QLabel("")
+        link_label.setStyleSheet("color: #4caf50; font-size: 14px; font-weight: bold; margin-top: 2px;")
+        left.addWidget(link_label)
+        fault_label = QLabel("")
+        fault_label.setWordWrap(True)
+        fault_label.setStyleSheet("color: #4caf50; font-size: 12px; font-weight: bold; margin-top: 2px;")
+        left.addWidget(fault_label)
+        left.addStretch()
+        layout.addLayout(left)
+
+        right = QGridLayout()
+        right.setHorizontalSpacing(20)
+        right.setVerticalSpacing(5)
+        key_style = "color: #aaaaaa; font-size: 14px; font-weight: normal;"
+        val_style = "color: white; font-size: 16px; font-weight: bold;"
+
+        decision_key = QLabel(_t("master_diag_decision_key"))
+        decision_key.setStyleSheet(key_style)
+        decision_label = QLabel("--")
+        decision_label.setStyleSheet(val_style)
+        right.addWidget(decision_key, 0, 0)
+        right.addWidget(decision_label, 0, 1)
+
+        mode_key = QLabel(_t("master_diag_mode_key"))
+        mode_key.setStyleSheet(key_style)
+        mode_label = QLabel("--")
+        mode_label.setStyleSheet(val_style)
+        right.addWidget(mode_key, 1, 0)
+        right.addWidget(mode_label, 1, 1)
+
+        hit_key = QLabel(_t("master_diag_hit_key"))
+        hit_key.setStyleSheet(key_style)
+        hit_label = QLabel("--")
+        hit_label.setStyleSheet(val_style)
+        right.addWidget(hit_key, 2, 0)
+        right.addWidget(hit_label, 2, 1)
+
+        online_key = QLabel(_t("master_diag_online_key"))
+        online_key.setStyleSheet("color: #aaaaaa; font-size: 12px; font-weight: normal;")
+        online_label = QLabel("--")
+        online_label.setStyleSheet("color: white; font-size: 14px; font-weight: bold;")
+        right.addWidget(online_key, 0, 2)
+        right.addWidget(online_label, 0, 3)
+
+        layout.addLayout(right)
+
+        widget.data_labels = {
+            "title": title,
+            "client_id": client_id_label,
+            "link": link_label,
+            "faults": fault_label,
+            "decision": decision_label,
+            "mode": mode_label,
+            "hit": hit_label,
+            "online_mask": online_label,
+            "decision_key": decision_key,
+            "mode_key": mode_key,
+            "hit_key": hit_key,
+            "online_key": online_key,
+        }
+        self.update_master_widget(widget, data)
+        return widget
+
+    def update_master_widget(self, widget: QFrame, data: dict):
+        from core.translation import _t
+        labels = widget.data_labels
+        labels["title"].setText(_t("master_diag_title"))
+        labels["client_id"].setText(_t("master_diag_id", id=data.get("master_id", "--")))
+        if "decision_key" in labels:
+            labels["decision_key"].setText(_t("master_diag_decision_key"))
+            labels["mode_key"].setText(_t("master_diag_mode_key"))
+            labels["hit_key"].setText(_t("master_diag_hit_key"))
+            labels["online_key"].setText(_t("master_diag_online_key"))
+
+        if data.get("online"):
+            link_text = _t("master_online")
+            link_color = "#4caf50"
+        elif data.get("link_only"):
+            link_text = _t("master_l2_invalid")
+            link_color = "#ff9800"
+        else:
+            link_text = _t("master_offline")
+            link_color = "#f44336"
+        labels["link"].setText(_t("master_diag_link", status=link_text))
+        labels["link"].setStyleSheet(
+            "color: %s; font-size: 14px; font-weight: bold; margin-top: 2px;" % link_color
+        )
+
+        decision_text = data.get("decision_text") or "--"
+        if data.get("decision") is None:
+            decision_text = "--"
+        if "hit" in labels:
+            labels["decision"].setText(str(decision_text))
+        else:
+            # legacy single-line widgets
+            labels["decision"].setText(_t("master_diag_decision", decision=decision_text))
+
+        if data.get("link_only"):
+            mode_text = _t("master_mode_invalid_l2")
+        elif data.get("ir_degraded"):
+            mode_text = _t("master_mode_degraded")
+        else:
+            mode_text = _t("master_mode_normal")
+        if "hit" in labels:
+            labels["mode"].setText(mode_text)
+            labels["hit"].setText("0x%04X" % int(data.get("hit_mask", 0) or 0))
+            labels["online_mask"].setText("0x%04X" % int(data.get("online_mask", 0) or 0))
+        else:
+            labels["mode"].setText(_t("master_diag_mode", mode=mode_text))
+            if "masks" in labels:
+                labels["masks"].setText(
+                    _t(
+                        "master_diag_masks",
+                        hit=int(data.get("hit_mask", 0)),
+                        online=int(data.get("online_mask", 0)),
+                    )
+                )
+
+        faults = data.get("faults", []) or []
+        if faults:
+            labels["faults"].setText(_t("master_diag_faults_active", faults=", ".join(faults)))
+            labels["faults"].setStyleSheet(
+                "color: #ffb74d; font-size: 12px; font-weight: bold; margin-top: 2px;"
+            )
+        else:
+            labels["faults"].setText(_t("master_diag_faults_normal"))
+            labels["faults"].setStyleSheet(
+                "color: #4caf50; font-size: 12px; font-weight: bold; margin-top: 2px;"
+            )
     def create_client_widget(self, client_id: str, data: dict) -> QFrame:
         """Create a widget for displaying client information"""
         from core.translation import _t

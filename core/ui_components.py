@@ -1,4 +1,5 @@
-﻿import time
+﻿# -*- coding: utf-8 -*-
+import time
 from datetime import datetime
 
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal
@@ -13,16 +14,15 @@ from core.utils import get_battery_percentage
 from core.icons import get_icon_svg
 from core.user_manager import UserRole
 
-# 字体配置（参考文档：伽玛数据采集看板）- 使用Arial字体
-# 根据用户要求进一步调整字体大小，使UI更清晰易读
+# 字体配置：优先微软雅黑，避免 Arial 导致中文/符号显示为 ?
 FONTS = {
-    "title": ("Arial", 20, "bold"),        # 主标题 - 从18增加到20
-    "subtitle": ("Arial", 18, "bold"),     # 子标题（卡片标题）- 从16增加到18
-    "mode": ("Arial", 16, "bold"),         # 模式标识 - 从14增加到16
-    "data_key": ("Arial", 16),             # 数据项键名 - 从14增加到16
-    "data_value": ("Arial", 16, "bold"),   # 数据项值 - 从14增加到16
-    "btn": ("Arial", 15),                  # 按钮字体 - 从13增加到15
-    "tip": ("Arial", 14)                   # 提示文本 - 从12增加到14
+    "title": ("Microsoft YaHei", 20, "bold"),
+    "subtitle": ("Microsoft YaHei", 18, "bold"),
+    "mode": ("Microsoft YaHei", 16, "bold"),
+    "data_key": ("Microsoft YaHei", 16),
+    "data_value": ("Microsoft YaHei", 16, "bold"),
+    "btn": ("Microsoft YaHei", 15),
+    "tip": ("Microsoft YaHei", 14)
 }
 
 # 间距配置
@@ -42,6 +42,7 @@ class StatusBar(QWidget):
     
     def __init__(self):
         super().__init__()
+        self._hide_clock = False
         self.setFixedHeight(32)  # 稍微增加高度以容纳更好的字体显示
         self.setStyleSheet("""
             QWidget {
@@ -207,8 +208,22 @@ class StatusBar(QWidget):
         self.status_label.setText(label)
 
         current_time = datetime.now().strftime("%H:%M")
-        self.time_label.setText(current_time)
-    
+        # 主显示 Web HMI 自带 HH:mm:ss 时钟，状态栏不再重复显示时间
+        if getattr(self, "_hide_clock", False):
+            self.time_label.setText("")
+            self.time_label.setVisible(False)
+        else:
+            self.time_label.setVisible(True)
+            self.time_label.setText(current_time)
+
+    def set_clock_visible(self, visible: bool):
+        self._hide_clock = not bool(visible)
+        self.time_label.setVisible(bool(visible))
+        if visible:
+            self.update_data()
+        else:
+            self.time_label.setText("")
+
     def update_timeout_display(self, remaining_seconds: int):
         """Update timeout display"""
         if remaining_seconds <= 0:

@@ -16,6 +16,7 @@ if HERE not in sys.path:
 
 from PyQt5.QtWidgets import QApplication, QMessageBox
 from PyQt5.QtCore import Qt
+from PyQt5.QtGui import QFont
 
 from core import themes
 from core.main_window import MainWindow, INSTANCE_ACTIVATE_SERVER
@@ -47,9 +48,10 @@ def main():
     use_fullscreen = args.fullscreen
     keyboard_debug = args.keyboard_debug
 
-    # High-DPI
+    # High-DPI + WebEngine OpenGL share (must be before QApplication)
     QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
     QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
+    QApplication.setAttribute(Qt.AA_ShareOpenGLContexts, True)
 
     app = QApplication(sys.argv)
     app.setApplicationName("DAQ Tablet")
@@ -80,8 +82,10 @@ def main():
             sys.exit(0)
     main._instance_lock = single_instance_lock
 
-    font = app.font()
-    font.setFamily("Arial")
+    font = QFont("Microsoft YaHei", 9)
+    # 回退：无雅黑时用系统默认 UI 字体，避免 Arial 导致中文变 ?
+    if not QFont("Microsoft YaHei").exactMatch():
+        font = QFont("Segoe UI", 9)
     if is_rpi and font.pointSize() < 10:
         font.setPointSize(10)
     app.setFont(font)

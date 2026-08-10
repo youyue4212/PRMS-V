@@ -38,6 +38,53 @@ class ConfigManager:
             self.expected_probe_count = max(0, min(16, int(self.expected_probe_count)))
         except (TypeError, ValueError):
             self.expected_probe_count = 2
+
+        # Home probe slot location labels (editable in Settings).
+        # Empty list → HomePage uses translation defaults (zh/en).
+        self._default_probe_slot_locations = [
+            "左侧 · 上",
+            "右侧 · 上",
+            "左侧 · 下",
+            "右侧 · 下",
+        ]
+        raw_locs = self.settings.value("PROBE_SLOT_LOCATIONS", "", str)
+        self.probe_slot_locations = []
+        if raw_locs:
+            try:
+                parsed = json.loads(raw_locs) if isinstance(raw_locs, str) else raw_locs
+                if isinstance(parsed, list):
+                    self.probe_slot_locations = [str(x).strip() for x in parsed]
+            except Exception:
+                self.probe_slot_locations = []
+        # Previously auto-persisted stock labels → clear so language defaults apply
+        if self.probe_slot_locations:
+            en_stock = ["Left · Upper", "Right · Upper", "Left · Lower", "Right · Lower"]
+            # Normalize length for stock compare
+            locs4 = list(self.probe_slot_locations) + [""] * 4
+            locs4 = locs4[:4]
+            if locs4 == self._default_probe_slot_locations or locs4 == en_stock:
+                self.probe_slot_locations = []
+                self.settings.remove("PROBE_SLOT_LOCATIONS")
+            elif not any(locs4):
+                self.probe_slot_locations = []
+                self.settings.remove("PROBE_SLOT_LOCATIONS")
+            else:
+                # Keep full custom list (may be >4); only normalize empty tails lightly
+                self.probe_slot_locations = [
+                    str(x).strip() for x in self.probe_slot_locations
+                ][:16]
+
+        # Home probe card display order (client_id list). Empty → default sort.
+        raw_order = self.settings.value("PROBE_DISPLAY_ORDER", "", str)
+        self.probe_display_order = []
+        if raw_order:
+            try:
+                parsed = json.loads(raw_order) if isinstance(raw_order, str) else raw_order
+                if isinstance(parsed, list):
+                    self.probe_display_order = [str(x).strip() for x in parsed if str(x).strip()]
+            except Exception:
+                self.probe_display_order = []
+
         # 计数率图时间窗口（分钟）：1 / 5 / 15，默认 5
         self.cps_window_minutes = self.settings.value("CPS_WINDOW_MINUTES", 5, int)
         try:
@@ -221,3 +268,40 @@ class ConfigManager:
 
     def save_settings(self):
         self.settings.sync()
+
+    def set_probe_slot_locations(self, locations):
+        """Persist home HMI probe slot location labels. Empty/None clears override."""
+        if locations is None:
+            self.probe_slot_locations = []
+            self.settings.remove("PROBE_SLOT_LOCATIONS")
+            return
+        cleaned = [str(x).strip() for x in list(locations)]
+        # Keep slot index alignment; allow up to 16 home tiles
+        if len(cleaned) > 16:
+            cleaned = cleaned[:16]
+        if not any(cleaned):
+            self.probe_slot_locations = []
+            self.settings.remove("PROBE_SLOT_LOCATIONS")
+            return
+        self.probe_slot_locations = cleaned
+        self.settings.setValue(
+            "PROBE_SLOT_LOCATIONS",
+            json.dumps(self.probe_slot_locations, ensure_ascii=False),
+        )
+
+    def set_probe_display_order(self, order):
+        """Persist home HMI probe card order by client_id (or slot:N)."""
+        if order is None:
+            self.probe_display_order = []
+            self.settings.remove("PROBE_DISPLAY_ORDER")
+            return
+        cleaned = [str(x).strip() for x in list(order) if str(x).strip()]
+        self.probe_display_order = cleaned
+        if not cleaned:
+            self.settings.remove("PROBE_DISPLAY_ORDER")
+            return
+        self.settings.setValue(
+            "PROBE_DISPLAY_ORDER",
+            json.dumps(self.probe_display_order, ensure_ascii=False),
+        )
+

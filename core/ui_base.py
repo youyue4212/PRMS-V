@@ -1286,6 +1286,40 @@ class UIBase():
         ctrl_layout.addWidget(self.expected_probe_spin, 2, 1)
         ctrl_layout.addWidget(self.adopt_probe_count_btn, 2, 2)
 
+        # Home probe card location labels (slot 1..4)
+        self.probe_locations_label = QLabel(_t("set_probe_locations"))
+        self.probe_locations_label.setToolTip(_t("tip_probe_locations"))
+        ctrl_layout.addWidget(self.probe_locations_label, 3, 0, 1, 3)
+        loc_wrap = QWidget()
+        loc_row = QHBoxLayout(loc_wrap)
+        loc_row.setContentsMargins(0, 0, 0, 0)
+        loc_row.setSpacing(6)
+        self.probe_location_edits = []
+        self.probe_location_slot_labels = []
+        saved_locs = list(getattr(self.config, "probe_slot_locations", None) or [])
+        for i in range(4):
+            cell = QVBoxLayout()
+            cell.setContentsMargins(0, 0, 0, 0)
+            cell.setSpacing(2)
+            slot_lbl = QLabel(_t("set_probe_loc_n", n=i + 1))
+            edit = QLineEdit()
+            if i < len(saved_locs) and str(saved_locs[i]).strip():
+                edit.setText(str(saved_locs[i]).strip())
+            else:
+                try:
+                    edit.setText(_t("probe_loc_%d" % i))
+                except Exception:
+                    pass
+            edit.setPlaceholderText(_t("set_probe_loc_n", n=i + 1))
+            edit.setToolTip(_t("tip_probe_locations"))
+            edit.editingFinished.connect(self.on_probe_slot_locations_changed)
+            cell.addWidget(slot_lbl)
+            cell.addWidget(edit)
+            loc_row.addLayout(cell, 1)
+            self.probe_location_edits.append(edit)
+            self.probe_location_slot_labels.append(slot_lbl)
+        ctrl_layout.addWidget(loc_wrap, 4, 0, 1, 3)
+
         # One-click factory parameter reset (command 0x14 → probe TCP/serial)
         self.factory_reset_label = QLabel(_t("set_factory_reset"))
         self.reset_defaults_current_btn = QPushButton(_t("btn_reset_current"))
@@ -1294,9 +1328,9 @@ class UIBase():
         self.reset_defaults_all_btn = QPushButton(_t("btn_reset_all"))
         self.reset_defaults_all_btn.setToolTip(_t("tip_reset_defaults"))
         self.reset_defaults_all_btn.clicked.connect(lambda: self.reset_factory_defaults(all_probes=True))
-        ctrl_layout.addWidget(self.factory_reset_label, 3, 0)
-        ctrl_layout.addWidget(self.reset_defaults_current_btn, 3, 1)
-        ctrl_layout.addWidget(self.reset_defaults_all_btn, 3, 2)
+        ctrl_layout.addWidget(self.factory_reset_label, 5, 0)
+        ctrl_layout.addWidget(self.reset_defaults_current_btn, 5, 1)
+        ctrl_layout.addWidget(self.reset_defaults_all_btn, 5, 2)
 
         settings_layout.addWidget(self.ctrl_group)
 
@@ -2862,6 +2896,64 @@ class UIBase():
     def on_expected_probe_count_changed(self, value):
         self.apply_expected_probe_count(int(value), source="spinbox")
 
+    def _stock_probe_slot_location_sets(self):
+        zh = ["左侧 · 上", "右侧 · 上", "左侧 · 下", "右侧 · 下"]
+        en = ["Left · Upper", "Right · Upper", "Left · Lower", "Right · Lower"]
+        return zh, en
+
+    def _current_language_probe_slot_locations(self):
+        out = []
+        for i in range(4):
+            try:
+                out.append(_t("probe_loc_%d" % i))
+            except Exception:
+                zh, _en = self._stock_probe_slot_location_sets()
+                out.append(zh[i])
+        return out
+
+    def on_probe_slot_locations_changed(self):
+        """Save settings-page location labels and refresh home HMI."""
+        if not hasattr(self, "probe_location_edits"):
+            return
+        locs = []
+        for edit in self.probe_location_edits:
+            locs.append((edit.text() or "").strip())
+        # All blank → clear override (home uses translation)
+        if not any(locs):
+            self.config.set_probe_slot_locations([])
+        else:
+            while len(locs) < 4:
+                locs.append("")
+            zh, en = self._stock_probe_slot_location_sets()
+            if locs[:4] == zh or locs[:4] == en:
+                self.config.set_probe_slot_locations([])
+            else:
+                self.config.set_probe_slot_locations(locs[:4])
+        self.config.save_settings()
+        home = getattr(self, "home_page", None)
+        if home is not None and hasattr(home, "schedule_web_flush"):
+            home.schedule_web_flush()
+
+    def refresh_probe_location_edits(self):
+        """Fill settings edits from config or current-language defaults."""
+        if not hasattr(self, "probe_location_edits"):
+            return
+        saved = list(getattr(self.config, "probe_slot_locations", None) or [])
+        defaults = self._current_language_probe_slot_locations()
+        for i, edit in enumerate(self.probe_location_edits):
+            edit.blockSignals(True)
+            if i < len(saved) and str(saved[i]).strip():
+                edit.setText(str(saved[i]).strip())
+            else:
+                edit.setText(defaults[i] if i < len(defaults) else "")
+            edit.setPlaceholderText(_t("set_probe_loc_n", n=i + 1))
+            edit.setToolTip(_t("tip_probe_locations"))
+            edit.blockSignals(False)
+        labels = getattr(self, "probe_location_slot_labels", None) or []
+        for i, lbl in enumerate(labels):
+            if lbl is not None:
+                lbl.setText(_t("set_probe_loc_n", n=i + 1))
+
     def get_online_probe_client_ids(self, fresh_sec: float = 12.0):
         """
         当前有效在线探头（按 IP 去重）。
@@ -3796,7 +3888,12 @@ class UIBase():
     def format_fault_operator_message(self, client_id: str, code: str) -> str:
         """Build operator-facing fault text with correct probe number (no IP, keep short)."""
         from core.translation import _t
-        label = self.get_probe_label(client_id)
+        if client_id == "master":
+            label = "主控" if _t("master_online") == "在线" else "Master"
+        elif client_id == "system":
+            label = ""
+        else:
+            label = self.get_probe_label(client_id)
         body = _t("fault_op_" + str(code))
         # 兼容旧 translation：清掉未替换占位符（写成拼接，避免源码里出现整串占位符）
         _ph = "{" + "probe" + "}"

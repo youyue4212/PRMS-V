@@ -26,6 +26,33 @@ class AlarmLogPage(QWidget):
         self.alarm_logger = get_alarm_logger()
         self.setup_ui()
         self.setup_timer()
+
+    def _format_event_client(self, event: AlarmEvent) -> str:
+        from core.translation import _t
+        if str(getattr(event, "alarm_type", "")) == "MasterFault":
+            return _t("log_master_client")
+        return str(getattr(event, "client_id", "") or "")
+
+    def _format_event_type(self, event: AlarmEvent) -> str:
+        from core.translation import _t
+        if str(getattr(event, "alarm_type", "")) == "MasterFault":
+            return _t("log_master_fault_type")
+        return str(getattr(event, "alarm_type", "") or "")
+
+    def _format_event_status(self, event: AlarmEvent) -> str:
+        from core.translation import _t
+        return _t("log_status_active") if bool(getattr(event, "alarm_status", False)) else _t("log_status_cleared")
+
+    def _format_event_message(self, event: AlarmEvent) -> str:
+        msg = str(getattr(event, "message", "") or "")
+        if str(getattr(event, "alarm_type", "")) != "MasterFault":
+            return msg
+        client_id = str(getattr(event, "client_id", "") or "")
+        if client_id.startswith("master_fault_"):
+            code = client_id.replace("master_fault_", "", 1)
+            if code and code not in msg:
+                msg = ("%s %s" % (code, msg)).strip()
+        return msg
     
     def setup_ui(self):
         """Setup UI interface"""
@@ -518,35 +545,39 @@ class AlarmLogPage(QWidget):
                         time_item.setTextAlignment(Qt.AlignCenter)
                         self.table_widget.setItem(row, 0, time_item)
                 
+                display_client = self._format_event_client(event)
+                display_type = self._format_event_type(event)
+                display_status = self._format_event_status(event)
+                display_message = self._format_event_message(event)
+
                 # Client ID
                 if row < self.table_widget.rowCount():
                     if self.table_widget.item(row, 1):
-                        self.table_widget.item(row, 1).setText(event.client_id)
+                        self.table_widget.item(row, 1).setText(display_client)
                     else:
-                        client_item = QTableWidgetItem(event.client_id)
+                        client_item = QTableWidgetItem(display_client)
                         client_item.setTextAlignment(Qt.AlignCenter)
                         self.table_widget.setItem(row, 1, client_item)
                 
                 # Alarm type
                 if row < self.table_widget.rowCount():
                     if self.table_widget.item(row, 2):
-                        self.table_widget.item(row, 2).setText(event.alarm_type)
+                        self.table_widget.item(row, 2).setText(display_type)
                     else:
-                        type_item = QTableWidgetItem(event.alarm_type)
+                        type_item = QTableWidgetItem(display_type)
                         type_item.setTextAlignment(Qt.AlignCenter)
                         self.table_widget.setItem(row, 2, type_item)
                 
                 # Status
-                status_text = "ACTIVE" if event.alarm_status else "INACTIVE"
                 if row < self.table_widget.rowCount():
                     if self.table_widget.item(row, 3):
-                        self.table_widget.item(row, 3).setText(status_text)
+                        self.table_widget.item(row, 3).setText(display_status)
                         if event.alarm_status:
                             self.table_widget.item(row, 3).setForeground(Qt.red)
                         else:
                             self.table_widget.item(row, 3).setForeground(Qt.green)
                     else:
-                        status_item = QTableWidgetItem(status_text)
+                        status_item = QTableWidgetItem(display_status)
                         status_item.setTextAlignment(Qt.AlignCenter)
                         if event.alarm_status:
                             status_item.setForeground(Qt.red)
@@ -608,9 +639,9 @@ class AlarmLogPage(QWidget):
                 # Message
                 if row < self.table_widget.rowCount():
                     if self.table_widget.item(row, 9):
-                        self.table_widget.item(row, 9).setText(event.message)
+                        self.table_widget.item(row, 9).setText(display_message)
                     else:
-                        message_item = QTableWidgetItem(event.message)
+                        message_item = QTableWidgetItem(display_message)
                         self.table_widget.setItem(row, 9, message_item)
                         
         finally:
@@ -776,6 +807,11 @@ class AlarmLogPage(QWidget):
             
             # Fill data for current page
             for row, event in enumerate(page_events):
+                display_client = self._format_event_client(event)
+                display_type = self._format_event_type(event)
+                display_status = self._format_event_status(event)
+                display_message = self._format_event_message(event)
+
                 # Time
                 time_str = datetime.fromtimestamp(event.timestamp).strftime('%Y-%m-%d %H:%M:%S')
                 time_item = QTableWidgetItem(time_str)
@@ -783,18 +819,17 @@ class AlarmLogPage(QWidget):
                 self.table_widget.setItem(row, 0, time_item)
                 
                 # Client ID
-                client_item = QTableWidgetItem(event.client_id)
+                client_item = QTableWidgetItem(display_client)
                 client_item.setTextAlignment(Qt.AlignCenter)
                 self.table_widget.setItem(row, 1, client_item)
                 
                 # Alarm type
-                type_item = QTableWidgetItem(event.alarm_type)
+                type_item = QTableWidgetItem(display_type)
                 type_item.setTextAlignment(Qt.AlignCenter)
                 self.table_widget.setItem(row, 2, type_item)
                 
                 # Status
-                status_text = "ACTIVE" if event.alarm_status else "INACTIVE"
-                status_item = QTableWidgetItem(status_text)
+                status_item = QTableWidgetItem(display_status)
                 status_item.setTextAlignment(Qt.AlignCenter)
                 if event.alarm_status:
                     status_item.setForeground(Qt.red)
@@ -830,7 +865,7 @@ class AlarmLogPage(QWidget):
                 self.table_widget.setItem(row, 8, duration_item)
                 
                 # Message
-                message_item = QTableWidgetItem(event.message)
+                message_item = QTableWidgetItem(display_message)
                 self.table_widget.setItem(row, 9, message_item)
                 
         finally:

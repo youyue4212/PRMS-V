@@ -50,6 +50,7 @@ from core.home_page import HomePage
 
 # 概览报警卡内说明区最多显示行数（超出部分在卡片内滚动，完整内容放 tooltip）
 _FAULT_DESC_MAX_LINES = 2
+_MASTER_FAULT_CLIENT_ID = "master"
 
 
 def _strip_fault_placeholders(text: str) -> str:
@@ -379,6 +380,7 @@ class MainWindow(QMainWindow, UIBase):
             connected_clients,
             ignore_clients=[cid for cid in [getattr(self, "master_client_id", None)] if cid],
         )
+        self._update_master_diagnostics()
         purged = getattr(self.diagnostics_manager, "purged_offline_clients", None) or []
         try:
             expected = int(getattr(self.config, "expected_probe_count", 0) or 0)
@@ -391,6 +393,7 @@ class MainWindow(QMainWindow, UIBase):
         
         # 更新系统状态（综合报警与故障码）
         self.update_system_status()
+        self._update_home_health_and_faults()
         
     
     def is_logged_in(self) -> bool:
@@ -415,6 +418,11 @@ class MainWindow(QMainWindow, UIBase):
 
         self.stacked_widget.setCurrentIndex(index)
         self.bottom_nav.set_active_button(index)
+        if hasattr(self, "status_bar"):
+            # 主显示用 Web 单行顶栏；其它页恢复 Qt 状态栏
+            self.status_bar.setVisible(index != 0)
+            if index != 0 and hasattr(self.status_bar, "set_clock_visible"):
+                self.status_bar.set_clock_visible(True)
         if index == 0:
             # 切回主显示时立即按当前源刷新（主控 L2 或探头回退）
             if self.is_master_online() and getattr(self, "latest_master_summary", None) is not None:
@@ -481,7 +489,7 @@ class MainWindow(QMainWindow, UIBase):
             self.overview_page.radiation_card.update_data("0 cps", "")
             self.overview_page.status_card.update_data("0" + chr(176) + "C", "0 V")
             if hasattr(self, "home_page"):
-                self.home_page.total_cps_label.setText("0 cps")
+                self.home_page.total_cps_label.setText("0")
                 self.home_page.update_probe_tiles_from_master(None, False)
             
             self.log("All data cleared", 'INFO')
@@ -561,6 +569,12 @@ class MainWindow(QMainWindow, UIBase):
             for cid in self.get_online_probe_client_ids():
                 items.append((cid, {"rates": 0, "alarm": False, "occupancy": False}))
 
+        # Apply saved display order (drag-reorder on home)
+        order = list(getattr(self.config, "probe_display_order", None) or [])
+        if order and items:
+            rank = {cid: i for i, cid in enumerate(order)}
+            items.sort(key=lambda pair: (rank.get(pair[0], 10_000),) + _sort_key(pair))
+
         entries = []
         total = 0
         for i, (cid, d) in enumerate(items):
@@ -576,8 +590,40 @@ class MainWindow(QMainWindow, UIBase):
                 "cps": cps,
                 "online": True,
                 "hit": hit,
+                "client_id": cid,
             })
         return entries, total
+
+    def open_probe_overview(self, client_id=None, slot_index=None):
+        """主页点探头卡：选中该探头并跳到实时概览。"""
+        if not client_id:
+            entries, _ = self._collect_home_probe_entries(self.client_data)
+            if slot_index is not None and 0 <= int(slot_index) < len(entries):
+                client_id = entries[int(slot_index)].get("client_id")
+        if not client_id:
+            self.log("No probe selected for overview navigation", "WARNING")
+            self.switch_page(1)
+            return
+
+        if hasattr(self, "set_primary_client"):
+            try:
+                self.set_primary_client(client_id)
+            except Exception as e:
+                self.log("Failed to select probe %s: %s" % (client_id, e), "WARNING")
+        else:
+            self.primary_client_id = client_id
+
+        if hasattr(self, "client_selection_combo"):
+            combo = self.client_selection_combo
+            for i in range(combo.count()):
+                if combo.itemData(i) == client_id:
+                    combo.blockSignals(True)
+                    combo.setCurrentIndex(i)
+                    combo.blockSignals(False)
+                    break
+
+        self.log("Home probe tile → overview: %s" % client_id, "INFO")
+        self.switch_page(1)
 
     def _apply_home_probe_cps(self, client_data=None):
         """Home page per-probe CPS + total — from probe spectrum only."""
@@ -590,11 +636,284 @@ class MainWindow(QMainWindow, UIBase):
             # 保留上一帧，避免闪灰
             page.update_probe_tiles_from_probe_list([], lang=lang)
             if not getattr(page, "_had_tile_data", False):
-                page.total_cps_label.setText("0 cps")
+                page.total_cps_label.setText("0")
             return
-        page.total_cps_label.setText("%d cps" % total)
+        page.total_cps_label.setText("%d" % total)
         # master_online=True：CPS 已是正式显示源，不再标「(探头)」后缀
         page.update_probe_tiles_from_probe_list(entries, lang=lang, show_as_primary=True)
+
+    def _set_home_aux_card_border(self, card, bar, color=None):
+        page = self.home_page
+        if hasattr(page, "apply_aux_card_style"):
+            page.apply_aux_card_style(card, bar, color)
+            return
+        if color:
+            card.setStyleSheet("""
+                QFrame {
+                    background-color: #141519; border-radius: 8px;
+                    border: 2px solid %s;
+                }
+            """ % color)
+            bar.setStyleSheet("QFrame { background-color: %s; border-radius: 1px; }" % color)
+        else:
+            card.setStyleSheet("""
+                QFrame {
+                    background-color: #141519; border-radius: 8px;
+                    border: 1px solid #252730;
+                }
+            """)
+            bar.setStyleSheet("QFrame { background-color: #10B981; border-radius: 1px; }")
+
+    def _master_fault_entries(self):
+        faults = []
+        dm = getattr(self, "diagnostics_manager", None)
+        if dm is None:
+            return faults
+        for code in (FaultCode.M101, FaultCode.M102, FaultCode.M103, FaultCode.M104):
+            if code in (dm.active_faults.get(_MASTER_FAULT_CLIENT_ID, {}) or {}):
+                faults.append(code)
+        return faults
+
+    def _sync_master_fault_logs(self):
+        """主控故障边沿日志：进入/恢复都记。"""
+        current = set(self._master_fault_entries())
+        previous = set(getattr(self, "_prev_master_fault_codes", set()) or set())
+        if current == previous:
+            return
+
+        latest = getattr(self, "latest_master_summary", None)
+        cps = float(getattr(latest, "total_cps", 0) or 0) if latest is not None else 0.0
+        mid = int(getattr(latest, "master_id", 0) or 0) if latest is not None else 0
+
+        try:
+            from core.alarm_logger import get_alarm_logger
+            alarm_logger = get_alarm_logger()
+        except Exception:
+            alarm_logger = None
+
+        for code in sorted(current - previous):
+            name, desc, severity, _ = FaultCode.get_info(code)
+            self.log(
+                "[MASTER FAULT DETECTED] Code: %s | %s: %s" % (code, name, desc),
+                severity,
+            )
+            if alarm_logger is not None:
+                try:
+                    alarm_logger.log_alarm_event(
+                        client_id="master_fault_" + code,
+                        alarm_status=True,
+                        count_rate=cps,
+                        temperature=0.0,
+                        hv=0.0,
+                        product_id=mid,
+                        sensitivity=0,
+                        alarm_type="MasterFault",
+                        message="%s %s" % (code, name),
+                    )
+                except Exception:
+                    pass
+
+        for code in sorted(previous - current):
+            name, _, _, _ = FaultCode.get_info(code)
+            self.log(
+                "[MASTER FAULT CLEARED] Code: %s | %s resolved" % (code, name),
+                "INFO",
+            )
+            if alarm_logger is not None:
+                try:
+                    alarm_logger.log_alarm_event(
+                        client_id="master_fault_" + code,
+                        alarm_status=False,
+                        count_rate=cps,
+                        temperature=0.0,
+                        hv=0.0,
+                        product_id=mid,
+                        sensitivity=0,
+                        alarm_type="MasterFault",
+                        message="%s %s cleared" % (code, name),
+                    )
+                except Exception:
+                    pass
+
+        self._prev_master_fault_codes = current
+
+    def _update_master_diagnostics(self):
+        """Inject master-related faults into the shared diagnostics table."""
+        dm = getattr(self, "diagnostics_manager", None)
+        if dm is None or not getattr(dm, "is_acquiring", False) or not dm.acquisition_start_time:
+            return
+        now = time.time()
+        startup_age = now - float(dm.acquisition_start_time or now)
+        master_cid = getattr(self, "master_client_id", None)
+        last_any = float(getattr(self, "_last_any_master_at", 0) or 0)
+        last_sane = float(getattr(self, "_last_sane_master_at", 0) or 0)
+        latest = getattr(self, "latest_master_summary", None)
+
+        if (not master_cid or last_any <= 0) and startup_age > dm.NO_DATA_STARTUP_SEC:
+            dm.add_fault(_MASTER_FAULT_CLIENT_ID, FaultCode.M101)
+        else:
+            dm.remove_fault(_MASTER_FAULT_CLIENT_ID, FaultCode.M101)
+
+        if last_any > 0 and (now - last_any) > dm.COMM_TIMEOUT_SEC:
+            dm.add_fault(_MASTER_FAULT_CLIENT_ID, FaultCode.M102)
+        else:
+            dm.remove_fault(_MASTER_FAULT_CLIENT_ID, FaultCode.M102)
+
+        if last_any > 0 and (now - last_any) <= dm.COMM_TIMEOUT_SEC:
+            if last_sane <= 0 or (now - last_sane) > dm.COMM_TIMEOUT_SEC:
+                dm.add_fault(_MASTER_FAULT_CLIENT_ID, FaultCode.M103)
+            else:
+                dm.remove_fault(_MASTER_FAULT_CLIENT_ID, FaultCode.M103)
+        else:
+            dm.remove_fault(_MASTER_FAULT_CLIENT_ID, FaultCode.M103)
+
+        if latest is not None and self.is_master_online() and int(latest.decision_result) == 0xFF:
+            dm.add_fault(_MASTER_FAULT_CLIENT_ID, FaultCode.M104)
+        else:
+            dm.remove_fault(_MASTER_FAULT_CLIENT_ID, FaultCode.M104)
+        self._sync_master_fault_logs()
+
+    def _update_home_health_and_faults(self):
+        from core.translation import _t, TranslationManager
+
+        if not hasattr(self, "home_page"):
+            return
+        lang = TranslationManager().current_lang
+        page = self.home_page
+        pkt = getattr(self, "latest_master_summary", None)
+        master_online = bool(pkt is not None and self.is_master_online())
+        master_faults = self._master_fault_entries()
+        try:
+            expected = int(getattr(self.config, "expected_probe_count", 0) or 0)
+        except (TypeError, ValueError):
+            expected = 0
+        probe_online = len(self.get_online_probe_client_ids()) if hasattr(self, "get_online_probe_client_ids") else 0
+        target = expected if expected > 0 else max(probe_online, int(getattr(pkt, "probe_count_cfg", 0) or 0), 1)
+        ir_degraded = bool(pkt is not None and getattr(pkt, "ir_degraded", False))
+
+        # --- structured health KV rows for Web HMI ---
+        probe_tone = "green" if probe_online >= target and target > 0 else "amber"
+        probe_comm = _t("health_probe_online", online=probe_online, expected=target)
+        if ir_degraded:
+            ir_status, ir_tone = _t("health_ir_degraded"), "amber"
+        else:
+            ir_status, ir_tone = _t("health_ir_ok"), "green"
+
+        if master_faults:
+            page.health_indicator.load(get_icon_svg('alarm_inactive'))
+            offline_mf = FaultCode.M101 in master_faults or FaultCode.M102 in master_faults
+            page.health_status_label.setText(
+                _t("status_health_offline") if offline_mf else _t("status_health_fault")
+            )
+            reason = " / ".join(master_faults)
+            if offline_mf:
+                # Offline alone: no yellow card/tag — amber only on Master HW row.
+                self._set_home_status_style(
+                    page.health_status_label, "#4caf50",
+                    "rgba(76, 175, 80, 0.1)", "rgba(76, 175, 80, 0.3)"
+                )
+                page.health_desc_label.setText(_t("desc_health_master_offline"))
+                master_hw, master_tone = _t("health_master_offline"), "amber"
+                self._set_home_aux_card_border(page.health_card, page.health_indicator_bar, None)
+            else:
+                self._set_home_status_style(
+                    page.health_status_label, "#ff9800",
+                    "rgba(255, 152, 0, 0.12)", "rgba(255, 152, 0, 0.35)"
+                )
+                page.health_desc_label.setText(_t("desc_health_master_fault", reason=reason))
+                master_hw, master_tone = _t("health_master_fault"), "amber"
+                self._set_home_aux_card_border(page.health_card, page.health_indicator_bar, "#ff9800")
+        elif ir_degraded:
+            page.health_indicator.load(get_icon_svg('occupancy_active'))
+            page.health_status_label.setText(_t("status_health_degraded"))
+            self._set_home_status_style(
+                page.health_status_label, "#ffb74d",
+                "rgba(255, 183, 77, 0.12)", "rgba(255, 183, 77, 0.35)"
+            )
+            page.health_desc_label.setText(
+                _t("desc_health_master_degraded", online=probe_online, expected=target)
+            )
+            master_hw, master_tone = _t("health_master_ok"), "green"
+            self._set_home_aux_card_border(page.health_card, page.health_indicator_bar, "#ffb74d")
+        else:
+            page.health_indicator.load(get_icon_svg('occupancy_inactive'))
+            page.health_status_label.setText(_t("status_health_ok"))
+            self._set_home_status_style(
+                page.health_status_label, "#4caf50",
+                "rgba(76, 175, 80, 0.1)", "rgba(76, 175, 80, 0.3)"
+            )
+            page.health_desc_label.setText(
+                _t("desc_health_master_ok", online=probe_online, expected=target)
+            )
+            if not master_online:
+                master_hw, master_tone = _t("health_master_offline"), "amber"
+            else:
+                master_hw, master_tone = _t("health_master_ok"), "green"
+            self._set_home_aux_card_border(page.health_card, page.health_indicator_bar, None)
+
+        page._health_rows = {
+            "probeComm": probe_comm,
+            "probeTone": probe_tone,
+            "irStatus": ir_status,
+            "irTone": ir_tone,
+            "masterHw": master_hw,
+            "masterTone": master_tone,
+        }
+
+        active_faults = getattr(self.diagnostics_manager, "get_all_active_faults", lambda: [])()
+        unique_msgs = []
+        for client_id, code, _, _, _, _ in active_faults:
+            msg = self.format_fault_operator_message(client_id, code)
+            if msg and msg not in unique_msgs:
+                unique_msgs.append(msg)
+
+        n_fault = len(unique_msgs)
+        if ir_degraded:
+            # Prefer channel hint from hit_mask / probe index when available
+            ch = 2
+            try:
+                mask = int(getattr(pkt, "hit_mask", 0) or 0)
+                if mask:
+                    for bit in range(16):
+                        if mask & (1 << bit):
+                            ch = bit + 1
+                            break
+            except Exception:
+                ch = 2
+            ir_shield, ir_shield_tone = _t("fault_ir_shield_ch", ch=ch), "amber"
+        else:
+            ir_shield, ir_shield_tone = _t("fault_ir_shield_none"), "green"
+
+        if unique_msgs:
+            text, tooltip = _format_fault_description(unique_msgs)
+            page.fault_indicator.load(get_icon_svg('alarm_inactive'))
+            page.fault_status_label.setText(_t("status_fault_count", n=n_fault))
+            self._set_home_status_style(
+                page.fault_status_label, "#ff9800",
+                "rgba(255, 152, 0, 0.12)", "rgba(255, 152, 0, 0.35)"
+            )
+            page.fault_desc_label.setText(text)
+            page.fault_desc_scroll.setToolTip(tooltip)
+            self._set_home_aux_card_border(page.fault_card, page.fault_indicator_bar, "#ff9800")
+            last_fault, last_tone = text.split("\n")[0].strip() if text else _t("fault_none_pending"), "amber"
+        else:
+            page.fault_indicator.load(get_icon_svg('occupancy_inactive'))
+            page.fault_status_label.setText(_t("status_fault_count", n=0))
+            self._set_home_status_style(
+                page.fault_status_label, "#4caf50",
+                "rgba(76, 175, 80, 0.1)", "rgba(76, 175, 80, 0.3)"
+            )
+            page.fault_desc_label.setText(_t("desc_fault_summary_none"))
+            page.fault_desc_scroll.setToolTip("")
+            self._set_home_aux_card_border(page.fault_card, page.fault_indicator_bar, None)
+            last_fault, last_tone = _t("fault_none_pending"), ""
+
+        page._fault_rows = {
+            "lastFault": last_fault,
+            "lastTone": last_tone,
+            "irShield": ir_shield,
+            "irTone": ir_shield_tone,
+        }
 
     def _refresh_home_from_probes(self, client_data=None):
         """Master offline/invalid L2: probe CPS + suspend channel hard-alarm."""
@@ -608,6 +927,7 @@ class MainWindow(QMainWindow, UIBase):
         self._apply_home_probe_cps(client_data)
         self._update_home_alarm_from_master(None, lang=lang, master_offline=True)
         self._update_home_occupancy(None, lang=lang, master_offline=True)
+        self._update_home_health_and_faults()
 
     def on_master_summary_ui(self, packet, client_id=None):
         """Refresh home alarm/channel from Master L2; CPS stays on probe spectrum."""
@@ -702,6 +1022,7 @@ class MainWindow(QMainWindow, UIBase):
         # 有本拍 L2 就刷新报警区（即使 looks_sane=False，decision 仍以本拍为准）
         self._update_home_alarm_from_master(display_pkt, lang=lang)
         self._update_home_occupancy(display_pkt, lang=lang)
+        self._update_home_health_and_faults()
 
     def _sync_master_relay_ui_from_l2(self, packet):
         """设置页主控继电器勾选/状态跟 L2 bit4/5/6（有 pending 命令时跳过，避免打架）。"""
@@ -725,6 +1046,10 @@ class MainWindow(QMainWindow, UIBase):
         return False
 
     def _set_home_status_style(self, label, color, bg, border):
+        page = self.home_page
+        if hasattr(page, "apply_status_label_style"):
+            page.apply_status_label_style(label, color, bg, border)
+            return
         label.setStyleSheet("""
             QLabel {
                 color: %s; font-size: 16px; font-weight: bold;
@@ -735,13 +1060,14 @@ class MainWindow(QMainWindow, UIBase):
 
     def _set_home_alarm_card_border(self, color=None):
         page = self.home_page
+        if hasattr(page, "apply_alarm_banner_style"):
+            page.apply_alarm_banner_style(color)
+            return
         if color:
             page.alarm_card.setStyleSheet("""
                 QFrame {
-                    background-color: #2a2a2a; border-radius: 10px;
+                    background-color: #141519; border-radius: 8px;
                     border: 2px solid %s;
-                    background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
-                        stop: 0 #2a2a2a, stop: 1 #1f1f1f);
                 }
             """ % color)
             page.status_indicator_bar.setStyleSheet(
@@ -750,13 +1076,12 @@ class MainWindow(QMainWindow, UIBase):
         else:
             page.alarm_card.setStyleSheet("""
                 QFrame {
-                    background-color: #2a2a2a; border-radius: 10px; border: none;
-                    background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
-                        stop: 0 #2a2a2a, stop: 1 #1f1f1f);
+                    background-color: #141519; border-radius: 8px;
+                    border: 1px solid #252730;
                 }
             """)
             page.status_indicator_bar.setStyleSheet(
-                "QFrame { background-color: #4caf50; border-radius: 1px; }"
+                "QFrame { background-color: #10B981; border-radius: 1px; }"
             )
 
     def _update_home_alarm_from_master(self, packet, lang="zh", master_offline=False):
@@ -778,6 +1103,8 @@ class MainWindow(QMainWindow, UIBase):
             self._over_thresh_soft_cleared = False
             if reset_btn is not None:
                 reset_btn.setEnabled(False)
+            if hasattr(page, "set_channel_reset_alarm_active"):
+                page.set_channel_reset_alarm_active(False)
             page.alarm_title_icon.load(get_icon_svg('alarm_inactive'))
             page.alarm_indicator.load(get_icon_svg('alarm_inactive'))
             page.alarm_status_label.setText(_t("master_offline"))
@@ -787,6 +1114,8 @@ class MainWindow(QMainWindow, UIBase):
             )
             page.alarm_desc_label.setText(_t("desc_master_offline"))
             self._set_home_alarm_card_border("#ff9800")
+            if hasattr(page, "sync_side_rad_from_alarm"):
+                page.sync_side_rad_from_alarm(_t("master_offline"), False)
             self._sync_channel_hard_alarm_log(False, None)
             return
 
@@ -832,6 +1161,8 @@ class MainWindow(QMainWindow, UIBase):
         # 仅硬报时可点复位；等待应答 / 等 L2=0x05 期间保持禁用
         if reset_btn is not None:
             reset_btn.setEnabled(kind == "channel_alarm" and not pending_reset)
+        if hasattr(page, "set_channel_reset_alarm_active"):
+            page.set_channel_reset_alarm_active(kind == "channel_alarm")
 
         if kind == "channel_alarm":
             page.alarm_title_icon.load(get_icon_svg('alarm_active'))
@@ -846,6 +1177,8 @@ class MainWindow(QMainWindow, UIBase):
             )
             page.alarm_desc_label.setText(desc)
             self._set_home_alarm_card_border("#ff4444")
+            if hasattr(page, "sync_side_rad_from_alarm"):
+                page.sync_side_rad_from_alarm(page.alarm_status_label.text(), True)
             self._sync_channel_hard_alarm_log(True, packet)
         elif kind == "acked":
             page.alarm_title_icon.load(get_icon_svg('alarm_inactive'))
@@ -917,6 +1250,12 @@ class MainWindow(QMainWindow, UIBase):
                 page.alarm_desc_label.setText(format_io_brief(packet, lang=lang))
             self._set_home_alarm_card_border(None)
             self._sync_channel_hard_alarm_log(False, packet)
+
+        if hasattr(page, "sync_side_rad_from_alarm") and kind != "channel_alarm":
+            page.sync_side_rad_from_alarm(
+                page.alarm_status_label.text(),
+                kind in ("over_threshold", "fault"),
+            )
 
     def _sync_channel_hard_alarm_log(self, active: bool, packet=None):
         """边沿写入通道符合硬报事件（alarm_logger client=master_channel）。"""
@@ -1168,11 +1507,13 @@ class MainWindow(QMainWindow, UIBase):
     def update_system_status(self, is_alarm_active: Optional[bool] = None):
         """Update system status indicator on overview page, combining radiation alarms and device faults."""
         current_time = datetime.now().strftime("%H:%M:%S")
-        
-        # Original overview: alarm bit from primary probe spectrum packet
+        master_pkt = getattr(self, "latest_master_summary", None)
+        master_hard_alarm = bool(master_pkt is not None and self.is_master_online() and master_pkt.is_channel_alarm())
+
+        # Original overview fallback: probe alarm bit only when no valid master hard-alarm source
         if is_alarm_active is None:
-            is_alarm_active = False
-            if self.primary_client_id and self.primary_client_id in self.client_latest_packets:
+            is_alarm_active = master_hard_alarm
+            if (not is_alarm_active) and self.primary_client_id and self.primary_client_id in self.client_latest_packets:
                 latest_packet = self.client_latest_packets[self.primary_client_id]
                 is_alarm_active = (latest_packet.device_status & 0b10000) != 0
 
@@ -1607,16 +1948,18 @@ class MainWindow(QMainWindow, UIBase):
         self.timeout_manager.stop_timer()
         self.status_bar.hide_timeout_display()
         self.status_bar.update_user_info(_t("status_public_mode"), None)
+        # 主显示：隐藏整条 Qt 状态栏，改用 Web Header 单行（含时钟/电量/EN）
+        self.status_bar.setVisible(False)
         self.setWindowTitle(_t("home_title"))
-        self.button_container.setVisible(False)
         self.stacked_widget.setCurrentIndex(0)
         self.bottom_nav.set_active_button(0)
-        # Keep a floating login affordance on the toolbar area: show container with only login
-        self.button_container.setVisible(True)
+        # 主显示保持整洁：隐藏登录条与底部 Tab
+        self.button_container.setVisible(False)
+        self.bottom_nav.setVisible(False)
         self.acquisition_btn.setVisible(False)
         self.save_data_btn.setVisible(False)
         self.user_management_btn.setVisible(False)
-        self.logout_btn.setVisible(True)
+        self.logout_btn.setVisible(False)
         self.logout_btn.setText(_t("btn_login"))
         try:
             self.logout_btn.clicked.disconnect()
@@ -1635,6 +1978,8 @@ class MainWindow(QMainWindow, UIBase):
             self.on_master_summary_ui(self.latest_master_summary, self.master_client_id)
         else:
             self._refresh_home_from_probes(self.client_data)
+        if hasattr(self, "home_page") and hasattr(self.home_page, "schedule_web_flush"):
+            self.home_page.schedule_web_flush()
 
     def update_ui_for_user_role(self):
         """根据用户角色更新UI"""
@@ -1645,8 +1990,15 @@ class MainWindow(QMainWindow, UIBase):
         
         role = self.current_user['role']
         self.button_container.setVisible(True)
+        self.bottom_nav.setVisible(True)
         self.acquisition_btn.setVisible(True)
         self.save_data_btn.setVisible(True)
+        self.logout_btn.setVisible(True)
+        if hasattr(self, "status_bar"):
+            on_home = self.stacked_widget.currentIndex() == 0
+            self.status_bar.setVisible(not on_home)
+            if not on_home and hasattr(self.status_bar, "set_clock_visible"):
+                self.status_bar.set_clock_visible(True)
         
         # 更新用户管理按钮可见性
         # 注意：这里需要检查本地角色，而不是用户管理器中的角色
@@ -1835,6 +2187,9 @@ class MainWindow(QMainWindow, UIBase):
             self.expected_probe_spin.setEnabled(can_modify_settings)
         if hasattr(self, 'adopt_probe_count_btn'):
             self.adopt_probe_count_btn.setEnabled(can_modify_settings)
+        if hasattr(self, 'probe_location_edits'):
+            for edit in self.probe_location_edits:
+                edit.setEnabled(can_modify_settings)
         
         if hasattr(self, 'telemetry_checkbox'):
             self.telemetry_checkbox.setEnabled(can_modify_settings)
@@ -2380,11 +2735,11 @@ class MainWindow(QMainWindow, UIBase):
         self.setWindowTitle(f"Gamma-ray Spectrometer - {username} ({role_name})")
 
         target = preferred_page if preferred_page is not None else 1
-        if target == 0:
-            target = 1  # after login land on original overview by default
         self.stacked_widget.setCurrentIndex(target)
         self.bottom_nav.set_active_button(target)
         self.update_operate_time()
+        if hasattr(self, "home_page") and hasattr(self.home_page, "schedule_web_flush"):
+            self.home_page.schedule_web_flush()
 
         if not required_for_page:
             QMessageBox.information(
@@ -2602,6 +2957,19 @@ class MainWindow(QMainWindow, UIBase):
             if hasattr(self, 'adopt_probe_count_btn'):
                 self.adopt_probe_count_btn.setText(_t("btn_adopt_probe_count"))
                 self.adopt_probe_count_btn.setToolTip(_t("tip_adopt_probe_count"))
+            if hasattr(self, 'probe_locations_label'):
+                self.probe_locations_label.setText(_t("set_probe_locations"))
+                self.probe_locations_label.setToolTip(_t("tip_probe_locations"))
+            # Stock labels follow language; custom overrides stay
+            try:
+                zh, en = self._stock_probe_slot_location_sets()
+                locs = list(getattr(self.config, "probe_slot_locations", None) or [])
+                if not locs or locs == zh or locs == en:
+                    self.config.set_probe_slot_locations([])
+            except Exception:
+                pass
+            if hasattr(self, 'refresh_probe_location_edits'):
+                self.refresh_probe_location_edits()
             self.update_control_labels()
             
         if hasattr(self, 'keyboard_group'):
@@ -2703,6 +3071,17 @@ class MainWindow(QMainWindow, UIBase):
         # Plot axis titles follow language
         if hasattr(self, 'retranslate_plot_labels'):
             self.retranslate_plot_labels()
+
+        # Rebuild home HMI strings that were cached in Chinese/English
+        try:
+            if self.is_master_online() and getattr(self, "latest_master_summary", None) is not None:
+                self.on_master_summary_ui(self.latest_master_summary, self.master_client_id)
+            else:
+                self._refresh_home_from_probes(self.client_data)
+            if hasattr(self, "update_system_status"):
+                self.update_system_status()
+        except Exception:
+            pass
                 
         # Force a UI update
         self.update()

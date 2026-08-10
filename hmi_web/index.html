@@ -1,0 +1,1108 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>行人通道辐射监测系统</title>
+    <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+    <style>
+        * {
+            box-sizing: border-box; margin: 0; padding: 0;
+            font-family: "Microsoft YaHei", "微软雅黑", "Segoe UI", "PingFang SC",
+                "Noto Sans CJK SC", sans-serif;
+            user-select: none;
+        }
+        :root {
+            --hmi-ok: #10B981;
+            --hmi-warn: #F59E0B;
+            --hmi-alarm: #EF4444;
+            --hmi-muted: #8B90A0;
+            --hmi-text: #F1F3F8;
+            --hmi-panel: #141519;
+            --hmi-border: #2A2D38;
+            --touch-min: 48px;
+        }
+        body {
+            background-color: #0B0C0E; color: #FFFFFF; height: 100vh;
+            display: flex; flex-direction: column; overflow: hidden; font-size: 13px;
+        }
+
+        @keyframes alarmPulse {
+            0% { background-color: rgba(239, 68, 68, 0.25); border-color: #EF4444; box-shadow: 0 0 20px rgba(239, 68, 68, 0.6); }
+            50% { background-color: rgba(239, 68, 68, 0.05); border-color: rgba(239, 68, 68, 0.4); box-shadow: 0 0 5px rgba(239, 68, 68, 0.1); }
+            100% { background-color: rgba(239, 68, 68, 0.25); border-color: #EF4444; box-shadow: 0 0 20px rgba(239, 68, 68, 0.6); }
+        }
+        @keyframes cardAlarmFlash {
+            0% { border-color: #EF4444; box-shadow: 0 0 25px rgba(239, 68, 68, 0.8); }
+            50% { border-color: #7F1D1D; box-shadow: 0 0 5px rgba(239, 68, 68, 0.2); }
+            100% { border-color: #EF4444; box-shadow: 0 0 25px rgba(239, 68, 68, 0.8); }
+        }
+        @keyframes textGlowRed {
+            0% { color: #FF4D4D; text-shadow: 0 0 20px #FF0000; }
+            50% { color: #990000; text-shadow: 0 0 4px #550000; }
+            100% { color: #FF4D4D; text-shadow: 0 0 20px #FF0000; }
+        }
+        @keyframes btnPulse {
+            0% { box-shadow: 0 0 8px rgba(239, 68, 68, 0.4); }
+            50% { box-shadow: 0 0 20px rgba(239, 68, 68, 0.8); }
+            100% { box-shadow: 0 0 8px rgba(239, 68, 68, 0.4); }
+        }
+        @keyframes iconPulse {
+            0% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.15); opacity: 0.55; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+        @keyframes walkThrough {
+            0% { transform: translateY(10px) scale(0.8); opacity: 0; }
+            50% { transform: translateY(-15px) scale(1.1); opacity: 1; }
+            100% { transform: translateY(-40px) scale(0.7); opacity: 0; }
+        }
+
+        .header {
+            display: flex; flex-direction: row; flex-wrap: nowrap;
+            justify-content: space-between; align-items: center;
+            background: var(--hmi-panel); padding: 0 16px;
+            height: 52px; min-height: 52px; max-height: 52px;
+            border-bottom: 1px solid var(--hmi-border); flex-shrink: 0; overflow: hidden;
+            box-sizing: border-box;
+        }
+        .header.global-alarm { background: #3B0707; border-bottom-color: #EF4444; }
+        .header-left, .header-right {
+            display: flex; flex-direction: row; flex-wrap: nowrap;
+            align-items: center; gap: 10px; min-width: 0; height: 50px;
+        }
+        .header-left { flex: 1 1 auto; overflow: hidden; min-width: 0; }
+        .header-right { flex: 0 1 auto; margin-left: 8px; max-width: 55%; overflow: hidden; }
+        .system-title {
+            font-size: 15px; font-weight: 800; color: #FFF; letter-spacing: 0.3px;
+            cursor: pointer; white-space: nowrap; line-height: 1.2;
+            overflow: hidden; text-overflow: ellipsis; min-width: 0; max-width: 100%;
+        }
+        .mode-badge {
+            flex-shrink: 0; white-space: nowrap;
+            background: #1E293B; color: #38BDF8; padding: 3px 10px;
+            border-radius: 12px; font-size: 11px; font-weight: 600;
+            border: 1px solid #0284C7; line-height: 1.2;
+        }
+        .time-tag {
+            flex-shrink: 0; white-space: nowrap;
+            font-family: Consolas, "Courier New", monospace;
+            font-size: 14px; color: #AAA; background: #1F2026;
+            padding: 3px 10px; border-radius: 4px;
+            border: 1px solid #2D303E; line-height: 1.2;
+        }
+        .total-cps {
+            color: #AAA; white-space: nowrap; font-size: 12px; line-height: 1.2;
+            display: inline-flex; align-items: center; gap: 4px; min-width: 0; flex-shrink: 1; overflow: hidden;
+        }
+        .total-cps #totalCpsLabel { overflow: hidden; text-overflow: ellipsis; max-width: 9em; }
+        .total-cps #totalCps {
+            font-size: 18px; font-weight: 800; font-family: Consolas, "Courier New", monospace;
+            color: #00FF66; text-shadow: 0 0 8px rgba(0,255,102,0.3); flex-shrink: 0;
+        }
+        .status-online {
+            flex-shrink: 0; white-space: nowrap;
+            background: #064E3B; color: #34D399; padding: 4px 10px; border-radius: 4px;
+            border: 1px solid #059669; font-weight: bold; font-size: 11px; line-height: 1.2;
+        }
+        .status-warn { background: #78350F; color: #FBBF24; border-color: #B45309; }
+        .status-offline { background: #7F1D1D; color: #FCA5A5; border-color: #991B1B; }
+        .hdr-tools {
+            display: flex; flex-direction: row; align-items: center; gap: 8px;
+            flex-shrink: 0; margin-left: 4px;
+        }
+        .battery-tag {
+            color: #DDD; font-size: 12px; font-weight: 600; white-space: nowrap;
+            padding: 3px 8px; background: #222430; border: 1px solid #323545; border-radius: 4px;
+        }
+        .lang-btn {
+            min-width: 42px; height: 24px; padding: 0 8px;
+            background: #333333; color: #ff9800; border: 1px solid #ff9800;
+            border-radius: 4px; font-size: 11px; font-weight: bold; cursor: pointer;
+            line-height: 22px;
+        }
+        .lang-btn:hover { background: #ff9800; color: #111; }
+        .ghost-login {
+            width: 34px;
+            height: 28px;
+            min-width: 34px;
+            min-height: 28px;
+            border-radius: 8px;
+            padding: 0;
+            border: 1px solid rgba(255,255,255,0.14);
+            background: rgba(34,36,48,0.75);
+            color: rgba(170,176,190,0.8);
+            font-size: 14px;
+            line-height: 26px;
+            text-align: center;
+            cursor: pointer;
+            opacity: 0.75;
+            flex-shrink: 0;
+            margin-left: 2px;
+            -webkit-tap-highlight-color: transparent;
+            touch-action: manipulation;
+        }
+        .ghost-login:hover, .ghost-login:active {
+            opacity: 1;
+            color: #E5E7EB;
+            border-color: rgba(56,189,248,0.5);
+            background: rgba(40,44,56,0.95);
+        }
+        body.nav-enabled .ghost-login { display: none !important; }
+        body.nav-enabled .original-probe-card { cursor: pointer; }
+        body.can-reorder .original-probe-card { cursor: grab; touch-action: none; }
+        .original-probe-card.dragging {
+            opacity: 0.55; transform: scale(0.98);
+            box-shadow: 0 0 0 2px #3B82F6;
+            z-index: 5;
+        }
+        .original-probe-card.drag-over {
+            border-color: #38BDF8 !important;
+            box-shadow: 0 0 0 2px rgba(56,189,248,0.55);
+        }
+
+        
+        .header .brand-title, #systemTitle {
+            font-size: 16px; font-weight: 800; letter-spacing: 0.5px;
+        }
+        #totalCps {
+            font-size: 20px !important; font-weight: 800; color: #00FF66;
+            font-variant-numeric: tabular-nums; letter-spacing: 0.5px;
+        }
+        #masterLink {
+            font-size: 11px !important; font-weight: 700;
+            max-width: 12em; overflow: hidden; text-overflow: ellipsis;
+        }
+        #batteryTag, #langBtn {
+            font-size: 12px !important;
+        }
+
+        .main-container {
+            flex: 1; display: grid;
+            grid-template-columns: minmax(0, 7fr) minmax(320px, 3fr);
+            gap: 12px; padding: 12px; min-height: 0;
+            align-items: stretch;
+            height: 100%;
+        }
+        .primary-section {
+            display: flex; flex-direction: column; gap: 12px; min-height: 0;
+            height: 100%;
+        }
+        /* Banner : probes = 1 : 1 */
+        .channel-master-card {
+            flex: 0 0 auto;
+            min-height: 0;
+            max-height: 148px;
+            background: #141519; border: 1px solid #252730; border-radius: 8px;
+            padding: 10px 14px; display: flex; flex-direction: row;
+            align-items: center; justify-content: space-between; gap: 14px;
+        }
+        .master-alarm-banner {
+            flex: 1; display: flex; flex-direction: row; justify-content: flex-start; align-items: center;
+            text-align: left; padding: 10px 16px; border-radius: 8px;
+            background: rgba(16, 185, 129, 0.10); border: 2px solid rgba(16, 185, 129, 0.55);
+            transition: all 0.3s ease; min-height: 88px; max-height: 120px; min-width: 0; gap: 14px;
+        }
+        .master-alarm-banner .banner-text-col {
+            display: flex; flex-direction: column; justify-content: center; gap: 4px; min-width: 0; flex: 1;
+        }
+        .master-alarm-banner.alarm { animation: alarmPulse 0.8s infinite; }
+        .master-alarm-banner.warn { background: rgba(245, 158, 11, 0.1); border-color: rgba(245, 158, 11, 0.5); }
+        .alarm-title-text {
+            font-size: 22px; font-weight: 900; color: var(--hmi-ok); letter-spacing: 0.5px;
+            display: flex; align-items: center; justify-content: flex-start; gap: 12px;
+            line-height: 1.2;
+        }
+        .master-alarm-banner.alarm .alarm-title-text { color: #FF3333; }
+        .master-alarm-banner.warn .alarm-title-text { color: #F59E0B; }
+        .alarm-icon-badge {
+            display: inline-flex; align-items: center; justify-content: center;
+            width: 56px; height: 56px; min-width: 56px; padding: 0; border-radius: 50%;
+            font-size: 28px; font-weight: 900; line-height: 1;
+            font-family: "Segoe UI Symbol", "Segoe UI Emoji", "Microsoft YaHei", sans-serif;
+            background: rgba(16, 185, 129, 0.22); color: #10B981;
+            border: 3px solid rgba(16, 185, 129, 0.75);
+            flex-shrink: 0; box-shadow: 0 0 12px rgba(16, 185, 129, 0.25);
+        }
+        .master-alarm-banner.alarm .alarm-icon-badge {
+            width: 64px; height: 64px; min-width: 64px; font-size: 34px;
+            background: rgba(239, 68, 68, 0.28); color: #FF4D4D;
+            border-color: #EF4444; border-radius: 12px;
+            box-shadow: 0 0 22px rgba(239, 68, 68, 0.55);
+            animation: iconPulse 0.8s infinite;
+        }
+        .master-alarm-banner.warn .alarm-icon-badge {
+            width: 60px; height: 60px; min-width: 60px; font-size: 30px;
+            background: rgba(245, 158, 11, 0.25); color: #F59E0B;
+            border-color: #F59E0B; border-radius: 12px;
+            box-shadow: 0 0 16px rgba(245, 158, 11, 0.4);
+        }
+        /* SVG warning glyph inside badge when alarming */
+        .alarm-icon-badge svg { width: 70%; height: 70%; display: block; }
+        .master-alarm-banner.alarm .alarm-icon-badge {
+            background: rgba(239, 68, 68, 0.25); color: #FF4D4D; border-color: #EF4444;
+            animation: iconPulse 0.8s infinite;
+        }
+        .master-alarm-banner.warn .alarm-icon-badge {
+            background: rgba(245, 158, 11, 0.25); color: #F59E0B; border-color: #F59E0B;
+        }
+        .alarm-sub-text { font-size: 13px; color: var(--hmi-muted); margin-top: 0; font-weight: 500; max-width: 100%; line-height: 1.3; }
+        .master-alarm-banner.alarm .alarm-sub-text { color: #FFAAAA; font-weight: bold; }
+
+        .gate-visual-box {
+            flex-shrink: 0; display: flex; flex-direction: row; align-items: center;
+            gap: 14px; padding-left: 4px;
+        }
+        .gate-frame {
+            width: 78px; height: 70px; border: 3px solid #F59E0B; border-bottom: none;
+            border-radius: 8px 8px 0 0; position: relative;
+            display: flex; align-items: flex-end; justify-content: center;
+            background: radial-gradient(circle, rgba(245,158,11,0.12) 0%, transparent 70%);
+        }
+        .person-avatar {
+            font-size: 34px; font-weight: 800; color: #F59E0B; line-height: 1;
+            font-family: "Segoe UI Symbol", "Segoe UI Emoji", "Microsoft YaHei", sans-serif;
+            position: absolute; bottom: 8px; letter-spacing: 0;
+        }
+        .person-avatar.passing { animation: walkThrough 1.5s infinite linear; }
+        .passage-state-badge {
+            padding: 10px 18px; border-radius: 22px; font-size: 15px; font-weight: bold;
+            background: #232530; color: #C5C8D4; border: 1px solid #3A3E4C; white-space: nowrap;
+            display: inline-flex; align-items: center; gap: 8px;
+            min-height: var(--touch-min); box-sizing: border-box;
+            font-family: "Segoe UI Emoji", "Segoe UI Symbol", "Microsoft YaHei", sans-serif;
+        }
+        .passage-state-badge.active {
+            background: #F59E0B; color: #000; border-color: #F59E0B;
+            box-shadow: 0 0 12px rgba(245,158,11,0.4);
+        }
+
+        .probes-section {
+            flex: 1 1 0;
+            display: flex; flex-direction: column; gap: 8px;
+            min-height: 0;
+            max-height: none;
+        }
+        .section-header {
+            font-size: 15px; font-weight: 800; color: var(--hmi-muted);
+            letter-spacing: 1px; flex-shrink: 0; text-transform: none;
+        }
+        .probes-grid {
+            display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
+            flex: 1; min-height: 0;
+            align-content: stretch;
+            grid-auto-rows: 1fr;
+        }
+
+        .original-probe-card {
+            background: var(--hmi-panel); border: 2px solid #272936; border-radius: 8px;
+            padding: 12px 14px;
+            display: flex; flex-direction: column; justify-content: space-between;
+            cursor: pointer; transition: border-color 0.2s;
+            min-height: 0; max-height: none; height: 100%; overflow: hidden;
+        }
+        .original-probe-card:hover { border-color: #3B82F6; }
+        .original-probe-card.alarm { background: #210A0C; animation: cardAlarmFlash 0.8s infinite; }
+        .original-probe-card.offline { border-color: #555; opacity: 0.85; }
+        .probe-head {
+            display: flex; justify-content: space-between; align-items: center;
+            flex-shrink: 0; margin-bottom: 4px;
+        }
+        .probe-name { font-size: 16px; font-weight: bold; color: #F1F5F9; }
+        .probe-location-tag {
+            background: #222430; color: #A4A7B5; padding: 4px 10px; border-radius: 4px;
+            font-size: 12px; border: 1px solid #2D3040;
+            max-width: 48%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        .probe-body {
+            flex: 1 1 auto;
+            display: flex; flex-direction: column;
+            justify-content: center; align-items: center;
+            text-align: center; padding: 6px 0; min-height: 0; gap: 2px;
+        }
+        .probe-num {
+            font-size: clamp(56px, 7vh, 72px); font-weight: 800;
+            font-family: "Microsoft YaHei", "Segoe UI", sans-serif;
+            color: #00FF66; text-shadow: 0 0 18px rgba(0, 255, 102, 0.40);
+            line-height: 1; letter-spacing: -1px;
+            font-variant-numeric: tabular-nums;
+        }
+        .original-probe-card.alarm .probe-num { animation: textGlowRed 0.8s infinite; }
+        .original-probe-card.offline .probe-num { color: #888; text-shadow: none; }
+        .probe-unit-label {
+            font-size: 14px; color: #8490A0; margin-top: 4px;
+            font-weight: 600; letter-spacing: 1px;
+        }
+        .probe-foot {
+            display: flex; justify-content: flex-start; align-items: center;
+            border-top: 1px solid #232532; padding-top: 10px; margin-top: 6px;
+            font-size: 15px; color: var(--hmi-muted); flex-shrink: 0; font-weight: 600;
+            gap: 10px; min-height: 28px;
+        }
+        .status-indicator { gap: 8px !important; }
+        .status-indicator > span:not(.dot) { letter-spacing: 0.5px; }
+        .status-indicator { gap: 8px !important; }
+        .status-indicator > span:not(.dot) { letter-spacing: 0.5px; }
+        .status-indicator { display: flex; align-items: center; gap: 6px; font-weight: 600; }
+        .dot { width: 10px; height: 10px; border-radius: 50%; background: #00FF66; box-shadow: 0 0 8px #00FF66; flex-shrink: 0; }
+        .dot.alarm { background: #EF4444; box-shadow: 0 0 8px #EF4444; animation: iconPulse 0.8s infinite; }
+        .dot.offline { background: #666; box-shadow: none; }
+        .status-text-green { color: #00FF66; }
+        .status-text-red { color: #EF4444; font-weight: bold; }
+
+        .sidebar-section {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            min-height: 0;
+            height: 100%;
+            min-width: 320px;
+            overflow: hidden;
+            box-sizing: border-box;
+        }
+        /* Strict 1:1:1 equal height */
+        #card_alarm, #card_health, #card_fault {
+            flex: 1 1 0% !important;
+            min-height: 0 !important;
+            max-height: none !important;
+            overflow: hidden !important;
+            align-self: stretch;
+            box-sizing: border-box;
+            position: relative;
+        }
+        .sidebar-section > .debug-bar {
+            flex: 0 0 auto !important;
+            height: auto !important;
+            max-height: none !important;
+            margin-top: 0;
+        }
+        .side-card {
+            background: #141519; border: 1px solid #252730; border-radius: 8px;
+            padding: 14px 16px; display: flex; flex-direction: column; gap: 10px;
+            justify-content: flex-start;
+            box-sizing: border-box;
+        }
+        .side-card > .info-list {
+            flex: 0 0 auto !important;
+            overflow: hidden;
+        }
+        .side-card > .side-card-title { flex: 0 0 auto; }
+        .side-card > .reset-btn {
+            flex: 0 0 auto;
+            margin-top: auto;
+        }
+.side-card.warn { border-color: rgba(245, 158, 11, 0.85); border-width: 2px; }
+        .side-card.danger { border-color: #EF4444; border-width: 2px; }
+        .clickable-card { cursor: default; transition: border-color 0.2s ease; position: relative; padding-bottom: 0; }
+        body.nav-enabled .clickable-card { cursor: pointer; }
+        body.nav-enabled .clickable-card:hover {
+            border-color: #3B82F6; background: #191B22;
+        }
+        .detail-link { display: none !important; }
+
+        .kv-list {
+            display: flex; flex-direction: column; gap: 10px;
+            flex: 1 1 auto; min-height: 0; justify-content: flex-start;
+            overflow: hidden; padding: 8px 0 4px;
+        }
+        .kv-row {
+            display: grid;
+            grid-template-columns: 88px 1fr;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            line-height: 1.35;
+            min-height: 24px;
+        }
+        .kv-key { color: var(--hmi-muted); flex-shrink: 0; font-size: 13px; }
+        .kv-val {
+            color: var(--hmi-text); font-weight: 700; text-align: right;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+            min-width: 0; font-size: 13px;
+            font-variant-numeric: tabular-nums;
+        }
+        .kv-val.green { color: #10B981; }
+        .kv-val.amber { color: #F59E0B; }
+        .kv-val.red { color: #EF4444; }
+        .detail-link {
+            position: absolute; right: 14px; bottom: 10px;
+            background: transparent; border: none; padding: 6px 2px;
+            color: #3B82F6; font-size: 13px; font-weight: 700;
+            cursor: pointer; letter-spacing: 0.2px;
+            min-height: 32px;
+        }
+        .detail-link:hover { color: #60A5FA; text-decoration: underline; }
+
+        .side-card-title {
+            font-size: 15px; font-weight: 800; color: #D5D7E0;
+            display: flex; align-items: center; justify-content: space-between;
+            border-bottom: 1px solid #22242C; padding-bottom: 8px;
+            letter-spacing: 0.3px;
+        }
+        .side-card-title > span:last-child {
+            font-size: 13px; font-weight: 700;
+        }
+        .info-list {
+            display: flex; flex-direction: column; gap: 10px;
+            font-size: 14px; flex: 1 1 auto; min-height: 0;
+            justify-content: flex-start; padding: 8px 0 4px;
+        }
+        .info-item {
+            display: flex; justify-content: space-between; align-items: center;
+            color: var(--hmi-muted); gap: 10px; font-size: 13px;
+            min-height: 24px; line-height: 1.35;
+        }
+        .info-item > span:first-child { flex-shrink: 0; min-width: 72px; }
+        .info-value {
+            color: var(--hmi-text); font-weight: 700; text-align: right;
+            max-width: 100%; flex: 1; min-width: 0; line-height: 1.5;
+            font-size: 14px;
+        }
+        #healthDesc, #lastFaultText {
+            max-width: 100%;
+            flex: 1 1 auto;
+            min-width: 0;
+            white-space: nowrap !important;
+            overflow: hidden !important;
+            text-overflow: ellipsis !important;
+            font-size: 11px;
+            letter-spacing: 0;
+            line-height: 1.3;
+        }
+        .info-item:has(#healthDesc) {
+            gap: 6px;
+            flex: 0 0 auto;
+            min-height: 0;
+        }
+        .info-item:has(#healthDesc) > span:first-child {
+            min-width: 36px;
+        }
+        .info-value.green { color: #10B981; }
+        .info-value.amber { color: #F59E0B; }
+        .info-value.red-flash { color: #FF4D4D; font-weight: bold; animation: textGlowRed 0.8s infinite; }
+
+        .reset-btn {
+            width: 100%; min-height: var(--touch-min); height: 48px; border-radius: 8px;
+            font-size: 16px; font-weight: 700;
+            display: flex; align-items: center; justify-content: center; gap: 10px;
+            cursor: pointer; transition: all 0.3s ease; margin-top: auto;
+            flex-shrink: 0; letter-spacing: 0.5px;
+        }
+        .reset-btn.normal { background: #1C1E26; border: 1px solid #2D303E; color: #6B7280; opacity: 0.8; }
+        .reset-btn.normal:hover { background: #252836; color: #9CA3AF; border-color: #3B3E52; }
+        .reset-btn.active {
+            background: linear-gradient(135deg, #DC2626 0%, #B91C1C 100%);
+            border: 1px solid #EF4444; color: #FFFFFF;
+            box-shadow: 0 0 15px rgba(239, 68, 68, 0.4); animation: btnPulse 1.2s infinite;
+        }
+        .reset-btn:disabled { cursor: not-allowed; opacity: 0.55; }
+
+        .debug-bar {
+            background: #141519; border: 1px solid #252730; border-radius: 8px;
+            padding: 12px; display: flex; flex-direction: column; gap: 8px; margin-top: auto;
+        }
+        body.embedded .sidebar-section {
+            /* three visible cards only; debug-bar display:none */
+        }
+        body.embedded .debug-bar { display: none !important; flex: 0 !important; height: 0 !important; max-height: 0 !important; margin: 0 !important; padding: 0 !important; border: none !important; overflow: hidden !important; }
+        .debug-btn-group { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+        .debug-btn {
+            background: #222430; color: #AAA; border: 1px solid #323545;
+            padding: 6px; border-radius: 4px; font-size: 11px; cursor: pointer;
+        }
+        .debug-btn:hover { background: #2C2F40; color: #FFF; }
+        .debug-btn.alarm-btn { background: #7F1D1D; color: #FCA5A5; border-color: #991B1B; }
+
+        .page-modal {
+            position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+            background: rgba(10, 11, 14, 0.92); z-index: 1000;
+            display: none; justify-content: center; align-items: center;
+        }
+        .page-modal.active { display: flex; }
+        .modal-box {
+            width: 700px; max-width: 90%; background: #16171D; border: 1px solid #2D303E;
+            border-radius: 12px; box-shadow: 0 20px 50px rgba(0,0,0,0.6);
+            display: flex; flex-direction: column; overflow: hidden;
+        }
+        .modal-header {
+            padding: 16px 20px; background: #1C1E26; border-bottom: 1px solid #2D303E;
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        .modal-title { font-size: 16px; font-weight: bold; color: #FFF; }
+        .close-btn {
+            background: #2A2D3A; border: none; color: #AAA; width: 28px; height: 28px;
+            border-radius: 50%; font-size: 14px; cursor: pointer; font-weight: bold;
+        }
+        .close-btn:hover { background: #EF4444; color: #FFF; }
+        .modal-body { padding: 20px; display: flex; flex-direction: column; gap: 12px; max-height: 60vh; overflow-y: auto; }
+        .detail-row {
+            display: flex; justify-content: space-between; align-items: center;
+            background: #1A1C23; padding: 12px 16px; border-radius: 6px; border: 1px solid #252834;
+        }
+        .status-tag-ok { background: #064E3B; color: #34D399; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: bold; }
+        .status-tag-warn { background: #78350F; color: #FBBF24; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: bold; }
+
+        @media (max-width: 900px) {
+            body { overflow-y: auto; height: auto; }
+            .main-container { grid-template-columns: 1fr; }
+            .probes-grid { grid-template-columns: 1fr; }
+            .channel-master-card { flex-direction: column; }
+            .gate-visual-box { justify-content: space-between; width: 100%; }
+        }
+    </style>
+</head>
+<body>
+    <div class="header" id="mainHeader">
+        <div class="header-left">
+            <span class="system-title" id="systemTitle" title="双击登录">行人通道辐射监测系统</span>
+            <span class="mode-badge" id="modeBadge">监视模式</span>
+            <button type="button" class="ghost-login" id="ghostLogin" aria-label="login" onclick="doLogin()">🔒</button>
+            <span class="time-tag" id="clock">--:--:--</span>
+        </div>
+        <div class="header-right">
+            <div class="total-cps"><span id="totalCpsLabel">Total</span><span id="totalCps">0</span><span id="totalCpsUnit">CPS</span></div>
+            <div class="status-online" id="masterLink">主控离线</div>
+            <div class="hdr-tools">
+                <span class="battery-tag" id="batteryTag">--%</span>
+                <button type="button" class="lang-btn" id="langBtn" onclick="toggleLang()">EN</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="main-container">
+        <div class="primary-section">
+            <div class="channel-master-card">
+                <div class="master-alarm-banner" id="alarmBanner">
+                    <span class="alarm-icon-badge" id="alarmIcon" aria-hidden="true"><svg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'><circle cx='12' cy='12' r='10' fill='#059669'/><path d='M7 12.5l3 3 7-7' stroke='#fff' stroke-width='2.4' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg></span>
+                    <div class="banner-text-col">
+                        <div class="alarm-title-text" id="alarmTitle">
+                            <span id="alarmText">通道辐射状态正常</span>
+                        </div>
+                        <div class="alarm-sub-text" id="alarmSubText">所有通道探头实时数值均低于安全阈值</div>
+                    </div>
+                </div>
+                <div class="gate-visual-box">
+                    <div class="gate-frame">
+                        <div class="person-avatar" id="personIcon">🚪</div>
+                    </div>
+                    <div class="passage-state-badge" id="passageBadge">🏃 通道空闲</div>
+                </div>
+            </div>
+
+            <div class="probes-section">
+                <div class="section-header" id="probeSectionTitle">探头实时计数率 (CPS)</div>
+                <div class="probes-grid" id="probesContainer"></div>
+            </div>
+        </div>
+
+        <div class="sidebar-section">
+            <div class="side-card" id="card_alarm">
+                <div class="side-card-title">
+                    <span id="resetCardTitle">报警与复位控制</span>
+                    <span id="sideHeaderTag" style="color:#10B981;">● 正常</span>
+                </div>
+                <div class="info-list">
+                    <div class="info-item"><span id="labelRadStatus">辐射状态</span><span class="info-value green" id="sideRadStat">全组正常</span></div>
+                    <div class="info-item"><span id="labelAlarmLatch">报警锁存</span><span class="info-value" id="alarmLatchStatus">无锁存</span></div>
+                </div>
+                <button class="reset-btn normal" id="resetBtn" onclick="handleReset()">
+                    <span id="resetIcon">↺</span>
+                    <span id="resetBtnText">通道报警复位</span>
+                </button>
+            </div>
+
+            <div class="side-card clickable-card" id="card_health" onclick="openPage('health')">
+                <div class="side-card-title">
+                    <span id="healthCardTitle">设备健康</span>
+                    <span id="healthStatusTag" style="color:#10B981;">正常</span>
+                </div>
+                <div class="kv-list">
+                    <div class="kv-row"><span class="kv-key" id="kvProbeComm">探头通信</span><span class="kv-val green" id="healthProbeComm">2/2 在线</span></div>
+                    <div class="kv-row"><span class="kv-key" id="kvIrStatus">红外状态</span><span class="kv-val green" id="healthIrStatus">正常</span></div>
+                    <div class="kv-row"><span class="kv-key" id="kvMasterHw">主控硬件</span><span class="kv-val green" id="healthMasterHw">正常</span></div>
+                </div>
+            </div>
+
+            <div class="side-card clickable-card" id="card_fault" onclick="openPage('fault')">
+                <div class="side-card-title">
+                    <span id="faultCardTitle">故障摘要</span>
+                    <span id="faultCountTag" style="color:#10B981;">0 活动故障</span>
+                </div>
+                <div class="kv-list">
+                    <div class="kv-row"><span class="kv-key" id="kvLastFault">最近故障</span><span class="kv-val" id="lastFaultText">无未处理故障</span></div>
+                    <div class="kv-row"><span class="kv-key" id="kvIrShield">红外屏蔽</span><span class="kv-val green" id="faultIrShield">无</span></div>
+                </div>
+            </div>
+
+            <div class="debug-bar">
+                <div style="font-size:11px; color:#666; font-weight:bold;">现场模拟调试:</div>
+                <div class="debug-btn-group">
+                    <button class="debug-btn" onclick="setProbeCount(2)">2 探头</button>
+                    <button class="debug-btn" onclick="setProbeCount(4)">4 探头</button>
+                    <button class="debug-btn" onclick="triggerPassage()">模拟通行</button>
+                    <button class="debug-btn alarm-btn" onclick="triggerAlarm()">模拟超限</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="page-modal" id="pageModal">
+        <div class="modal-box">
+            <div class="modal-header">
+                <div class="modal-title" id="modalTitle">详情</div>
+                <button class="close-btn" onclick="closePage()">X</button>
+            </div>
+            <div class="modal-body" id="modalBody"></div>
+        </div>
+    </div>
+
+    <script>
+        let bridge = null;
+        let embedded = false;
+        var canNavigate = false;
+        let probes = [
+            { id: 1, name: '1 号探头', location: '左侧 · 上', cps: 0, threshold: 1000, isAlarm: false, online: true, clientId: null },
+            { id: 2, name: '2 号探头', location: '右侧 · 上', cps: 0, threshold: 1000, isAlarm: false, online: true, clientId: null },
+            { id: 3, name: '3 号探头', location: '左侧 · 下', cps: 0, threshold: 1000, isAlarm: false, online: true, clientId: null },
+            { id: 4, name: '4 号探头', location: '右侧 · 下', cps: 0, threshold: 1000, isAlarm: false, online: true, clientId: null }
+        ];
+        let activeCount = 2;
+        let isPassing = false;
+
+        function $(id) { return document.getElementById(id); }
+
+        var UI = {
+            probeOk: 'OK', probeAlarm: 'ALARM', probeOffline: 'OFF',
+            resetBtn: '', resetBtnActive: '', sideTagOk: '', sideTagAlarm: '',
+            latchNone: '', latchPending: '', vacant: '', passing: '', clickDetail: 'Details >'
+        };
+
+        function applyUiLabels(ui) {
+            if (!ui) return;
+            for (var k in ui) { if (Object.prototype.hasOwnProperty.call(ui, k)) UI[k] = ui[k]; }
+            var map = [
+                ['systemTitle', 'title'], ['modeBadge', 'mode'], ['totalCpsLabel', 'totalCpsLabel'],
+                ['probeSectionTitle', 'probeSection'], ['resetCardTitle', 'resetTitle'],
+                ['labelRadStatus', 'radStatus'], ['labelAlarmLatch', 'alarmLatch'],
+                ['healthCardTitle', 'healthTitle'], ['faultCardTitle', 'faultTitle'],
+                ['kvProbeComm', 'kvProbeComm'], ['kvIrStatus', 'kvIrStatus'], ['kvMasterHw', 'kvMasterHw'],
+                ['kvLastFault', 'kvLastFault'], ['kvIrShield', 'kvIrShield'],
+                ['detailLinkHealth', 'clickDetail'], ['detailLinkFault', 'clickDetail']
+            ];
+            for (var i = 0; i < map.length; i++) {
+                var el = $(map[i][0]);
+                if (el && UI[map[i][1]]) el.innerText = UI[map[i][1]];
+            }
+            var titleEl = $('systemTitle');
+            if (titleEl && UI.titleTip) titleEl.title = UI.titleTip;
+            document.documentElement.style.setProperty('--detail-hint', UI.clickDetail || 'Details >');
+            if (UI.title) document.title = UI.title;
+        }
+
+        var canReorder = false;
+        var _drag = { from: -1, active: false, moved: false, startX: 0, startY: 0, el: null };
+
+        function renderProbes() {
+            const container = $('probesContainer');
+            container.innerHTML = '';
+            const current = probes.slice(0, activeCount);
+            let total = 0;
+            current.forEach((probe, index) => {
+                total += Number(probe.cps) || 0;
+                const card = document.createElement('div');
+                let cls = 'original-probe-card';
+                if (probe.isAlarm) cls += ' alarm';
+                else if (!probe.online) cls += ' offline';
+                card.className = cls;
+                card.dataset.index = String(index);
+                const stateHtml = probe.isAlarm
+                    ? '<span class="dot alarm"></span><span class="status-text-red">' + UI.probeAlarm + '</span>'
+                    : (probe.online
+                        ? '<span class="dot"></span><span class="status-text-green">' + UI.probeOk + '</span>'
+                        : '<span class="dot offline"></span><span>' + UI.probeOffline + '</span>');
+                const cpsShow = (probe.online || probe.cps) ? probe.cps : '--';
+                card.innerHTML =
+                    '<div class="probe-head">' +
+                    '<span class="probe-name">' + probe.name + '</span>' +
+                    '<span class="probe-location-tag">' + (probe.location || '') + '</span>' +
+                    '</div>' +
+                    '<div class="probe-body">' +
+                    '<div class="probe-num">' + cpsShow + '</div>' +
+                    '<div class="probe-unit-label">CPS</div>' +
+                    '</div>' +
+                    '<div class="probe-foot">' +
+                    '<div class="status-indicator">' + stateHtml + '</div>' +
+                    '</div>';
+                bindProbeCardInteractions(card, index, probe);
+                container.appendChild(card);
+            });
+            if (!embedded) $('totalCps').innerText = total;
+        }
+
+        function clearDragOver() {
+            var nodes = document.querySelectorAll('.original-probe-card.drag-over');
+            for (var i = 0; i < nodes.length; i++) nodes[i].classList.remove('drag-over');
+        }
+
+        function bindProbeCardInteractions(card, index, probe) {
+            card.addEventListener('pointerdown', function (ev) {
+                if (!canReorder) return;
+                if (ev.button != null && ev.button !== 0) return;
+                _drag.from = index;
+                _drag.active = true;
+                _drag.moved = false;
+                _drag.startX = ev.clientX;
+                _drag.startY = ev.clientY;
+                _drag.el = card;
+                try { card.setPointerCapture(ev.pointerId); } catch (e) {}
+            });
+            card.addEventListener('pointermove', function (ev) {
+                if (!_drag.active || _drag.from < 0) return;
+                var dx = ev.clientX - _drag.startX;
+                var dy = ev.clientY - _drag.startY;
+                if (!_drag.moved && (dx * dx + dy * dy) < 64) return;
+                _drag.moved = true;
+                if (_drag.el) _drag.el.classList.add('dragging');
+                clearDragOver();
+                var under = document.elementFromPoint(ev.clientX, ev.clientY);
+                while (under && under !== document.body && !under.classList.contains('original-probe-card')) {
+                    under = under.parentElement;
+                }
+                if (under && under.classList.contains('original-probe-card') && under !== _drag.el) {
+                    under.classList.add('drag-over');
+                }
+            });
+            function endDrag(ev) {
+                if (!_drag.active) return;
+                var from = _drag.from;
+                var moved = _drag.moved;
+                var src = _drag.el;
+                _drag.active = false;
+                _drag.from = -1;
+                if (src) src.classList.remove('dragging');
+                clearDragOver();
+                try { if (src) src.releasePointerCapture(ev.pointerId); } catch (e) {}
+                if (!moved) {
+                    if (canNavigate && bridge && bridge.openProbe) {
+                        bridge.openProbe(index, probe.clientId || '');
+                    }
+                    return;
+                }
+                var under = document.elementFromPoint(ev.clientX, ev.clientY);
+                while (under && under !== document.body && !under.classList.contains('original-probe-card')) {
+                    under = under.parentElement;
+                }
+                if (!under || !under.dataset || under === src) return;
+                var to = parseInt(under.dataset.index, 10);
+                if (isNaN(to) || to === from) return;
+                var tmp = probes[from];
+                probes[from] = probes[to];
+                probes[to] = tmp;
+                renderProbes();
+                if (bridge && bridge.reorderProbes) bridge.reorderProbes(from, to);
+            }
+            card.addEventListener('pointerup', endDrag);
+            card.addEventListener('pointercancel', endDrag);
+        }
+
+        function setProbeCount(count) {
+            activeCount = count;
+            renderProbes();
+        }
+
+        function triggerPassage() {
+            if (isPassing) return;
+            isPassing = true;
+            $('personIcon').classList.add('passing');
+            $('personIcon').innerText = '🚶';
+            const badge = $('passageBadge');
+            badge.className = 'passage-state-badge active';
+            badge.innerText = '🏃 人员正在通行';
+            setTimeout(function () {
+                $('personIcon').classList.remove('passing');
+                $('personIcon').innerText = '🚪';
+                badge.className = 'passage-state-badge';
+                badge.innerText = '🏃 通道空闲';
+                isPassing = false;
+            }, 3000);
+        }
+
+        function setPassage(busy, text) {
+            isPassing = !!busy;
+            const badge = $('passageBadge');
+            const icon = $('personIcon');
+            if (busy) {
+                icon.classList.add('passing');
+                icon.innerText = '🚶';
+                badge.className = 'passage-state-badge active';
+                badge.innerText = text || ('🏃 ' + (UI.passing || ''));
+            } else {
+                icon.classList.remove('passing');
+                icon.innerText = '🚪';
+                badge.className = 'passage-state-badge';
+                badge.innerText = text || ('🏃 ' + (UI.vacant || ''));
+            }
+        }
+
+        function setResetStyle(active, enabled) {
+            const btn = $('resetBtn');
+            if (active) {
+                btn.className = 'reset-btn active';
+                $('resetIcon').innerText = '\u26a0';
+                $('resetBtnText').innerText = UI.resetBtnActive;
+                $('sideHeaderTag').innerText = UI.sideTagAlarm;
+                $('sideHeaderTag').style.color = '#FF4D4D';
+                $('alarmLatchStatus').innerText = UI.latchPending;
+                $('alarmLatchStatus').style.color = '#FF4D4D';
+            } else {
+                btn.className = 'reset-btn normal';
+                $('resetIcon').innerText = '\u21ba';
+                $('resetBtnText').innerText = UI.resetBtn;
+                $('sideHeaderTag').innerText = UI.sideTagOk;
+                $('sideHeaderTag').style.color = '#10B981';
+                $('alarmLatchStatus').innerText = UI.latchNone;
+                $('alarmLatchStatus').style.color = '#DDD';
+            }
+            btn.disabled = (enabled === false);
+        }
+
+
+                function layoutSidebarCards() {
+            var cards = [
+                document.getElementById('card_alarm'),
+                document.getElementById('card_health'),
+                document.getElementById('card_fault')
+            ];
+            cards.forEach(function (el) {
+                if (!el) return;
+                el.style.removeProperty('height');
+                el.style.removeProperty('max-height');
+                el.style.removeProperty('min-height');
+                el.style.setProperty('flex', '1 1 0%', 'important');
+                el.style.setProperty('overflow', 'hidden', 'important');
+            });
+        }
+
+        function setAlarmBanner(state) {
+            const banner = $('alarmBanner');
+            const header = $('mainHeader');
+            banner.className = 'master-alarm-banner';
+            header.className = 'header';
+            if (state === 'alarm') {
+                banner.classList.add('alarm');
+                header.classList.add('global-alarm');
+                $('alarmIcon').innerHTML = "<svg viewBox='0 0 24 24' fill='none' xmlns='http://www.w3.org/2000/svg'><path d='M12 3L22 20H2L12 3Z' fill='#EF4444' stroke='#FFAAAA' stroke-width='1.2'/><path d='M12 9V14' stroke='#fff' stroke-width='2.2' stroke-linecap='round'/><circle cx='12' cy='17.2' r='1.2' fill='#fff'/></svg>";
+            } else if (state === 'warn' || state === 'offline') {
+                banner.classList.add('warn');
+                $('alarmIcon').innerHTML = "<svg viewBox='0 0 24 24' fill='none' xmlns='http://www.w3.org/2000/svg'><path d='M12 3L22 20H2L12 3Z' fill='#F59E0B' stroke='#FDE68A' stroke-width='1.2'/><path d='M12 9V14' stroke='#111' stroke-width='2.2' stroke-linecap='round'/><circle cx='12' cy='17.2' r='1.2' fill='#111'/></svg>";
+            } else {
+                $('alarmIcon').innerHTML = "<svg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'><circle cx='12' cy='12' r='10' fill='#059669'/><path d='M7 12.5l3 3 7-7' stroke='#fff' stroke-width='2.4' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>";
+            }
+        }
+
+        function triggerAlarm() {
+            probes[0].cps = 3240;
+            probes[0].isAlarm = true;
+            setAlarmBanner('alarm');
+            $('alarmText').innerText = '危险：1号探头辐射计数率超限！';
+            $('alarmSubText').innerText = '当前数值 3240 CPS（已超出阈值 1000 CPS），请立即核查！';
+            $('sideRadStat').innerText = '1号探头超限';
+            $('sideRadStat').className = 'info-value red-flash';
+            setResetStyle(true, true);
+            renderProbes();
+        }
+
+        function handleReset() {
+            if (bridge && bridge.requestReset) {
+                bridge.requestReset();
+                return;
+            }
+            probes[0].cps = 402;
+            probes[0].isAlarm = false;
+            setAlarmBanner('normal');
+            $('alarmText').innerText = '通道辐射状态正常';
+            $('alarmSubText').innerText = '所有通道探头实时数值均低于安全阈值';
+            $('sideRadStat').innerText = '全组正常';
+            $('sideRadStat').className = 'info-value green';
+            setResetStyle(false, false);
+            renderProbes();
+        }
+
+        function openPage(pageType) {
+            if (!canNavigate) return;
+            if (bridge) {
+                if (pageType === 'health' && bridge.openHealth) { bridge.openHealth(); return; }
+                if (pageType === 'fault' && bridge.openFault) { bridge.openFault(); return; }
+            }
+        }
+        function closePage() { $('pageModal').classList.remove('active'); }
+
+
+        /** Python demo / backend: updateCpsData(cps1, cps2, ...) */
+        window.updateCpsData = function () {
+            var args = Array.prototype.slice.call(arguments);
+            if (!args.length) return;
+            for (var i = 0; i < args.length; i++) {
+                if (!probes[i]) {
+                    probes[i] = {
+                        id: i + 1,
+                        name: 'Probe ' + (i + 1),
+                        location: '',
+                        cps: 0,
+                        threshold: 1000,
+                        isAlarm: false,
+                        online: true,
+                        clientId: null
+                    };
+                }
+                probes[i].cps = Number(args[i]) || 0;
+                probes[i].online = true;
+            }
+            activeCount = Math.max(activeCount, args.length);
+            var total = 0;
+            for (var j = 0; j < activeCount; j++) total += Number(probes[j].cps) || 0;
+            var el = document.getElementById('totalCps');
+            if (el) el.innerText = total;
+            renderProbes();
+        };
+
+        /** Alias for simple demos: updateData(cps1, cps2) */
+        window.updateData = function (cps1, cps2) {
+            return window.updateCpsData(cps1, cps2);
+        };
+
+        window.applyHmiState = function (state) {
+            if (!state) return;
+            embedded = true;
+            document.body.classList.add('embedded');
+            setTimeout(layoutSidebarCards, 0);
+
+            if (state.ui) applyUiLabels(state.ui);
+            canNavigate = !!state.canNavigate;
+            canReorder = !!state.canReorder;
+            document.body.classList.toggle('nav-enabled', canNavigate);
+            document.body.classList.toggle('can-reorder', canReorder);
+            var ghost = $('ghostLogin');
+            if (ghost) ghost.style.display = canNavigate ? 'none' : '';
+            if (state.modeLabel) { var mb0 = $('modeBadge'); if (mb0) mb0.innerText = state.modeLabel; }
+
+            if (state.totalCps != null) $('totalCps').innerText = state.totalCps;
+            if (state.masterLink) {
+                const el = $('masterLink');
+                el.innerText = state.masterLink.text || '';
+                el.className = 'status-online';
+                if (state.masterLink.level === 'warn') el.classList.add('status-warn');
+                if (state.masterLink.level === 'offline') el.classList.add('status-offline');
+            }
+            if (Array.isArray(state.probes)) {
+                probes = state.probes.map(function (p, i) {
+                    return {
+                        id: i + 1,
+                        name: p.name || ('Probe ' + (i + 1)),
+                        location: p.location || '',
+                        cps: p.cps || 0,
+                        threshold: p.threshold || 1000,
+                        isAlarm: !!p.isAlarm,
+                        online: p.online !== false,
+                        clientId: p.clientId || null
+                    };
+                });
+                activeCount = probes.length;
+                renderProbes();
+            }
+            if (state.alarm) {
+                setAlarmBanner(state.alarm.kind || 'normal');
+                if (state.alarm.title) $('alarmText').innerText = state.alarm.title;
+                if (state.alarm.desc) $('alarmSubText').innerText = state.alarm.desc;
+                if (state.alarm.sideRad) {
+                    $('sideRadStat').innerText = state.alarm.sideRad;
+                    $('sideRadStat').className = state.alarm.latched ? 'info-value red-flash' : 'info-value green';
+                }
+                setResetStyle(!!state.alarm.latched, state.alarm.resetEnabled !== false && !!state.alarm.latched);
+            }
+            if (state.passage) setPassage(!!state.passage.busy, state.passage.text);
+            if (state.health) {
+                var hs = state.health.status || '';
+                if (state.health.warn && hs && hs.indexOf('\u26a0') < 0) hs = '\u26a0 ' + hs;
+                $('healthStatusTag').innerText = hs;
+                $('healthStatusTag').style.color = state.health.color || '#10B981';
+                var rows = state.health.rows || {};
+                function setKv(id, text, tone) {
+                    var el = $(id);
+                    if (!el) return;
+                    el.innerText = text || '';
+                    el.className = 'kv-val' + (tone ? (' ' + tone) : '');
+                }
+                setKv('healthProbeComm', rows.probeComm || '', rows.probeTone || 'green');
+                setKv('healthIrStatus', rows.irStatus || '', rows.irTone || 'green');
+                setKv('healthMasterHw', rows.masterHw || '', rows.masterTone || 'green');
+                $('card_health').className = 'side-card clickable-card' + (state.health.warn ? ' warn' : '');
+            }
+            if (state.fault) {
+                $('faultCountTag').innerText = state.fault.status || '';
+                $('faultCountTag').style.color = state.fault.color || '#10B981';
+                var frows = state.fault.rows || {};
+                var lastEl = $('lastFaultText');
+                if (lastEl) {
+                    lastEl.innerText = frows.lastFault || state.fault.desc || '';
+                    lastEl.className = 'kv-val' + (frows.lastTone ? (' ' + frows.lastTone) : '');
+                }
+                var irEl = $('faultIrShield');
+                if (irEl) {
+                    irEl.innerText = frows.irShield || '';
+                    irEl.className = 'kv-val' + (frows.irTone ? (' ' + frows.irTone) : '');
+                }
+                $('card_fault').className = 'side-card clickable-card' + (state.fault.warn ? ' warn' : '');
+            }
+
+            if (state.battery != null) {
+                var b = $('batteryTag');
+                if (b) b.innerText = state.battery;
+            }
+            if (state.langLabel) {
+                var lb = $('langBtn');
+                if (lb) lb.innerText = state.langLabel;
+            }
+            if (state.modeLabel) {
+                var mb = $('modeBadge');
+                if (mb) mb.innerText = state.modeLabel;
+            }
+        };
+
+
+        function toggleLang() {
+            if (bridge && bridge.toggleLanguage) bridge.toggleLanguage();
+        }
+
+        function doLogin() {
+            if (bridge && bridge.requestLogin) bridge.requestLogin();
+        }
+
+        function initBridge() {
+            if (typeof qt === 'undefined' || !qt.webChannelTransport) return;
+            new QWebChannel(qt.webChannelTransport, function (channel) {
+                bridge = channel.objects.bridge;
+                document.body.classList.add('embedded');
+                embedded = true;
+                layoutSidebarCards();
+                window.addEventListener('resize', layoutSidebarCards);
+                if (bridge && bridge.pageReady) bridge.pageReady();
+            });
+        }
+
+        $('systemTitle').addEventListener('dblclick', function () {
+            if (bridge && bridge.requestLogin) bridge.requestLogin();
+        });
+
+        setInterval(function () {
+            const now = new Date();
+            function pad(n) { return n < 10 ? '0' + n : '' + n; }
+            $('clock').innerText = pad(now.getHours()) + ':' + pad(now.getMinutes()) + ':' + pad(now.getSeconds());
+        }, 1000);
+
+        renderProbes();
+        initBridge();
+    </script>
+</body>
+</html>
