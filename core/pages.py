@@ -861,19 +861,6 @@ class ClientsPage(QWidget):
         """)
         left_layout.addWidget(alarm_label)
 
-        # Occupancy status
-        occupancy_status = data.get('occupancy', False)
-        occupancy_label = QLabel(_t("probe_occ_active") if occupancy_status else _t("probe_occ_normal"))
-        occupancy_label.setStyleSheet(f"""
-            QLabel {{
-                color: {'#ffb74d' if occupancy_status else '#4caf50'};
-                font-size: 14px;
-                font-weight: bold;
-                margin-top: 2px;
-            }}
-        """)
-        left_layout.addWidget(occupancy_label)
-
         # Faults status
         faults_label = QLabel(_t("probe_faults_normal"))
         faults_label.setStyleSheet("""
@@ -1011,7 +998,6 @@ class ClientsPage(QWidget):
             'sensitivity': sensitivity_value,
             'status': status_label,
             'alarm': alarm_label,
-            'occupancy': occupancy_label,
             'faults': faults_label
         }
         
@@ -1050,18 +1036,6 @@ class ClientsPage(QWidget):
         labels['alarm'].setStyleSheet(f"""
             QLabel {{
                 color: {'#ff4444' if alarm_status else '#4caf50'};
-                font-size: 12px;
-                font-weight: bold;
-                margin-top: 5px;
-            }}
-        """)
-
-        # Update occupancy status
-        occupancy_status = data.get('occupancy', False)
-        labels['occupancy'].setText(_t("probe_occ_active") if occupancy_status else _t("probe_occ_normal"))
-        labels['occupancy'].setStyleSheet(f"""
-            QLabel {{
-                color: {'#ffb74d' if occupancy_status else '#4caf50'};
                 font-size: 12px;
                 font-weight: bold;
                 margin-top: 5px;

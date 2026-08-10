@@ -475,7 +475,7 @@ class BottomNavBar(QWidget):
             "overview": "#4a9eff",      # 蓝色 - 原实时概览
             "spectrum": "#4caf50",      # 绿色
             "clients": "#ff9800",       # 橙色
-            "alarm_log": "#f44336",     # 红色
+            "alarm_log": "#ef9a9a",     # 浅红：日志入口，非「当前有报警」
             "settings": "#9c27b0"       # 紫色
         }
         
@@ -519,6 +519,26 @@ class BottomNavBar(QWidget):
         self.clients_btn = self.buttons[3]
         self.alarm_log_btn = self.buttons[4]
         self.settings_btn = self.buttons[5]
+        self._active_index = 0
+        self._alarm_log_badge = False
+
+    def _alarm_log_icon_tag(self):
+        return "alarm_log_alert" if self._alarm_log_badge else "alarm_log"
+
+    def set_alarm_log_badge(self, active: bool):
+        """有活动报警时显示铃铛红点；平时无角标。"""
+        active = bool(active)
+        if active == getattr(self, "_alarm_log_badge", False):
+            return
+        self._alarm_log_badge = active
+        if len(self.button_widgets) < 5:
+            return
+        widget = self.button_widgets[4]
+        widget.icon_tag = self._alarm_log_icon_tag()
+        if self._active_index == 4:
+            self._apply_active_style(widget, widget.icon_tag, widget.theme_color)
+        else:
+            self._apply_inactive_style(widget, widget.icon_tag)
     
     def create_nav_button(self, text, icon_tag, color, active=False):
         """Create a navigation button with SVG icon"""
@@ -698,7 +718,11 @@ class BottomNavBar(QWidget):
     
     def set_active_button(self, index):
         """Set the active button"""
+        self._active_index = index
         for i, widget in enumerate(self.button_widgets):
+            # 报警日志图标跟活动报警角标同步
+            if i == 4:
+                widget.icon_tag = self._alarm_log_icon_tag()
             if i == index:
                 self._apply_active_style(widget, widget.icon_tag, widget.theme_color)
             else:
@@ -715,8 +739,9 @@ class BottomNavBar(QWidget):
             if i < len(nav_keys):
                 new_text = _t(nav_keys[i])
                 widget.text_label.setText(new_text)
-                # Re-apply styling to update text color and icons properly
-                if widget.styleSheet() and "rgba" in widget.styleSheet():
+                if i == 4:
+                    widget.icon_tag = self._alarm_log_icon_tag()
+                if getattr(self, "_active_index", -1) == i:
                     self._apply_active_style(widget, widget.icon_tag, widget.theme_color)
                 else:
                     self._apply_inactive_style(widget, widget.icon_tag)

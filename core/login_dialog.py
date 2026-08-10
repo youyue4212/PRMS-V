@@ -264,18 +264,18 @@ class LoginDialog(QDialog):
             pass
 
     def enable_login_virtual_keyboard(self):
-        """Enable virtual keyboard auto-trigger on login dialog."""
-        enable_env = os.environ.get("ENABLE_LOGIN_KEYBOARD", "1").strip()
+        """工控触摸屏：登录输入自动弹软键盘；普通电脑不弹。"""
+        enable_env = os.environ.get("ENABLE_LOGIN_KEYBOARD", "").strip()
         if enable_env == "0":
             return
-        # 主窗口已装全局过滤器时不再重复安装；启动时先弹登录则仍需本地过滤器
-        if str(os.environ.get("USE_SOFTWARE_KEYBOARD", "")).strip() == "1":
-            try:
-                app = QApplication.instance()
-                if app and any(w.__class__.__name__ == "MainWindow" for w in app.topLevelWidgets()):
-                    return
-            except Exception:
-                pass
+        try:
+            from core.software_keyboard import should_use_software_keyboard
+            need_kb = (enable_env == "1") or should_use_software_keyboard()
+        except Exception:
+            need_kb = enable_env == "1"
+        if not need_kb:
+            return
+        # 每次登录都装专用过滤器（强制开启），避免「第二次交给主窗却不弹」
         try:
             from core.ui_base import FocusEventFilter
             self._login_focus_filter = FocusEventFilter()

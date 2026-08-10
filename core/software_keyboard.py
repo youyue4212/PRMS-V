@@ -3,12 +3,90 @@
 软件键盘组件 - 作为onboard虚拟键盘的替代方案
 当onboard无法正常输入时，提供内置的软件数字键盘
 """
+import os
 import sys
 from PyQt5.QtWidgets import (QWidget, QGridLayout, QPushButton, QLineEdit, 
                              QVBoxLayout, QHBoxLayout, QLabel, QDialog, QApplication,
                              QSpinBox, QDoubleSpinBox)
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal
 from PyQt5.QtGui import QFont, QIcon
+
+
+def is_industrial_touch_host() -> bool:
+    """树莓派 / ARM 工控 / 触摸屏设备 → 需要软键盘。普通 Windows PC → False。"""
+    # 显式环境变量优先（启动脚本已设）
+    env = str(os.environ.get("USE_SOFTWARE_KEYBOARD", "")).strip()
+    if env == "1":
+        return True
+    if env == "0":
+        return False
+
+    # 树莓派 / ARM Linux 工控机
+    try:
+        if os.path.exists("/proc/device-tree/model"):
+            return True
+    except Exception:
+        pass
+    try:
+        if hasattr(os, "uname") and os.uname().machine.startswith(("arm", "aarch64")):
+            return True
+    except Exception:
+        pass
+
+    # Qt 检测到触摸屏
+    try:
+        from PyQt5.QtGui import QTouchDevice
+        for d in QTouchDevice.devices():
+            if d.type() == QTouchDevice.TouchScreen:
+                return True
+    except Exception:
+        pass
+
+    # Linux：输入设备名含 touch / goodix / ft5x 等
+    try:
+        path = "/proc/bus/input/devices"
+        if os.path.isfile(path):
+            with open(path, "r", encoding="utf-8", errors="ignore") as f:
+                text = f.read().lower()
+            for tip in ("touchscreen", "touch screen", "goodix", "ft5x", "edt-ft", "capacitive"):
+                if tip in text:
+                    return True
+    except Exception:
+        pass
+
+    return False
+
+
+def should_use_software_keyboard(settings=None) -> bool:
+    """
+    是否启用内置软键盘。
+    - USE_SOFTWARE_KEYBOARD=1/0 强制开关
+    - 设置页曾保存 SOFTWARE_KEYBOARD_ENABLED 则跟设置
+    - 否则：工控触摸屏自动开，普通电脑自动关
+    """
+    env = str(os.environ.get("USE_SOFTWARE_KEYBOARD", "")).strip()
+    if env == "1":
+        return True
+    if env == "0":
+        return False
+
+    try:
+        from PyQt5.QtCore import QSettings
+        qs = settings if settings is not None else QSettings("Raysen", "Spectrometer")
+        saved = qs.value("SOFTWARE_KEYBOARD_ENABLED", None)
+        if saved is not None:
+            if isinstance(saved, bool):
+                return saved
+            s = str(saved).strip().lower()
+            if s in ("1", "true", "yes"):
+                return True
+            if s in ("0", "false", "no"):
+                return False
+    except Exception:
+        pass
+
+    return is_industrial_touch_host()
+
 
 class SoftwareKeyboard(QDialog):
     """软件数字键盘对话框"""

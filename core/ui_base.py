@@ -51,13 +51,17 @@ class FocusEventFilter(QObject):
         self.last_trigger_time = 0
         self.platform = sys.platform
         self.keyboard_process = None  # 跟踪键盘进程
-        self.keyboard_enabled = False  # 默认禁用，避免导致树莓派注销
+        # 电脑默认关；工控触摸屏 / USE_SOFTWARE_KEYBOARD=1 自动开
+        try:
+            from core.software_keyboard import should_use_software_keyboard
+            self.keyboard_enabled = bool(should_use_software_keyboard())
+        except Exception:
+            self.keyboard_enabled = False
         self.current_focused_obj = None  # 当前获得焦点的输入控件
         self.debug_keyboard = str(os.environ.get('KEYBOARD_DEBUG', '')).strip() == '1'
-        # 软件键盘模式时强制启用触发
-        if str(os.environ.get('USE_SOFTWARE_KEYBOARD', '')).strip() == '1':
+        # 环境变量强制开时关掉系统 OSK，避免冲突
+        if self.keyboard_enabled or str(os.environ.get('USE_SOFTWARE_KEYBOARD', '')).strip() == '1':
             self.keyboard_enabled = True
-            # 关闭系统屏幕键盘，避免与内置键盘冲突
             try:
                 subprocess.run(['gsettings', 'set', 'org.gnome.desktop.a11y.applications', 'screen-keyboard-enabled', 'false'],
                                stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL, timeout=2)
@@ -1266,12 +1270,6 @@ class UIBase():
         ctrl_layout.addWidget(self.gain_stabilizer_label, 0, 1)
         ctrl_layout.addWidget(self.gain_stabilizer_btn, 0, 2)
 
-        # 占用传感器：未接线时关闭，避免 bit5 浮空导致“有人经过/人体感应故障”
-        self.occupancy_sensor_checkbox = QCheckBox(_t("set_occupancy_enable"))
-        self.occupancy_sensor_checkbox.setChecked(bool(getattr(self.config, 'occupancy_sensor_enabled', False)))
-        self.occupancy_sensor_checkbox.stateChanged.connect(self.on_occupancy_sensor_enabled_changed)
-        ctrl_layout.addWidget(self.occupancy_sensor_checkbox, 1, 0, 1, 3)
-
         # 期望探头数：在线不足则报缺；达到期望则清除旧离线故障（支持换 IP）
         self.expected_probe_label = QLabel(_t("set_expected_probes"))
         self.expected_probe_spin = QSpinBox()
@@ -1282,14 +1280,14 @@ class UIBase():
         self.adopt_probe_count_btn = QPushButton(_t("btn_adopt_probe_count"))
         self.adopt_probe_count_btn.setToolTip(_t("tip_adopt_probe_count"))
         self.adopt_probe_count_btn.clicked.connect(self.adopt_current_probe_count)
-        ctrl_layout.addWidget(self.expected_probe_label, 2, 0)
-        ctrl_layout.addWidget(self.expected_probe_spin, 2, 1)
-        ctrl_layout.addWidget(self.adopt_probe_count_btn, 2, 2)
+        ctrl_layout.addWidget(self.expected_probe_label, 1, 0)
+        ctrl_layout.addWidget(self.expected_probe_spin, 1, 1)
+        ctrl_layout.addWidget(self.adopt_probe_count_btn, 1, 2)
 
         # Home probe card location labels (slot 1..4)
         self.probe_locations_label = QLabel(_t("set_probe_locations"))
         self.probe_locations_label.setToolTip(_t("tip_probe_locations"))
-        ctrl_layout.addWidget(self.probe_locations_label, 3, 0, 1, 3)
+        ctrl_layout.addWidget(self.probe_locations_label, 2, 0, 1, 3)
         loc_wrap = QWidget()
         loc_row = QHBoxLayout(loc_wrap)
         loc_row.setContentsMargins(0, 0, 0, 0)
@@ -1318,7 +1316,7 @@ class UIBase():
             loc_row.addLayout(cell, 1)
             self.probe_location_edits.append(edit)
             self.probe_location_slot_labels.append(slot_lbl)
-        ctrl_layout.addWidget(loc_wrap, 4, 0, 1, 3)
+        ctrl_layout.addWidget(loc_wrap, 3, 0, 1, 3)
 
         # One-click factory parameter reset (command 0x14 → probe TCP/serial)
         self.factory_reset_label = QLabel(_t("set_factory_reset"))
@@ -1328,24 +1326,33 @@ class UIBase():
         self.reset_defaults_all_btn = QPushButton(_t("btn_reset_all"))
         self.reset_defaults_all_btn.setToolTip(_t("tip_reset_defaults"))
         self.reset_defaults_all_btn.clicked.connect(lambda: self.reset_factory_defaults(all_probes=True))
-        ctrl_layout.addWidget(self.factory_reset_label, 5, 0)
-        ctrl_layout.addWidget(self.reset_defaults_current_btn, 5, 1)
-        ctrl_layout.addWidget(self.reset_defaults_all_btn, 5, 2)
+        ctrl_layout.addWidget(self.factory_reset_label, 4, 0)
+        ctrl_layout.addWidget(self.reset_defaults_current_btn, 4, 1)
+        ctrl_layout.addWidget(self.reset_defaults_all_btn, 4, 2)
 
         settings_layout.addWidget(self.ctrl_group)
 
         # --- Virtual Keyboard Group ---
         self.keyboard_group = QGroupBox(_t("set_keyboard"))
         keyboard_layout = QGridLayout(self.keyboard_group)
-        
+
+        from core.software_keyboard import should_use_software_keyboard
+        kb_on = bool(should_use_software_keyboard())
         self.keyboard_enable_checkbox = QCheckBox(_t("set_keyboard_enable"))
-        self.keyboard_enable_checkbox.setChecked(False)
+        self.keyboard_enable_checkbox.setChecked(kb_on)
+        self.focus_filter.keyboard_enabled = kb_on
         self.keyboard_enable_checkbox.stateChanged.connect(self.toggle_virtual_keyboard)
         keyboard_layout.addWidget(self.keyboard_enable_checkbox, 0, 0, 1, 2)
-        
-        self.keyboard_status_label = QLabel(_t("status_disabled"))
+
+        self.keyboard_status_label = QLabel(
+            _t("status_enabled") if kb_on else _t("status_disabled")
+        )
+        if kb_on:
+            self.keyboard_status_label.setStyleSheet("color: green;")
+        else:
+            self.keyboard_status_label.setStyleSheet("color: gray;")
         keyboard_layout.addWidget(self.keyboard_status_label, 1, 0, 1, 2)
-        
+
         settings_layout.addWidget(self.keyboard_group)
 
         # --- Device Control and Status Group (根据参考代码添加) ---
@@ -1415,7 +1422,7 @@ class UIBase():
         device_layout.addWidget(self.alarm_status_label, 5, 1, 1, 3)
         device_layout.addWidget(self.alarm_read_btn, 5, 4)
         
-        # Occupancy Status (通道占用状态) - device_status bit5 (0=Free, 1=Occupied)
+        # Occupancy Status — 通道占用跟主控 L2（红外/雷达），不跟探头 bit5
         self.occupancy_status_label = QLabel("--")
         self.occupancy_title_label = QLabel(_t("set_occupancy"))
         device_layout.addWidget(self.occupancy_title_label, 6, 0)
@@ -2060,18 +2067,25 @@ class UIBase():
             self.log(f"Auto-save traceback: {traceback.format_exc()}", 'ERROR')
     
     def toggle_virtual_keyboard(self, state):
-        """切换虚拟键盘自动触发开关"""
+        """切换虚拟键盘自动触发开关（写入设置，电脑/工控可手动覆盖自动检测）。"""
+        from core.translation import _t
         enabled = state == Qt.Checked
         self.focus_filter.keyboard_enabled = enabled
-        
-        # 更新状态标签
+        try:
+            from PyQt5.QtCore import QSettings
+            QSettings("Raysen", "Spectrometer").setValue(
+                "SOFTWARE_KEYBOARD_ENABLED", bool(enabled)
+            )
+        except Exception:
+            pass
+
         if hasattr(self, 'keyboard_status_label'):
             if enabled:
-                self.keyboard_status_label.setText("Status: Enabled")
+                self.keyboard_status_label.setText(_t("status_enabled"))
                 self.keyboard_status_label.setStyleSheet("color: green;")
                 self.log("Virtual keyboard auto-trigger enabled", 'INFO')
             else:
-                self.keyboard_status_label.setText("Status: Disabled")
+                self.keyboard_status_label.setText(_t("status_disabled"))
                 self.keyboard_status_label.setStyleSheet("color: gray;")
                 self.log("Virtual keyboard auto-trigger disabled", 'INFO')
 
@@ -2902,18 +2916,6 @@ class UIBase():
         except ValueError:
             self.log(f"Invalid baudrate: {baudrate_text}", 'ERROR')
 
-    def on_occupancy_sensor_enabled_changed(self, state):
-        enabled = state == Qt.Checked
-        self.config.update_settings(occupancy_sensor_enabled=enabled)
-        self.config.save_settings()
-        self.log(f"Occupancy sensor {'enabled' if enabled else 'disabled'}", 'INFO')
-        # 关闭时清掉占用相关故障，避免残留 E501
-        if (not enabled and hasattr(self, 'diagnostics_manager')
-                and self.diagnostics_manager is not None):
-            for client_id in list(self.diagnostics_manager.active_faults.keys()):
-                self.diagnostics_manager.remove_fault(client_id, 'E501')
-                self.diagnostics_manager.occupancy_start_time.pop(client_id, None)
-
     def on_expected_probe_count_changed(self, value):
         self.apply_expected_probe_count(int(value), source="spinbox")
 
@@ -3569,20 +3571,6 @@ class UIBase():
             if self.alarm_status_callback is not None:
                 self.alarm_status_callback(remote_sig_alarm)
 
-            # 更新占用状态（device_status bit5: 0=Free, 1=Occupied）
-            if hasattr(self, 'occupancy_status_label'):
-                occupancy_enabled = bool(getattr(self.config, 'occupancy_sensor_enabled', False))
-                if not occupancy_enabled:
-                    self.occupancy_status_label.setText("Disabled")
-                    self.occupancy_status_label.setStyleSheet("background-color: #dddddd; color: #000000;")
-                else:
-                    is_occupied = (packet.device_status & 0b100000) != 0
-                    self.occupancy_status_label.setText("Occupied" if is_occupied else "Free")
-                    if is_occupied:
-                        self.occupancy_status_label.setStyleSheet("background-color: #ffe0b2; color: #000000;")
-                    else:
-                        self.occupancy_status_label.setStyleSheet("background-color: #ccffcc; color: #000000;")
-
             # 注意：报警事件的记录已移至 on_spectrum_packet_received，对每个客户端独立
             # 进行边沿检测与记录，不再受“仅主客户端”限制，确保多 IP 设备的报警都能进记录表。
 
@@ -3603,10 +3591,6 @@ class UIBase():
             'temp': packet.temperature / 100.0,  # 温度（°C）
             'last_update': current_time,
             'alarm': (packet.device_status & 0b10000) != 0,  # 报警状态
-            'occupancy': (
-                bool(getattr(self.config, 'occupancy_sensor_enabled', False))
-                and (packet.device_status & 0b100000) != 0
-            ),
             'client_id': client_id,
             'product_id': packet.product_id,
             'sensitivity': packet.sen_coef

@@ -115,14 +115,19 @@ def get_clients_svg():
     </svg>
     """
 
-def get_alarm_log_svg():
-    """SVG for alarm log icon (bell)"""
-    return """
+def get_alarm_log_svg(show_badge=False):
+    """报警日志铃铛。show_badge=True 时才显示红点（仅活动报警）。"""
+    badge = ""
+    if show_badge:
+        badge = """
+        <circle cx="18" cy="6" r="3.2" fill="#ff4444"/>
+        <circle cx="18" cy="6" r="4.2" fill="#ff4444" fill-opacity="0.25"/>
+        """
+    return f"""
     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
         <path d="M12 3c-1.7 0-3 1.3-3 3v5c0 1.1-.4 2.1-1.2 2.8l-1.8 1.7c-.3.3-.5.7-.5 1.1 0 .8.7 1.4 1.5 1.4h11c.8 0 1.5-.6 1.5-1.4 0-.4-.2-.8-.5-1.1l-1.8-1.7c-.8-.7-1.2-1.7-1.2-2.8V6c0-1.7-1.3-3-3-3z" fill="currentColor"/>
         <path d="M10 19c0 1.1.9 2 2 2s2-.9 2-2" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/>
-        <circle cx="18" cy="6" r="3" fill="#ff4444"/>
-        <text x="18" y="8" text-anchor="middle" font-size="6" fill="white" font-weight="bold">!</text>
+        {badge}
     </svg>
     """
 
@@ -212,7 +217,9 @@ def get_icon_svg(tag, w=14,h=14):
     elif tag == 'clients':
         svg=get_clients_svg().encode()
     elif tag == 'alarm_log':
-        svg=get_alarm_log_svg().encode()
+        svg=get_alarm_log_svg(show_badge=False).encode()
+    elif tag == 'alarm_log_alert':
+        svg=get_alarm_log_svg(show_badge=True).encode()
     elif tag == 'settings':
         svg=get_settings_svg().encode()
     elif tag == 'lock':

@@ -33,8 +33,8 @@ class FaultCode:
     # E4xx: Count Rate (CPS)
     E401 = "E401"  # 计数率突然大幅波动
 
-    # E5xx: Occupancy Sensor
-    E501 = "E501"  # 通道占用传感器异常 / 卡死
+    # E5xx: 探头占用传感器（已弃用，通道占用改由主控 GPIO；保留码表兼容旧日志）
+    E501 = "E501"
 
     MAP = {
         E101: ("探测器无数据", "配置的探测器未上报数据，请检查网络、IP设置或探测器供电", "ERROR", "探测器连接异常！请检查网线连接，或尝试断电重启设备。若仍异常，请联系维保人员。"),
@@ -47,7 +47,7 @@ class FaultCode:
         E303: ("温度传感器故障", "温度在短时间内出现大幅度跳变(>8°C)，可能传感器接触不良", "ERROR", "通道温度传感器故障 → 无法准确读取温度，请联系维保人员。"),
         E304: ("温度读数异常", "温度读数极值或恒定异常，可能温度传感器损坏", "WARNING", "通道温度传感器故障 → 无法准确读取温度，请联系维保人员。"),
         E401: ("计数率异常波动", "计数率(CPS)出现非正常的突发性大幅度波动，可能前端受电磁干扰", "WARNING", "探测器信号不稳定！请检查周边是否有强电磁干扰，或重启设备。"),
-        E501: ("占用传感器异常", "通道占用传感器状态持续异常或卡死，请检查接线", "WARNING", "通道人体感应故障 → 无法识别行人，暂停使用，请联系维保人员。"),
+        E501: ("占用传感器异常(已弃用)", "旧探头占用逻辑已停用；通道占用请检查主控红外/雷达接线", "WARNING", "通道占用已改由主控判定，请检查主控侧传感器。"),
         M101: ("主控无数据", "主控未连接或启动后长时间未收到主控数据", "ERROR", "主控未连接/无数据 → 无法进行通道硬报警判决，请检查主控供电、网络与固件。"),
         M102: ("主控通信中断", "主控已连接但超过超时时间未收到数据", "ERROR", "主控通信中断 → 通道硬报警判决暂停，请检查主控网络连接。"),
         M103: ("主控L2无效", "主控连接存在，但未收到有效L2（可能CRC错误或协议不匹配）", "ERROR", "主控L2无效 → 收到主控连接但无有效L2，请检查协议版本或CRC。"),
@@ -82,9 +82,6 @@ class DiagnosticsManager:
         # Track when acquisition started
         self.acquisition_start_time: Optional[float] = None
         self.is_acquiring = False
-        
-        # Occupancy stuck detection
-        self.occupancy_start_time: Dict[str, float] = {}
 
         # 本轮采集中曾同时在线的最大探头数；用于热替换后清除旧 IP 的粘性 E102
         self.peak_connected_count = 0
@@ -114,7 +111,6 @@ class DiagnosticsManager:
         self.hv_history.clear()
         self.cps_history.clear()
         self.last_packet_time.clear()
-        self.occupancy_start_time.clear()
         self.peak_connected_count = 0
         self.purged_offline_clients = []
         # 保留分探头高压设定（不随开停采集清空）
@@ -142,8 +138,6 @@ class DiagnosticsManager:
             del self.cps_history[client_id]
         if client_id in self.last_packet_time:
             del self.last_packet_time[client_id]
-        if client_id in self.occupancy_start_time:
-            del self.occupancy_start_time[client_id]
 
     def add_fault(self, client_id: str, code: str):
         self.register_client(client_id)
@@ -311,25 +305,8 @@ class DiagnosticsManager:
 
         self.cps_history[client_id].append(cps)
 
-        # 4. Occupancy Sensor (通道占用) Diagnostics
-        # device_status bit5: 0=Free, 1=Occupied
-        # 未接入传感器时 bit5 可能浮空误报；关闭开关后忽略占用与 E501
-        if not getattr(self.config, 'occupancy_sensor_enabled', False):
-            self.occupancy_start_time.pop(client_id, None)
-            self.remove_fault(client_id, FaultCode.E501)
-        else:
-            is_occupied = (packet.device_status & 0b100000) != 0
-            if is_occupied:
-                start_ts = self.occupancy_start_time.get(client_id)
-                # 仅在真正从空闲进入占用时开始计时；勿用 0.0 占位（会导致立刻误报 E501）
-                if not start_ts:
-                    self.occupancy_start_time[client_id] = now
-                elif now - start_ts > 300.0:
-                    # E501: Occupancy stuck (occupied for more than 5 minutes)
-                    self.add_fault(client_id, FaultCode.E501)
-            else:
-                self.occupancy_start_time.pop(client_id, None)
-                self.remove_fault(client_id, FaultCode.E501)
+        # 通道占用已改由主控 GPIO（L2 io_status）；不再根据探头 bit5 报 E501
+        self.remove_fault(client_id, FaultCode.E501)
 
         return list(self.active_faults[client_id].keys())
 
