@@ -47,6 +47,7 @@ from core.ui_components import StatusBar, DataCard, BottomNavBar, AcquisitionBut
 from core.diagnostics import FaultCode
 from core.pages import OverviewPage, SpectrumPage, SettingsPage, ClientsPage
 from core.home_page import HomePage
+from core.control_room_page import ControlRoomPage
 
 # 概览报警卡内说明区最多显示行数（超出部分在卡片内滚动，完整内容放 tooltip）
 _FAULT_DESC_MAX_LINES = 2
@@ -99,6 +100,10 @@ class MainWindow(QMainWindow, UIBase):
         
         # 初始化超时管理器
         self.timeout_manager = get_timeout_manager()
+
+        self.control_room_mode = (
+            str(getattr(self.config, "ui_mode", "tablet") or "tablet").lower() == "control_room"
+        )
         
         # Set window title based on user role
         from core.translation import _t
@@ -107,10 +112,15 @@ class MainWindow(QMainWindow, UIBase):
             role_name = "Admin" if current_user['role'] == UserRole.ADMIN else "User"
             self.setWindowTitle(f"Gamma-ray Spectrometer - {username} ({role_name})")
         else:
-            self.setWindowTitle(_t("home_title"))
+            self.setWindowTitle(
+                _t("control_room_title") if self.control_room_mode else _t("home_title")
+            )
         
         # 设置窗口初始大小，但不固定，允许外部控制全屏或调整大小
-        self.resize(1024, 600)
+        if self.control_room_mode:
+            self.resize(1440, 900)
+        else:
+            self.resize(1024, 600)
         self.setStyleSheet("QMainWindow { background-color: #1a1a1a; }")
 
         
@@ -124,6 +134,8 @@ class MainWindow(QMainWindow, UIBase):
         
         # Status bar - 添加用户信息显示
         self.status_bar = StatusBar()
+        if self.control_room_mode:
+            self.status_bar.setFixedHeight(46)
         if current_user and 'username' in current_user:
             self.status_bar.update_user_info(current_user['username'], current_user['role'])
         else:
@@ -131,18 +143,38 @@ class MainWindow(QMainWindow, UIBase):
         main_layout.addWidget(self.status_bar)
         
         # Stacked widget for pages
-        # 0: 主显示(免登录)  1: 原实时概览  2:能谱  3:诊断  4:报警日志  5:设置
+        # 0: 主显示(免登录) — 平板 HomePage / 主控室 ControlRoomPage
+        # 1: 原实时概览  2:能谱  3:诊断  4:报警日志  5:设置
         self.stacked_widget = QStackedWidget()
 
-        self.home_page = HomePage(self)
+        self.home_page = HomePage(self, headless=bool(self.control_room_mode))
         self.home_page.channel_reset_btn.clicked.connect(self.request_channel_alarm_reset)
+        self.control_room_page = ControlRoomPage(self)
+        self.control_room_page.probe_selected.connect(self._on_control_room_probe)
+        self.control_room_page.open_alarm_log.connect(lambda: self.switch_page(4))
+        self.control_room_page.reset_requested.connect(self.request_channel_alarm_reset)
+        self.control_room_page.login_requested.connect(lambda: self.login(preferred_page=0))
+        self.control_room_page.reorder_requested.connect(self._on_control_room_reorder)
         self.overview_page = OverviewPage(self)
         self.spectrum_page = SpectrumPage(self)
         self.clients_page = ClientsPage(self)
         self.alarm_log_page = AlarmLogPage(self)
         self.settings_page = SettingsPage(self)
 
-        self.stacked_widget.addWidget(self.home_page)
+        # Page 0 shell depends on UI mode (tablet vs control room).
+        # 未进栈的那一页若仍挂在 MainWindow 下，会在左上角露出残影（Web 滚动条/箭头）。
+        self._shell_stash = QWidget(self)
+        self._shell_stash.hide()
+        self._shell_stash.setFixedSize(0, 0)
+        self.primary_home_page = (
+            self.control_room_page if self.control_room_mode else self.home_page
+        )
+        unused_shell = (
+            self.home_page if self.control_room_mode else self.control_room_page
+        )
+        unused_shell.hide()
+        unused_shell.setParent(self._shell_stash)
+        self.stacked_widget.addWidget(self.primary_home_page)
         self.stacked_widget.addWidget(self.overview_page)
         self.stacked_widget.addWidget(self.spectrum_page)
         self.stacked_widget.addWidget(self.clients_page)
@@ -244,6 +276,8 @@ class MainWindow(QMainWindow, UIBase):
         
         # Bottom navigation
         self.bottom_nav = BottomNavBar()
+        if self.control_room_mode and hasattr(self.bottom_nav, "set_desktop_compact"):
+            self.bottom_nav.set_desktop_compact(True)
         self.bottom_nav.home_btn.clicked.connect(lambda: self.switch_page(0))
         self.bottom_nav.overview_btn.clicked.connect(lambda: self.switch_page(1))
         self.bottom_nav.spectrum_btn.clicked.connect(lambda: self.switch_page(2))
@@ -296,13 +330,23 @@ class MainWindow(QMainWindow, UIBase):
         # 根据用户权限更新UI（未登录=主显示监视模式）
         self.update_ui_for_user_role()
         for page in (
-            self.home_page, self.overview_page, self.spectrum_page,
+            self.home_page, self.control_room_page, self.overview_page, self.spectrum_page,
             self.clients_page, self.alarm_log_page, self.settings_page,
         ):
             if hasattr(page, "retranslate_ui"):
                 page.retranslate_ui()
         if hasattr(self.bottom_nav, "retranslate_ui"):
             self.bottom_nav.retranslate_ui()
+        self._apply_control_room_nav_labels()
+        if self.control_room_mode and hasattr(self, "control_room_page"):
+            self.control_room_page.set_login_visible(not self.is_logged_in())
+            self.control_room_page.set_reorder_enabled(self.is_logged_in())
+            self.control_room_page.set_alarm_polling(True)
+            self._refresh_control_room_snapshot()
+            if hasattr(self, "status_bar") and hasattr(self.status_bar, "set_battery_visible"):
+                self.status_bar.set_battery_visible(False)
+        elif hasattr(self, "control_room_page"):
+            self.control_room_page.set_alarm_polling(False)
         
         # 如果是管理员模式，启动超时计时器
         if self.current_user and self.current_user['role'] == UserRole.ADMIN:
@@ -416,9 +460,12 @@ class MainWindow(QMainWindow, UIBase):
         self.stacked_widget.setCurrentIndex(index)
         self.bottom_nav.set_active_button(index)
         if hasattr(self, "status_bar"):
-            # 主显示用 Web 单行顶栏；其它页恢复 Qt 状态栏
-            self.status_bar.setVisible(index != 0)
-            if index != 0 and hasattr(self.status_bar, "set_clock_visible"):
+            # 平板主显示用 Web 顶栏藏 Qt 状态栏；主控室模式始终显示状态栏
+            if getattr(self, "control_room_mode", False):
+                self.status_bar.setVisible(True)
+            else:
+                self.status_bar.setVisible(index != 0)
+            if self.status_bar.isVisible() and hasattr(self.status_bar, "set_clock_visible"):
                 self.status_bar.set_clock_visible(True)
         if not self.is_logged_in():
             self._apply_public_chrome(index)
@@ -428,27 +475,37 @@ class MainWindow(QMainWindow, UIBase):
                 self.on_master_summary_ui(self.latest_master_summary, self.master_client_id)
             else:
                 self._refresh_home_from_probes(self.client_data)
+            if getattr(self, "control_room_mode", False):
+                self._refresh_control_room_snapshot()
         if hasattr(self, "alarm_log_page") and hasattr(self.alarm_log_page, "update_auth_controls"):
             self.alarm_log_page.update_auth_controls()
         # 更新操作时间（重置超时计时器）
         self.update_operate_time()
 
     def _apply_public_chrome(self, index: int):
-        """公共模式 UI：主显示藏底栏；报警日志显示底栏便于返回。"""
+        """公共模式 UI：主显示藏底栏；报警日志显示底栏便于返回。主控室模式常显底栏。"""
         if self.is_logged_in():
             return
         self.button_container.setVisible(False)
         self.acquisition_btn.setVisible(False)
         self.save_data_btn.setVisible(False)
         self.user_management_btn.setVisible(False)
-        # 报警日志页：显示底栏 + 状态栏（可点回主显示）
-        show_nav = (index == 4)
+        # 主控室：公共模式也保留导航，便于看日志/回总览
+        if getattr(self, "control_room_mode", False):
+            show_nav = True
+            show_status = True
+        else:
+            show_nav = (index == 4)
+            show_status = (index == 4)
         self.bottom_nav.setVisible(show_nav)
         if hasattr(self, "status_bar"):
-            self.status_bar.setVisible(show_nav)
-            if show_nav:
+            self.status_bar.setVisible(show_status)
+            if show_status:
                 from core.translation import _t
                 self.status_bar.update_user_info(_t("status_public_readonly_log"), None)
+        if hasattr(self, "control_room_page"):
+            self.control_room_page.set_login_visible(True)
+            self.control_room_page.set_reorder_enabled(False)
     
     def clear_data(self):
         """Clear all data (spectrum, time series, etc.)"""
@@ -651,10 +708,134 @@ class MainWindow(QMainWindow, UIBase):
             page.update_probe_tiles_from_probe_list([], lang=lang)
             if not getattr(page, "_had_tile_data", False):
                 page.total_cps_label.setText("0")
+                self._sync_control_room_probes([], 0)
+            else:
+                # still refresh CR from last home entries if any
+                self._sync_control_room_from_home()
             return
         page.total_cps_label.setText("%d" % total)
         # master_online=True：CPS 已是正式显示源，不再标「(探头)」后缀
         page.update_probe_tiles_from_probe_list(entries, lang=lang, show_as_primary=True)
+        self._sync_control_room_probes(entries, total)
+
+    def _sync_control_room_probes(self, entries, total_cps=0):
+        if not getattr(self, "control_room_mode", False):
+            return
+        cr = getattr(self, "control_room_page", None)
+        if cr is None:
+            return
+        # Enrich location labels for display
+        enriched = []
+        for i, e in enumerate(entries or []):
+            row = dict(e)
+            if not row.get("location") and hasattr(self, "home_page"):
+                try:
+                    row["location"] = self.home_page._slot_location(i)
+                except Exception:
+                    row["location"] = ""
+            if not row.get("name"):
+                try:
+                    from core.translation import _t
+                    row["name"] = _t("probe_slot_name", n=i + 1)
+                except Exception:
+                    row["name"] = "Probe %d" % (i + 1)
+            enriched.append(row)
+        if not enriched and hasattr(self, "home_page"):
+            # placeholders
+            try:
+                n = self.home_page._expected_placeholder_count()
+            except Exception:
+                n = 2
+            from core.translation import _t
+            for i in range(n):
+                enriched.append({
+                    "name": _t("probe_slot_name", n=i + 1),
+                    "location": self.home_page._slot_location(i),
+                    "cps": 0, "online": False, "hit": False, "client_id": None,
+                })
+        cr.update_probes(enriched, total_cps=total_cps)
+
+    def _sync_control_room_from_home(self):
+        if not getattr(self, "control_room_mode", False):
+            return
+        page = getattr(self, "home_page", None)
+        cr = getattr(self, "control_room_page", None)
+        if page is None or cr is None:
+            return
+        entries = list(getattr(page, "_probe_entries", None) or [])
+        try:
+            total = int(str(page.total_cps_label.text()).split()[0])
+        except Exception:
+            total = sum(int(e.get("cps", 0) or 0) for e in entries)
+        self._sync_control_room_probes(entries, total)
+
+    def _refresh_control_room_snapshot(self):
+        """Push master link / alarm / occupancy / probes into control-room page."""
+        if not getattr(self, "control_room_mode", False):
+            return
+        cr = getattr(self, "control_room_page", None)
+        if cr is None:
+            return
+        page = getattr(self, "home_page", None)
+        if page is not None:
+            # master link text + level
+            text = page.master_link_label.text() if hasattr(page, "master_link_label") else "--"
+            level = "ok"
+            try:
+                level = page._link_level()
+            except Exception:
+                if "离线" in text or "Offline" in text:
+                    level = "offline"
+                elif "无L2" in text or "Linked" in text:
+                    level = "warn"
+            cr.set_master_link(text, level)
+            # channel alarm
+            active = bool(getattr(page, "_reset_alarm_active", False))
+            latch = ""
+            try:
+                latch = page.alarm_status_label.text()
+            except Exception:
+                pass
+            cr.set_channel_alarm(active, latch)
+            # occupancy
+            busy = bool(getattr(page, "_passage_busy", False))
+            st = page.occupancy_status_label.text() if hasattr(page, "occupancy_status_label") else "--"
+            desc = page.occupancy_desc_label.text() if hasattr(page, "occupancy_desc_label") else ""
+            cr.set_occupancy(busy, st, desc)
+        self._sync_control_room_from_home()
+        cr.refresh_alarm_sidebar()
+        cr.set_login_visible(not self.is_logged_in())
+        cr.set_reorder_enabled(self.is_logged_in())
+
+    def _on_control_room_reorder(self, from_index, to_index):
+        page = getattr(self, "home_page", None)
+        if page is None or not hasattr(page, "reorder_probes"):
+            return
+        if not self.is_logged_in():
+            if not self.login(preferred_page=0, required_for_page=True):
+                return
+        page.reorder_probes(from_index, to_index)
+        self._sync_control_room_from_home()
+
+    def _on_control_room_probe(self, client_id):
+        if not self.is_logged_in():
+            # login() 成功会先切到 preferred_page；随后仍要打开对应探头
+            if not self.login(preferred_page=1, required_for_page=True):
+                return
+        self.open_probe_overview(client_id)
+
+    def _apply_control_room_nav_labels(self):
+        if not getattr(self, "control_room_mode", False):
+            return
+        if not hasattr(self, "bottom_nav") or not self.bottom_nav.button_widgets:
+            return
+        from core.translation import _t
+        widget = self.bottom_nav.button_widgets[0]
+        widget.text_label.setText(_t("nav_control_room"))
+        if getattr(self.bottom_nav, "_active_index", -1) == 0:
+            self.bottom_nav._apply_active_style(widget, widget.icon_tag, widget.theme_color)
+        else:
+            self.bottom_nav._apply_inactive_style(widget, widget.icon_tag)
 
     def _set_home_aux_card_border(self, card, bar, color=None):
         page = self.home_page
@@ -942,6 +1123,8 @@ class MainWindow(QMainWindow, UIBase):
         self._update_home_alarm_from_master(None, lang=lang, master_offline=True)
         self._update_home_occupancy(None, lang=lang, master_offline=True)
         self._update_home_health_and_faults()
+        if getattr(self, "control_room_mode", False):
+            self._refresh_control_room_snapshot()
 
     def on_master_summary_ui(self, packet, client_id=None):
         """Refresh home alarm/channel from Master L2; CPS stays on probe spectrum."""
@@ -1003,6 +1186,8 @@ class MainWindow(QMainWindow, UIBase):
             self._update_home_occupancy(None, lang=lang, master_offline=True)
             self._update_overview_occupancy_from_master(None, master_offline=True)
             self._update_settings_occupancy_from_master(None, master_offline=True)
+            if getattr(self, "control_room_mode", False):
+                self._refresh_control_room_snapshot()
             return
 
         # decision 边沿日志，便于确认主控是否已离开 0x01
@@ -1042,6 +1227,8 @@ class MainWindow(QMainWindow, UIBase):
         self._update_overview_occupancy_from_master(display_pkt)
         self._update_settings_occupancy_from_master(display_pkt)
         self._update_home_health_and_faults()
+        if getattr(self, "control_room_mode", False):
+            self._refresh_control_room_snapshot()
 
     def _sync_master_relay_ui_from_l2(self, packet):
         """设置页主控继电器勾选/状态跟 L2 bit4/5/6（有 pending 命令时跳过，避免打架）。"""
@@ -2121,14 +2308,19 @@ class MainWindow(QMainWindow, UIBase):
         self.timeout_manager.stop_timer()
         self.status_bar.hide_timeout_display()
         self.status_bar.update_user_info(_t("status_public_mode"), None)
-        # 主显示：隐藏整条 Qt 状态栏，改用 Web Header 单行（含时钟/电量/EN）
-        self.status_bar.setVisible(False)
-        self.setWindowTitle(_t("home_title"))
+        if getattr(self, "control_room_mode", False):
+            self.status_bar.setVisible(True)
+            self.setWindowTitle(_t("control_room_title"))
+            self.bottom_nav.setVisible(True)
+        else:
+            # 主显示：隐藏整条 Qt 状态栏，改用 Web Header 单行（含时钟/电量/EN）
+            self.status_bar.setVisible(False)
+            self.setWindowTitle(_t("home_title"))
+            self.bottom_nav.setVisible(False)
         self.stacked_widget.setCurrentIndex(0)
         self.bottom_nav.set_active_button(0)
-        # 主显示保持整洁：藏顶栏按钮；底栏仅报警日志页再显示
+        # 主显示保持整洁：藏顶栏按钮；底栏仅报警日志页再显示（主控室除外）
         self.button_container.setVisible(False)
-        self.bottom_nav.setVisible(False)
         self.acquisition_btn.setVisible(False)
         self.save_data_btn.setVisible(False)
         self.user_management_btn.setVisible(False)
@@ -2155,6 +2347,9 @@ class MainWindow(QMainWindow, UIBase):
             self.home_page.schedule_web_flush()
         if hasattr(self, "alarm_log_page") and hasattr(self.alarm_log_page, "update_auth_controls"):
             self.alarm_log_page.update_auth_controls()
+        if getattr(self, "control_room_mode", False):
+            self._refresh_control_room_snapshot()
+            self._apply_control_room_nav_labels()
 
     def update_ui_for_user_role(self):
         """根据用户角色更新UI"""
@@ -2171,9 +2366,15 @@ class MainWindow(QMainWindow, UIBase):
         self.logout_btn.setVisible(True)
         if hasattr(self, "status_bar"):
             on_home = self.stacked_widget.currentIndex() == 0
-            self.status_bar.setVisible(not on_home)
-            if not on_home and hasattr(self.status_bar, "set_clock_visible"):
+            if getattr(self, "control_room_mode", False):
+                self.status_bar.setVisible(True)
+            else:
+                self.status_bar.setVisible(not on_home)
+            if self.status_bar.isVisible() and hasattr(self.status_bar, "set_clock_visible"):
                 self.status_bar.set_clock_visible(True)
+        if hasattr(self, "control_room_page"):
+            self.control_room_page.set_login_visible(False)
+            self.control_room_page.set_reorder_enabled(True)
         
         # 更新用户管理按钮可见性
         # 注意：这里需要检查本地角色，而不是用户管理器中的角色
@@ -3100,7 +3301,9 @@ class MainWindow(QMainWindow, UIBase):
             role_name = "Admin" if self.current_user['role'] == UserRole.ADMIN else "User"
             self.setWindowTitle(f"Gamma-ray Spectrometer - {username} ({role_name})")
         else:
-            self.setWindowTitle(_t("sys_title"))
+            self.setWindowTitle(
+                _t("control_room_title") if getattr(self, "control_room_mode", False) else _t("sys_title")
+            )
             
         self.save_data_btn.setText(_t("btn_save"))
         self.user_management_btn.setText(_t("btn_user_mgmt"))
@@ -3147,6 +3350,19 @@ class MainWindow(QMainWindow, UIBase):
             if hasattr(self, 'adopt_probe_count_btn'):
                 self.adopt_probe_count_btn.setText(_t("btn_adopt_probe_count"))
                 self.adopt_probe_count_btn.setToolTip(_t("tip_adopt_probe_count"))
+            if hasattr(self, "ui_mode_label"):
+                self.ui_mode_label.setText(_t("set_ui_mode"))
+                self.ui_mode_label.setToolTip(_t("tip_ui_mode"))
+            if hasattr(self, "ui_mode_combo"):
+                self.ui_mode_combo.blockSignals(True)
+                cur = self.ui_mode_combo.currentData()
+                self.ui_mode_combo.setItemText(0, _t("set_ui_mode_tablet"))
+                self.ui_mode_combo.setItemText(1, _t("set_ui_mode_control_room"))
+                idx = self.ui_mode_combo.findData(cur)
+                if idx >= 0:
+                    self.ui_mode_combo.setCurrentIndex(idx)
+                self.ui_mode_combo.setToolTip(_t("tip_ui_mode"))
+                self.ui_mode_combo.blockSignals(False)
             if hasattr(self, 'probe_locations_label'):
                 self.probe_locations_label.setText(_t("set_probe_locations"))
                 self.probe_locations_label.setToolTip(_t("tip_probe_locations"))
@@ -3160,6 +3376,14 @@ class MainWindow(QMainWindow, UIBase):
                 pass
             if hasattr(self, 'refresh_probe_location_edits'):
                 self.refresh_probe_location_edits()
+            if hasattr(self, "factory_reset_label"):
+                self.factory_reset_label.setText(_t("set_factory_reset"))
+            if hasattr(self, "reset_defaults_current_btn"):
+                self.reset_defaults_current_btn.setText(_t("btn_reset_current"))
+                self.reset_defaults_current_btn.setToolTip(_t("tip_reset_defaults"))
+            if hasattr(self, "reset_defaults_all_btn"):
+                self.reset_defaults_all_btn.setText(_t("btn_reset_all"))
+                self.reset_defaults_all_btn.setToolTip(_t("tip_reset_defaults"))
             self.update_control_labels()
             
         if hasattr(self, 'keyboard_group'):
@@ -3268,11 +3492,12 @@ class MainWindow(QMainWindow, UIBase):
             
         # Call retranslate_ui on each page if they support it
         for page in [
-            self.home_page, self.overview_page, self.spectrum_page,
+            self.home_page, self.control_room_page, self.overview_page, self.spectrum_page,
             self.clients_page, self.alarm_log_page, self.settings_page,
         ]:
             if hasattr(page, 'retranslate_ui'):
                 page.retranslate_ui()
+        self._apply_control_room_nav_labels()
 
         # Plot axis titles follow language
         if hasattr(self, 'retranslate_plot_labels'):
@@ -3286,6 +3511,8 @@ class MainWindow(QMainWindow, UIBase):
                 self._refresh_home_from_probes(self.client_data)
             if hasattr(self, "update_system_status"):
                 self.update_system_status()
+            if getattr(self, "control_room_mode", False):
+                self._refresh_control_room_snapshot()
         except Exception:
             pass
                 

@@ -105,7 +105,7 @@ class StatusBar(QWidget):
 
         # Connection icon (default: disconnected)
         self.connection_icon_widget = QSvgWidget()
-        self.connection_icon_widget.setFixedSize(18, 18)
+        self.connection_icon_widget.setFixedSize(22, 22)
         self.connection_icon_widget.load(get_icon_svg('disconnected'))
 
         # Battery label
@@ -229,6 +229,12 @@ class StatusBar(QWidget):
             self.update_data()
         else:
             self.time_label.setText("")
+
+    def set_battery_visible(self, visible: bool):
+        """PC control-room usually has no battery — hide the percent tag."""
+        self.status_label.setVisible(bool(visible))
+        if visible:
+            self.update_data()
 
     def update_timeout_display(self, remaining_seconds: int):
         """Update timeout display"""
@@ -477,7 +483,9 @@ class BottomNavBar(QWidget):
     """Bottom navigation bar with page buttons"""
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedHeight(70)
+        self._desktop_compact = False
+        self._bar_height = 70
+        self.setFixedHeight(self._bar_height)
         # 只对 BottomNavBar 本身设置样式，不影响子组件
         self.setStyleSheet("""
             BottomNavBar {
@@ -504,7 +512,7 @@ class BottomNavBar(QWidget):
         }
         
         from core.translation import _t
-        home_widget = self.create_nav_button(_t("nav_home"), "alarm_inactive", button_colors["home"], True)
+        home_widget = self.create_nav_button(_t("nav_home"), "home", button_colors["home"], True)
         self.button_widgets.append(home_widget)
         self.buttons.append(home_widget.findChild(QPushButton))
 
@@ -546,6 +554,28 @@ class BottomNavBar(QWidget):
         self._active_index = 0
         self._alarm_log_badge = False
 
+    def set_desktop_compact(self, enabled: bool):
+        """主控室电脑：略低于平板触控底栏，但保留桌面可读字号（勿用 48px/10pt）。"""
+        self._desktop_compact = bool(enabled)
+        self._bar_height = 58 if self._desktop_compact else 70
+        self.setFixedHeight(self._bar_height)
+        icon_size = 24 if self._desktop_compact else 28
+        nav_font_pt = 13 if self._desktop_compact else 11
+        for container in self.button_widgets:
+            container.setFixedHeight(self._bar_height)
+            if hasattr(container, "icon_widget"):
+                container.icon_widget.setFixedSize(icon_size, icon_size)
+            if hasattr(container, "text_label"):
+                from PyQt5.QtGui import QFont
+                container.text_label.setFont(QFont(FONTS["tip"][0], nav_font_pt))
+            lay = container.layout()
+            if lay is not None and self._desktop_compact:
+                # outer container has nested layout; tighten via icon parent
+                pass
+        self.refresh_hit_areas()
+        # re-apply active style so icon sizes refresh
+        self.set_active_button(getattr(self, "_active_index", 0))
+
     def _alarm_log_icon_tag(self):
         return "alarm_log_alert" if self._alarm_log_badge else "alarm_log"
 
@@ -569,16 +599,17 @@ class BottomNavBar(QWidget):
         # Create a container widget for the button
         container = QWidget()
         container.setObjectName("nav_button_container")  # 设置对象名称以便精确样式定位
-        container.setFixedHeight(70)
+        bar_h = 70
+        container.setFixedHeight(bar_h)
         
         # Create layout for icon and text
         layout = QVBoxLayout()
-        layout.setContentsMargins(0, 8, 0, 8)
-        layout.setSpacing(4)
+        layout.setContentsMargins(0, 6, 0, 6)
+        layout.setSpacing(2)
         
-        # Create SVG icon
+        # Create SVG icon — 略放大，暗底更易辨认
         icon_widget = QSvgWidget()
-        icon_widget.setFixedSize(24, 24)
+        icon_widget.setFixedSize(28, 28)
         icon_widget.load(get_icon_svg(icon_tag))
         
         # Center the icon
@@ -598,7 +629,7 @@ class BottomNavBar(QWidget):
         
         # Create invisible button for click handling
         btn = QPushButton()
-        btn.setFixedHeight(70)
+        btn.setFixedHeight(bar_h)
         
         # Add everything to container
         container_layout = QVBoxLayout()
@@ -609,7 +640,7 @@ class BottomNavBar(QWidget):
         
         # Position button on top of the content
         btn.setParent(container)
-        btn.setGeometry(0, 0, max(container.width(), 1), 70)
+        btn.setGeometry(0, 0, max(container.width(), 1), bar_h)
         btn.raise_()
         container._hit_btn = btn
         
@@ -633,12 +664,14 @@ class BottomNavBar(QWidget):
 
     def refresh_hit_areas(self):
         """按当前宽度重设底部导航按钮点击区域。"""
-        self.setFixedHeight(70)
+        h = getattr(self, "_bar_height", 70)
+        self.setFixedHeight(h)
         for container in self.button_widgets:
-            container.setFixedHeight(70)
+            container.setFixedHeight(h)
             btn = getattr(container, '_hit_btn', None)
             if btn is not None:
-                btn.setGeometry(0, 0, max(container.width(), 1), 70)
+                btn.setFixedHeight(h)
+                btn.setGeometry(0, 0, max(container.width(), 1), h)
                 btn.raise_()
     
     def _apply_active_style(self, container, icon_tag, color):
@@ -667,17 +700,8 @@ class BottomNavBar(QWidget):
         """)
         # 为图标添加发光效果 - 在 SVG 中添加发光滤镜
         svg_template = '''
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <defs>
-                <filter id="glow">
-                    <feGaussianBlur stdDeviation="2" result="coloredBlur"/>
-                    <feMerge>
-                        <feMergeNode in="coloredBlur"/>
-                        <feMergeNode in="SourceGraphic"/>
-                    </feMerge>
-                </filter>
-            </defs>
-            <g filter="url(#glow)">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <g>
                 {content}
             </g>
         </svg>
@@ -692,7 +716,7 @@ class BottomNavBar(QWidget):
             content = content_match.group(1)
             # 替换 currentColor 为发光颜色
             content = content.replace('currentColor', color)
-            # 生成带发光效果的 SVG
+            # 生成带主题色的 SVG（去掉易糊的 glow 滤镜）
             glowing_svg = svg_template.format(content=content)
             container.icon_widget.load(glowing_svg.encode())
         else:
@@ -724,13 +748,13 @@ class BottomNavBar(QWidget):
         """)
         container.text_label.setStyleSheet("""
             QLabel {
-                color: #888888;
+                color: #cccccc;
                 background-color: transparent;
                 border: none;
             }
         """)
-        # Update icon with inactive color
-        svg_data = get_icon_svg(icon_tag).decode().replace('currentColor', '#888888')
+        # Update icon with inactive color — 提高对比，避免暗底看不清
+        svg_data = get_icon_svg(icon_tag).decode().replace('currentColor', '#cccccc')
         container.icon_widget.load(svg_data.encode())
 
         btn = container.findChild(QPushButton)

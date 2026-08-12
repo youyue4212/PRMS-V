@@ -21,6 +21,9 @@ class ConfigManager:
         # 多探头面板参数：{ip: {hv, threshold, sensitivity, product_id}}
         self.client_probe_settings = self._load_probe_settings()
         self.language = self.settings.value("LANGUAGE", "zh", str)  # "zh" or "en"
+        # UI shell: tablet (7" HMI) | control_room (PC overview wall)
+        raw_mode = str(self.settings.value("UI_MODE", "tablet", str) or "tablet").strip().lower()
+        self.ui_mode = raw_mode if raw_mode in ("tablet", "control_room") else "tablet"
 
         # TCP/IP settings
         self.tcp_enabled = self.settings.value("TCP_ENABLED", False, bool)
@@ -200,10 +203,17 @@ class ConfigManager:
                        tcp_enabled=None, tcp_mode=None, tcp_host=None, tcp_port=None,
                        tcp_client_host=None, tcp_client_port=None, language=None,
                        hv_user_set=None,
-                       expected_probe_count=None, cps_window_minutes=None):
+                       expected_probe_count=None, cps_window_minutes=None,
+                       ui_mode=None):
         if language is not None:
             self.language = language
             self.settings.setValue("LANGUAGE", language)
+        if ui_mode is not None:
+            mode = str(ui_mode).strip().lower()
+            if mode not in ("tablet", "control_room"):
+                mode = "tablet"
+            self.ui_mode = mode
+            self.settings.setValue("UI_MODE", self.ui_mode)
         if baudrate is not None:
             self.baudrate = baudrate
             self.settings.setValue("BAUDRATE", baudrate)

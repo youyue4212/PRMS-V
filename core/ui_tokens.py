@@ -24,6 +24,21 @@ RADIUS_BTN = 8
 TOUCH_H = 44
 PAGE_TITLE_PX = 22
 
+# Control-room (PC) typography — tablet px baseline × scale for viewing distance
+CONTROL_ROOM_FONT_SCALE = 1.4
+# Count-rate digits (CPS) get an extra bump — primary readout at desk viewing distance
+CONTROL_ROOM_CPS_EXTRA = 1.32
+
+
+def cr_px(n: int) -> int:
+    """Scale a tablet-baseline px size for control-room desktop UI."""
+    return max(1, int(round(n * CONTROL_ROOM_FONT_SCALE)))
+
+
+def cr_cps_px(n: int) -> int:
+    """Scale CPS / count-rate numerals (larger than general UI text)."""
+    return max(1, int(round(n * CONTROL_ROOM_FONT_SCALE * CONTROL_ROOM_CPS_EXTRA)))
+
 # Common stylesheets
 PAGE_TITLE_QSS = f"""
     QLabel {{

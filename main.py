@@ -44,6 +44,10 @@ def main():
     parser.add_argument("--keyboard-debug", action="store_true", help="Keyboard debug title")
     parser.add_argument("--login", action="store_true",
                         help="Force login dialog at startup (otherwise public home)")
+    parser.add_argument("--control-room", action="store_true",
+                        help="Start in control-room PC UI (multi-probe wall)")
+    parser.add_argument("--tablet", action="store_true",
+                        help="Force field-tablet UI for this session")
     args = parser.parse_args()
     use_fullscreen = args.fullscreen
     keyboard_debug = args.keyboard_debug
@@ -56,6 +60,15 @@ def main():
     app = QApplication(sys.argv)
     app.setApplicationName("DAQ Tablet")
     app.setOrganizationName("Raysen")
+
+    # UI mode override for this process (also persisted when --control-room/--tablet)
+    if args.control_room or args.tablet:
+        from core.config import ConfigManager
+        cfg = ConfigManager()
+        mode = "control_room" if args.control_room else "tablet"
+        cfg.update_settings(ui_mode=mode)
+        cfg.save_settings()
+        print("UI mode set to:", mode)
 
     is_rpi = os.path.exists("/proc/device-tree/model")
     if not is_rpi and hasattr(os, "uname"):
@@ -82,10 +95,15 @@ def main():
             sys.exit(0)
     main._instance_lock = single_instance_lock
 
-    font = QFont("Microsoft YaHei", 9)
+    from core.config import ConfigManager
+    ui_mode = str(getattr(ConfigManager(), "ui_mode", "tablet") or "tablet").lower()
+    control_room = ui_mode == "control_room"
+    # 平板 9pt 触控；主控室 PC 用更大基准字号（子页/对话框一并受益）
+    base_pt = 12 if control_room and not is_rpi else 9
+    font = QFont("Microsoft YaHei", base_pt)
     # 回退：无雅黑时用系统默认 UI 字体，避免 Arial 导致中文变 ?
     if not QFont("Microsoft YaHei").exactMatch():
-        font = QFont("Segoe UI", 9)
+        font = QFont("Segoe UI", base_pt)
     if is_rpi and font.pointSize() < 10:
         font.setPointSize(10)
     app.setFont(font)

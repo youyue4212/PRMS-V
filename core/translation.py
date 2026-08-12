@@ -17,6 +17,28 @@ class TranslationManager:
             "nav_clients": "探头诊断",
             "nav_alarm_log": "报警日志",
             "nav_settings": "系统设置",
+            "nav_control_room": "总览",
+            "control_room_title": "主控室总览",
+            "control_room_subtitle": "多探头监视 · 报警值班",
+            "control_room_probe_wall": "探头墙",
+            "control_room_occupancy": "通道占用",
+            "control_room_recent_alarms": "最近报警",
+            "control_room_open_log": "打开日志",
+            "control_room_hint": "点击探头卡片进入实时概览；公共模式可查看总览与报警日志。",
+            "control_room_hint_reorder": "登录后可拖拽探头卡片互换位置；点击进入实时概览。",
+            "control_room_mute": "消音",
+            "control_room_unmute": "取消消音",
+            "control_room_muted_tag": "已消音",
+            "control_room_kpi_active": "活动报警",
+            "control_room_kpi_today": "今日触发",
+            "control_room_kpi_online": "在线探头",
+            "control_room_online_fmt": "在线 {online}/{total}",
+            "control_room_no_alarms": "暂无报警事件",
+            "set_ui_mode": "界面模式",
+            "set_ui_mode_tablet": "现场平板",
+            "set_ui_mode_control_room": "主控室电脑",
+            "tip_ui_mode": "切换后需重启软件生效",
+            "msg_ui_mode_restart": "界面模式已保存，请重启软件后生效。",
             "home_title": "通道辐射监测",
             "home_title_full": "行人通道辐射监测系统",
             "mode_monitor": "监视模式",
@@ -90,7 +112,7 @@ class TranslationManager:
             "probe_loc_1": "右侧 · 上",
             "probe_loc_2": "左侧 · 下",
             "probe_loc_3": "右侧 · 下",
-            "probe_loc_n": "#{n}",
+            "probe_loc_n": "槽位{n}",
             "desc_master_offline": "主控离线，通道硬报警停止判决",
             "desc_master_alarm": "{decision} ({time})",
             "desc_home_probe_fallback": "主控无有效 L2：CPS 仅供参考",
@@ -510,6 +532,28 @@ class TranslationManager:
             "nav_clients": "Diagnostics",
             "nav_alarm_log": "Alarm Log",
             "nav_settings": "Settings",
+            "nav_control_room": "Wall",
+            "control_room_title": "Control Room",
+            "control_room_subtitle": "Multi-probe monitor · Alarm duty",
+            "control_room_probe_wall": "Probe Wall",
+            "control_room_occupancy": "Passage Occupancy",
+            "control_room_recent_alarms": "Recent Alarms",
+            "control_room_open_log": "Open Log",
+            "control_room_hint": "Click a probe card to open live overview. Public mode can view wall and alarm log.",
+            "control_room_hint_reorder": "After login, drag probe cards to swap order; click to open live overview.",
+            "control_room_mute": "Mute",
+            "control_room_unmute": "Unmute",
+            "control_room_muted_tag": "Muted",
+            "control_room_kpi_active": "Active",
+            "control_room_kpi_today": "Today",
+            "control_room_kpi_online": "Online",
+            "control_room_online_fmt": "Online {online}/{total}",
+            "control_room_no_alarms": "No alarm events",
+            "set_ui_mode": "UI Mode",
+            "set_ui_mode_tablet": "Field Tablet",
+            "set_ui_mode_control_room": "Control Room PC",
+            "tip_ui_mode": "Restart the app after changing this setting",
+            "msg_ui_mode_restart": "UI mode saved. Restart the application to apply.",
             "home_title": "Portal Radiation Monitor",
             "home_title_full": "Portal Radiation Monitor",
             "mode_monitor": "Monitor",
@@ -565,7 +609,7 @@ class TranslationManager:
             "probe_loc_1": "Right · Upper",
             "probe_loc_2": "Left · Lower",
             "probe_loc_3": "Right · Lower",
-            "probe_loc_n": "#{n}",
+            "probe_loc_n": "Slot {n}",
             "desc_master_offline": "Master offline — channel hard-alarm judgment stopped",
             "desc_master_alarm": "{decision} ({time})",
             "desc_home_probe_fallback": "No valid master L2: CPS for reference only",
@@ -1011,3 +1055,30 @@ class TranslationManager:
 # Global translation helper function
 def _t(key: str, **kwargs) -> str:
     return TranslationManager().t(key, **kwargs)
+
+
+STOCK_PROBE_LOCS_ZH = ["左侧 · 上", "右侧 · 上", "左侧 · 下", "右侧 · 下"]
+STOCK_PROBE_LOCS_EN = ["Left · Upper", "Right · Upper", "Left · Lower", "Right · Lower"]
+
+
+def default_probe_location(index: int) -> str:
+    """Default location label for display slot index (0-based)."""
+    try:
+        i = int(index)
+    except (TypeError, ValueError):
+        i = 0
+    if 0 <= i <= 3:
+        return _t("probe_loc_%d" % i)
+    return _t("probe_loc_n", n=i + 1)
+
+
+def localize_probe_location(text, index=0) -> str:
+    """Map persisted stock zh/en labels to current language; keep custom text."""
+    raw = str(text or "").strip()
+    if raw:
+        if raw in STOCK_PROBE_LOCS_ZH:
+            return _t("probe_loc_%d" % STOCK_PROBE_LOCS_ZH.index(raw))
+        if raw in STOCK_PROBE_LOCS_EN:
+            return _t("probe_loc_%d" % STOCK_PROBE_LOCS_EN.index(raw))
+        return raw
+    return default_probe_location(index)

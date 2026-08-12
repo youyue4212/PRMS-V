@@ -80,11 +80,15 @@ class HmiBridge(QObject):
 
 
 class HomePage(QWidget):
-    """Web HMI home; keeps stub widgets for main_window compatibility."""
+    """Web HMI home; keeps stub widgets for main_window compatibility.
 
-    def __init__(self, parent=None):
+    headless=True：仅保留数据桩（主控室模式），不创建 QWebEngineView。
+    """
+
+    def __init__(self, parent=None, headless=False):
         super().__init__(parent)
         self.parent = parent
+        self.headless = bool(headless)
         self.probe_tiles = []  # unused; kept for isinstance checks
         self._tile_hold = {}
         self._had_tile_data = False
@@ -104,47 +108,53 @@ class HomePage(QWidget):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
-        self.browser = QWebEngineView(self)
-        self.browser.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        root.addWidget(self.browser, 1)
-
         # Hidden stubs so existing main_window attribute access keeps working
         self._stubs = QWidget(self)
         self._stubs.hide()
         self._stubs.setFixedSize(0, 0)
         self._build_stubs()
 
-        self.bridge = HmiBridge(self)
-        self.channel = QWebChannel(self)
-        self.channel.registerObject("bridge", self.bridge)
-        self.browser.page().setWebChannel(self.channel)
+        self.browser = None
+        self.bridge = None
+        self.channel = None
+        if not self.headless:
+            self.browser = QWebEngineView(self)
+            self.browser.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+            root.addWidget(self.browser, 1)
 
-        self.bridge.page_ready.connect(self._on_page_ready)
-        self.bridge.reset_requested.connect(self._on_js_reset)
-        self.bridge.health_requested.connect(lambda: self._nav(3))
-        self.bridge.fault_requested.connect(lambda: self._nav(4))
-        self.bridge.probe_requested.connect(self._on_js_probe)
-        self.bridge.login_requested.connect(self._on_js_login)
-        self.bridge.language_requested.connect(self._on_js_language)
-        self.bridge.reorder_requested.connect(self._on_js_reorder)
+            self.bridge = HmiBridge(self)
+            self.channel = QWebChannel(self)
+            self.channel.registerObject("bridge", self.bridge)
+            self.browser.page().setWebChannel(self.channel)
 
-        url = QUrl.fromLocalFile(_HMI_HTML.replace("\\", "/"))
-        # 强制按 UTF-8 读入再 setHtml，避免 Windows 下本地文件被当成系统编码导致乱码
-        try:
-            with open(_HMI_HTML, "r", encoding="utf-8") as f:
-                html = f.read()
-            self.browser.setHtml(html, url)
-        except Exception:
-            self.browser.setUrl(url)
+            self.bridge.page_ready.connect(self._on_page_ready)
+            self.bridge.reset_requested.connect(self._on_js_reset)
+            self.bridge.health_requested.connect(lambda: self._nav(3))
+            self.bridge.fault_requested.connect(lambda: self._nav(4))
+            self.bridge.probe_requested.connect(self._on_js_probe)
+            self.bridge.login_requested.connect(self._on_js_login)
+            self.bridge.language_requested.connect(self._on_js_language)
+            self.bridge.reorder_requested.connect(self._on_js_reorder)
 
-        self._flush_timer = QTimer(self)
-        self._flush_timer.setSingleShot(True)
-        self._flush_timer.timeout.connect(self._flush_to_web)
+            url = QUrl.fromLocalFile(_HMI_HTML.replace("\\", "/"))
+            try:
+                with open(_HMI_HTML, "r", encoding="utf-8") as f:
+                    html = f.read()
+                self.browser.setHtml(html, url)
+            except Exception:
+                self.browser.setUrl(url)
 
-        # 顶栏电池刷新
-        self._tools_timer = QTimer(self)
-        self._tools_timer.timeout.connect(self.schedule_web_flush)
-        self._tools_timer.start(10000)
+            self._flush_timer = QTimer(self)
+            self._flush_timer.setSingleShot(True)
+            self._flush_timer.timeout.connect(self._flush_to_web)
+
+            self._tools_timer = QTimer(self)
+            self._tools_timer.timeout.connect(self.schedule_web_flush)
+            self._tools_timer.start(10000)
+        else:
+            self._flush_timer = QTimer(self)
+            self._flush_timer.setSingleShot(True)
+            self._tools_timer = QTimer(self)
 
         _install_label_hooks(self)
         _install_reset_enable_hook(self)
@@ -204,6 +214,8 @@ class HomePage(QWidget):
         self.channel_reset_btn.hide()
 
     def schedule_web_flush(self):
+        if self.headless:
+            return
         if not self._flush_timer.isActive():
             self._flush_timer.start(50)
 
@@ -429,23 +441,20 @@ class HomePage(QWidget):
 
     def _slot_location(self, i):
         """Slot position label: config override > translation default."""
-        # 1) config.probe_slot_locations (settable)
+        saved = ""
         try:
             cfg = getattr(self.parent, "config", None) if self.parent is not None else None
             locs = list(getattr(cfg, "probe_slot_locations", None) or [])
-            if i < len(locs) and str(locs[i]).strip():
-                return str(locs[i]).strip()
+            if i < len(locs):
+                saved = str(locs[i] or "").strip()
         except Exception:
-            pass
-        # 2) translation defaults (zh/en)
+            saved = ""
         try:
-            from core.translation import _t
-            if i <= 3:
-                return _t("probe_loc_%d" % i)
-            return _t("probe_loc_n", n=i + 1)
+            from core.translation import localize_probe_location
+            return localize_probe_location(saved, i)
         except Exception:
-            fallback = ["左侧 · 上", "右侧 · 上", "左侧 · 下", "右侧 · 下"]
-            return fallback[i] if i < len(fallback) else ("#%d" % (i + 1))
+            from core.translation import default_probe_location
+            return default_probe_location(i)
 
     def _link_level(self):
         t = self.master_link_label.text()
@@ -601,12 +610,18 @@ class HomePage(QWidget):
             return "--%"
 
     def _flush_to_web(self):
+        if self.headless or self.browser is None:
+            return
         if not self._web_ready:
             return
         state = self.build_hmi_state()
         payload = json.dumps(state, ensure_ascii=False)
         js = "if (window.applyHmiState) { applyHmiState(%s); }" % payload
         self.browser.page().runJavaScript(js)
+
+    def reorder_probes(self, from_index, to_index):
+        """Public API for control-room drag reorder (same as Web HMI)."""
+        self._on_js_reorder(from_index, to_index)
 
     # ---- API used by main_window ----
     def _expected_placeholder_count(self):

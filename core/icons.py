@@ -91,6 +91,15 @@ def get_overview_svg():
     </svg>
     """
 
+def get_home_svg():
+    """SVG for home / monitor wall (clear currentColor icon)."""
+    return """
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M4 10.5L12 4l8 6.5V20a1 1 0 0 1-1 1h-5v-6H10v6H5a1 1 0 0 1-1-1v-9.5z"
+              stroke="currentColor" stroke-width="2" stroke-linejoin="round" fill="none"/>
+    </svg>
+    """
+
 def get_spectrum_svg():
     """SVG for spectrum icon (line chart)"""
     return """
@@ -212,6 +221,8 @@ def get_icon_svg(tag, w=14,h=14):
         svg=get_occupancy_flashing_svg().encode()
     elif tag == 'overview':
         svg=get_overview_svg().encode()
+    elif tag == 'home':
+        svg=get_home_svg().encode()
     elif tag == 'spectrum':
         svg=get_spectrum_svg().encode()
     elif tag == 'clients':

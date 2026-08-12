@@ -1284,39 +1284,33 @@ class UIBase():
         ctrl_layout.addWidget(self.expected_probe_spin, 1, 1)
         ctrl_layout.addWidget(self.adopt_probe_count_btn, 1, 2)
 
-        # Home probe card location labels (slot 1..4)
+        # UI mode: field tablet vs control-room PC (restart required)
+        self.ui_mode_label = QLabel(_t("set_ui_mode"))
+        self.ui_mode_label.setToolTip(_t("tip_ui_mode"))
+        self.ui_mode_combo = QComboBox()
+        self.ui_mode_combo.addItem(_t("set_ui_mode_tablet"), "tablet")
+        self.ui_mode_combo.addItem(_t("set_ui_mode_control_room"), "control_room")
+        cur_mode = str(getattr(self.config, "ui_mode", "tablet") or "tablet")
+        idx = self.ui_mode_combo.findData(cur_mode)
+        self.ui_mode_combo.setCurrentIndex(idx if idx >= 0 else 0)
+        self.ui_mode_combo.setToolTip(_t("tip_ui_mode"))
+        self.ui_mode_combo.currentIndexChanged.connect(self.on_ui_mode_changed)
+        ctrl_layout.addWidget(self.ui_mode_label, 2, 0)
+        ctrl_layout.addWidget(self.ui_mode_combo, 2, 1, 1, 2)
+
+        # Home probe card location labels (count follows expected_probe_count)
         self.probe_locations_label = QLabel(_t("set_probe_locations"))
         self.probe_locations_label.setToolTip(_t("tip_probe_locations"))
-        ctrl_layout.addWidget(self.probe_locations_label, 2, 0, 1, 3)
-        loc_wrap = QWidget()
-        loc_row = QHBoxLayout(loc_wrap)
-        loc_row.setContentsMargins(0, 0, 0, 0)
-        loc_row.setSpacing(6)
+        ctrl_layout.addWidget(self.probe_locations_label, 3, 0, 1, 3)
+        self.probe_location_wrap = QWidget()
+        self.probe_location_grid = QGridLayout(self.probe_location_wrap)
+        self.probe_location_grid.setContentsMargins(0, 0, 0, 0)
+        self.probe_location_grid.setSpacing(6)
         self.probe_location_edits = []
         self.probe_location_slot_labels = []
-        saved_locs = list(getattr(self.config, "probe_slot_locations", None) or [])
-        for i in range(4):
-            cell = QVBoxLayout()
-            cell.setContentsMargins(0, 0, 0, 0)
-            cell.setSpacing(2)
-            slot_lbl = QLabel(_t("set_probe_loc_n", n=i + 1))
-            edit = QLineEdit()
-            if i < len(saved_locs) and str(saved_locs[i]).strip():
-                edit.setText(str(saved_locs[i]).strip())
-            else:
-                try:
-                    edit.setText(_t("probe_loc_%d" % i))
-                except Exception:
-                    pass
-            edit.setPlaceholderText(_t("set_probe_loc_n", n=i + 1))
-            edit.setToolTip(_t("tip_probe_locations"))
-            edit.editingFinished.connect(self.on_probe_slot_locations_changed)
-            cell.addWidget(slot_lbl)
-            cell.addWidget(edit)
-            loc_row.addLayout(cell, 1)
-            self.probe_location_edits.append(edit)
-            self.probe_location_slot_labels.append(slot_lbl)
-        ctrl_layout.addWidget(loc_wrap, 3, 0, 1, 3)
+        self.probe_location_cells = []
+        self._rebuild_probe_location_edits()
+        ctrl_layout.addWidget(self.probe_location_wrap, 4, 0, 1, 3)
 
         # One-click factory parameter reset (command 0x14 → probe TCP/serial)
         self.factory_reset_label = QLabel(_t("set_factory_reset"))
@@ -1326,9 +1320,9 @@ class UIBase():
         self.reset_defaults_all_btn = QPushButton(_t("btn_reset_all"))
         self.reset_defaults_all_btn.setToolTip(_t("tip_reset_defaults"))
         self.reset_defaults_all_btn.clicked.connect(lambda: self.reset_factory_defaults(all_probes=True))
-        ctrl_layout.addWidget(self.factory_reset_label, 4, 0)
-        ctrl_layout.addWidget(self.reset_defaults_current_btn, 4, 1)
-        ctrl_layout.addWidget(self.reset_defaults_all_btn, 4, 2)
+        ctrl_layout.addWidget(self.factory_reset_label, 5, 0)
+        ctrl_layout.addWidget(self.reset_defaults_current_btn, 5, 1)
+        ctrl_layout.addWidget(self.reset_defaults_all_btn, 5, 2)
 
         settings_layout.addWidget(self.ctrl_group)
 
@@ -2919,56 +2913,119 @@ class UIBase():
     def on_expected_probe_count_changed(self, value):
         self.apply_expected_probe_count(int(value), source="spinbox")
 
+    def on_ui_mode_changed(self, _index=None):
+        from core.translation import _t
+        if not hasattr(self, "ui_mode_combo"):
+            return
+        mode = self.ui_mode_combo.currentData()
+        if mode is None:
+            return
+        mode = str(mode)
+        if mode == str(getattr(self.config, "ui_mode", "tablet")):
+            return
+        self.config.update_settings(ui_mode=mode)
+        self.config.save_settings()
+        try:
+            from core.industrial_dialogs import show_info
+            show_info(self if isinstance(self, QWidget) else None,
+                      _t("set_ui_mode"), _t("msg_ui_mode_restart"))
+        except Exception:
+            pass
+
     def _stock_probe_slot_location_sets(self):
-        zh = ["左侧 · 上", "右侧 · 上", "左侧 · 下", "右侧 · 下"]
-        en = ["Left · Upper", "Right · Upper", "Left · Lower", "Right · Lower"]
-        return zh, en
+        from core.translation import STOCK_PROBE_LOCS_ZH, STOCK_PROBE_LOCS_EN
+        return list(STOCK_PROBE_LOCS_ZH), list(STOCK_PROBE_LOCS_EN)
+
+    def _probe_location_slot_count(self):
+        try:
+            n = int(getattr(self.config, "expected_probe_count", 0) or 0)
+        except (TypeError, ValueError):
+            n = 0
+        saved = list(getattr(self.config, "probe_slot_locations", None) or [])
+        if n <= 0:
+            n = max(2, len(saved), 4)
+        return max(1, min(16, n))
 
     def _current_language_probe_slot_locations(self):
-        out = []
-        for i in range(4):
-            try:
-                out.append(_t("probe_loc_%d" % i))
-            except Exception:
-                zh, _en = self._stock_probe_slot_location_sets()
-                out.append(zh[i])
-        return out
+        from core.translation import default_probe_location
+        return [default_probe_location(i) for i in range(self._probe_location_slot_count())]
+
+    def _rebuild_probe_location_edits(self):
+        """Create N location editors matching expected probe count."""
+        from core.translation import _t, localize_probe_location
+        if not hasattr(self, "probe_location_grid"):
+            return
+        count = self._probe_location_slot_count()
+        saved = list(getattr(self.config, "probe_slot_locations", None) or [])
+
+        # Clear old cells
+        while self.probe_location_grid.count():
+            item = self.probe_location_grid.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.deleteLater()
+        self.probe_location_edits = []
+        self.probe_location_slot_labels = []
+        self.probe_location_cells = []
+
+        cols = 4 if count > 4 else max(1, count)
+        for i in range(count):
+            cell = QWidget()
+            cell_lay = QVBoxLayout(cell)
+            cell_lay.setContentsMargins(0, 0, 0, 0)
+            cell_lay.setSpacing(2)
+            slot_lbl = QLabel(_t("set_probe_loc_n", n=i + 1))
+            edit = QLineEdit()
+            saved_txt = str(saved[i]).strip() if i < len(saved) else ""
+            edit.setText(localize_probe_location(saved_txt, i))
+            edit.setPlaceholderText(_t("set_probe_loc_n", n=i + 1))
+            edit.setToolTip(_t("tip_probe_locations"))
+            edit.editingFinished.connect(self.on_probe_slot_locations_changed)
+            cell_lay.addWidget(slot_lbl)
+            cell_lay.addWidget(edit)
+            self.probe_location_grid.addWidget(cell, i // cols, i % cols)
+            self.probe_location_edits.append(edit)
+            self.probe_location_slot_labels.append(slot_lbl)
+            self.probe_location_cells.append(cell)
 
     def on_probe_slot_locations_changed(self):
         """Save settings-page location labels and refresh home HMI."""
+        from core.translation import default_probe_location, localize_probe_location
         if not hasattr(self, "probe_location_edits"):
             return
         locs = []
-        for edit in self.probe_location_edits:
-            locs.append((edit.text() or "").strip())
-        # All blank → clear override (home uses translation)
-        if not any(locs):
+        all_default = True
+        for i, edit in enumerate(self.probe_location_edits):
+            text = (edit.text() or "").strip()
+            shown_default = localize_probe_location("", i)
+            if not text or text == shown_default or text == default_probe_location(i):
+                locs.append("")
+            else:
+                locs.append(text)
+                all_default = False
+        if all_default or not any(locs):
             self.config.set_probe_slot_locations([])
         else:
-            while len(locs) < 4:
-                locs.append("")
-            zh, en = self._stock_probe_slot_location_sets()
-            if locs[:4] == zh or locs[:4] == en:
-                self.config.set_probe_slot_locations([])
-            else:
-                self.config.set_probe_slot_locations(locs[:4])
+            self.config.set_probe_slot_locations(locs)
         self.config.save_settings()
         home = getattr(self, "home_page", None)
         if home is not None and hasattr(home, "schedule_web_flush"):
             home.schedule_web_flush()
+        if getattr(self, "control_room_mode", False) and hasattr(self, "_refresh_control_room_snapshot"):
+            self._refresh_control_room_snapshot()
 
     def refresh_probe_location_edits(self):
         """Fill settings edits from config or current-language defaults."""
-        if not hasattr(self, "probe_location_edits"):
+        from core.translation import _t, localize_probe_location
+        want = self._probe_location_slot_count()
+        if len(getattr(self, "probe_location_edits", []) or []) != want:
+            self._rebuild_probe_location_edits()
             return
         saved = list(getattr(self.config, "probe_slot_locations", None) or [])
-        defaults = self._current_language_probe_slot_locations()
         for i, edit in enumerate(self.probe_location_edits):
+            saved_txt = str(saved[i]).strip() if i < len(saved) else ""
             edit.blockSignals(True)
-            if i < len(saved) and str(saved[i]).strip():
-                edit.setText(str(saved[i]).strip())
-            else:
-                edit.setText(defaults[i] if i < len(defaults) else "")
+            edit.setText(localize_probe_location(saved_txt, i))
             edit.setPlaceholderText(_t("set_probe_loc_n", n=i + 1))
             edit.setToolTip(_t("tip_probe_locations"))
             edit.blockSignals(False)
@@ -3035,6 +3092,8 @@ class UIBase():
             self.expected_probe_spin.blockSignals(True)
             self.expected_probe_spin.setValue(n)
             self.expected_probe_spin.blockSignals(False)
+        if hasattr(self, "_rebuild_probe_location_edits"):
+            self._rebuild_probe_location_edits()
 
         online = self.get_online_probe_client_ids()
         if getattr(self, "diagnostics_manager", None) is not None:
