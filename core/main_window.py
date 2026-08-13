@@ -737,15 +737,15 @@ class MainWindow(QMainWindow, UIBase):
         cr = getattr(self, "control_room_page", None)
         if cr is None:
             return
-        # Enrich location labels for display
+        # Enrich location labels for display — always from Settings slot labels
         enriched = []
         for i, e in enumerate(entries or []):
             row = dict(e)
-            if not row.get("location") and hasattr(self, "home_page"):
+            if hasattr(self, "home_page"):
                 try:
                     row["location"] = self.home_page._slot_location(i)
                 except Exception:
-                    row["location"] = ""
+                    row["location"] = row.get("location") or ""
             if not row.get("name"):
                 try:
                     from core.translation import _t

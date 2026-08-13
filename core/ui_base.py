@@ -3026,7 +3026,9 @@ class UIBase():
             self.config.set_probe_slot_locations(locs)
         self.config.save_settings()
         home = getattr(self, "home_page", None)
-        if home is not None and hasattr(home, "schedule_web_flush"):
+        if home is not None and hasattr(home, "sync_probe_slot_locations"):
+            home.sync_probe_slot_locations(immediate=True)
+        elif home is not None and hasattr(home, "schedule_web_flush"):
             home.schedule_web_flush()
         if getattr(self, "control_room_mode", False) and hasattr(self, "_refresh_control_room_snapshot"):
             self._refresh_control_room_snapshot()

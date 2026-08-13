@@ -504,6 +504,12 @@ class HomePage(QWidget):
             from core.translation import default_probe_location
             return default_probe_location(i)
 
+    def sync_probe_slot_locations(self, immediate=True):
+        """Rewrite cached card locations from Settings (stop old/new label flicker)."""
+        for i, e in enumerate(self._probe_entries):
+            e["location"] = self._slot_location(i)
+        self.schedule_web_flush(immediate=immediate)
+
     def _link_level(self):
         t = self.master_link_label.text()
         if "离线" in t or "Offline" in t:
@@ -523,10 +529,9 @@ class HomePage(QWidget):
         probes = []
         for i, e in enumerate(self._probe_entries):
             probes.append({
-                # name/location 每次按当前语言重算，避免切英文仍显示「号探头/左侧」
-                # name 跟卡片身份(slot_id/client_id)；location 跟卡片一起走（entry 优先）
+                # name 跟卡片身份；location 始终跟设置页槽位标签（避免两路刷新来回跳）
                 "name": self._live_probe_name(i, e),
-                "location": str(e.get("location") or "").strip() or self._slot_location(i),
+                "location": self._slot_location(i),
                 "cps": int(e.get("cps", 0) or 0),
                 "threshold": int(e.get("threshold", 1000) or 1000),
                 "isAlarm": bool(e.get("hit", False)),
@@ -702,8 +707,7 @@ class HomePage(QWidget):
         for i, e in enumerate(self._probe_entries):
             if e.get("slot_id") is None:
                 e["slot_id"] = i
-            if not str(e.get("location") or "").strip():
-                e["location"] = self._slot_location(i)
+            e["location"] = self._slot_location(i)
             e["cps"] = 0
             e["online"] = False
             e["hit"] = False
@@ -802,18 +806,13 @@ class HomePage(QWidget):
             slot_id = prev.get("slot_id") if prev else None
             if slot_id is None:
                 slot_id = i
-            loc = ""
-            if prev and str(prev.get("location") or "").strip():
-                loc = str(prev.get("location")).strip()
-            if not loc:
-                loc = self._slot_location(i)
             self._probe_entries[i] = {
                 "name": self._live_probe_name(i, {
                     "client_id": cid,
                     "slot_id": slot_id,
                     "name": e.get("name"),
                 }),
-                "location": loc,
+                "location": self._slot_location(i),
                 "cps": cps,
                 "online": online,
                 "hit": hit,
