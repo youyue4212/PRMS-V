@@ -452,13 +452,27 @@ class MainWindow(QMainWindow, UIBase):
             # 需要登录；取消则静默回主显示，不再弹「需要登录」
             if self.login(preferred_page=index, required_for_page=True):
                 return
-            self.stacked_widget.setCurrentIndex(0)
-            self.bottom_nav.set_active_button(0)
-            self._apply_public_chrome(0)
+            self._apply_page_index(0)
             return
 
+        self._apply_page_index(index)
+        # 更新操作时间（重置超时计时器）
+        self.update_operate_time()
+
+    def _apply_page_index(self, index):
+        """切页后的统一收尾：状态栏、首页/曲线刷新、绘图节拍。登录/退出也走这里。"""
+        # 先写首页数据再 show，避免 showEvent 把藏页期间的旧画面立刻推上去
+        if index == 0:
+            if self.is_master_online() and getattr(self, "latest_master_summary", None) is not None:
+                self.on_master_summary_ui(self.latest_master_summary, self.master_client_id)
+            else:
+                self._refresh_home_from_probes(self.client_data)
+            if getattr(self, "control_room_mode", False):
+                self._refresh_control_room_snapshot()
+
         self.stacked_widget.setCurrentIndex(index)
-        self.bottom_nav.set_active_button(index)
+        if hasattr(self, "bottom_nav"):
+            self.bottom_nav.set_active_button(index)
         if hasattr(self, "status_bar"):
             # 平板主显示用 Web 顶栏藏 Qt 状态栏；主控室模式始终显示状态栏
             if getattr(self, "control_room_mode", False):
@@ -470,17 +484,16 @@ class MainWindow(QMainWindow, UIBase):
         if not self.is_logged_in():
             self._apply_public_chrome(index)
         if index == 0:
-            # 切回主显示时立即按当前源刷新（主控 L2 或探头回退）
-            if self.is_master_online() and getattr(self, "latest_master_summary", None) is not None:
-                self.on_master_summary_ui(self.latest_master_summary, self.master_client_id)
-            else:
-                self._refresh_home_from_probes(self.client_data)
-            if getattr(self, "control_room_mode", False):
-                self._refresh_control_room_snapshot()
+            home = getattr(self, "home_page", None)
+            if home is not None and hasattr(home, "schedule_web_flush"):
+                home.schedule_web_flush(immediate=True)
+        elif index in (1, 2):
+            self._plot_dirty = True
+            self.update_data(update_cps=(index == 1), update_spectrum=(index == 2))
+        if hasattr(self, "_sync_plot_timer_interval"):
+            self._sync_plot_timer_interval(index)
         if hasattr(self, "alarm_log_page") and hasattr(self.alarm_log_page, "update_auth_controls"):
             self.alarm_log_page.update_auth_controls()
-        # 更新操作时间（重置超时计时器）
-        self.update_operate_time()
 
     def _apply_public_chrome(self, index: int):
         """公共模式 UI：主显示藏底栏；报警日志显示底栏便于返回。主控室模式常显底栏。"""
@@ -1531,12 +1544,63 @@ class MainWindow(QMainWindow, UIBase):
                 kind in ("over_threshold", "soft_cleared", "fault"),
             )
 
+    def _format_hit_probes_for_log(self, packet) -> str:
+        """主控 hit_mask → 操作员可读的探头位置（槽位与主控 bit 一致）。"""
+        from core.translation import _t
+        if packet is None:
+            return _t("log_hit_probes_none")
+        mask = int(getattr(packet, "hit_probe_mask", 0) or 0)
+        try:
+            n = int(packet.active_probe_count() or 16)
+        except Exception:
+            n = 16
+        n = max(1, min(n, 16))
+        parts = []
+        for i in range(n):
+            if not (mask & (1 << i)):
+                continue
+            loc = ""
+            try:
+                loc = str(self.home_page._slot_location(i) or "").strip()
+            except Exception:
+                loc = ""
+            label = loc or _t("probe_slot_name", n=i + 1)
+            cps = 0
+            try:
+                probe_cps = getattr(packet, "probe_cps", None) or []
+                if i < len(probe_cps):
+                    cps = int(probe_cps[i] or 0)
+            except Exception:
+                cps = 0
+            if cps > 0:
+                parts.append("%s %d cps" % (label, cps))
+            else:
+                parts.append(label)
+        return "、".join(parts) if parts else _t("log_hit_probes_none")
+
+    def _channel_hard_alarm_log_message(self, packet) -> str:
+        probes = self._format_hit_probes_for_log(packet)
+        decision = ""
+        if packet is not None:
+            lang = "zh"
+            try:
+                from core.translation import TranslationManager
+                lang = TranslationManager().current_lang
+            except Exception:
+                pass
+            try:
+                decision = packet.decision_text(lang)
+            except Exception:
+                decision = "0x%02X" % int(getattr(packet, "decision_result", 0) or 0)
+        return "%s | %s" % (probes, decision)
+
     def _sync_channel_hard_alarm_log(self, active: bool, packet=None):
         """边沿写入通道符合硬报事件（alarm_logger client=master_channel）。"""
         prev = bool(getattr(self, "_channel_hard_alarm_active", False))
+        msg = self._channel_hard_alarm_log_message(packet)
         if prev == bool(active):
             if active and packet is not None:
-                # 持续硬报时刷新峰值 CPS
+                # 持续硬报时刷新峰值 CPS / 命中探头
                 try:
                     from core.alarm_logger import get_alarm_logger
                     get_alarm_logger().log_alarm_event(
@@ -1548,11 +1612,7 @@ class MainWindow(QMainWindow, UIBase):
                         product_id=int(getattr(packet, "master_id", 0) or 0),
                         sensitivity=0,
                         alarm_type="ChannelMatch",
-                        message="hit_mask=0x%04X decision=0x%02X"
-                        % (
-                            int(getattr(packet, "hit_probe_mask", 0) or 0),
-                            int(getattr(packet, "decision_result", 0) or 0),
-                        ),
+                        message=msg,
                     )
                 except Exception:
                     pass
@@ -1573,11 +1633,11 @@ class MainWindow(QMainWindow, UIBase):
                 product_id=int(getattr(packet, "master_id", 0) or 0) if packet else 0,
                 sensitivity=0,
                 alarm_type="ChannelMatch",
-                message="hit_mask=0x%04X decision=0x%02X" % (mask, decision),
+                message=msg,
             )
             self.log(
-                "Channel hard-alarm %s (decision=0x%02X hit_mask=0x%04X cps=%d)"
-                % ("ACTIVE" if active else "CLEAR", decision, mask, int(cps)),
+                "Channel hard-alarm %s (decision=0x%02X hit_mask=0x%04X cps=%d probes=%s)"
+                % ("ACTIVE" if active else "CLEAR", decision, mask, int(cps), msg),
                 "WARNING" if active else "INFO",
             )
         except Exception as e:
@@ -2317,8 +2377,6 @@ class MainWindow(QMainWindow, UIBase):
             self.status_bar.setVisible(False)
             self.setWindowTitle(_t("home_title"))
             self.bottom_nav.setVisible(False)
-        self.stacked_widget.setCurrentIndex(0)
-        self.bottom_nav.set_active_button(0)
         # 主显示保持整洁：藏顶栏按钮；底栏仅报警日志页再显示（主控室除外）
         self.button_container.setVisible(False)
         self.acquisition_btn.setVisible(False)
@@ -2338,17 +2396,8 @@ class MainWindow(QMainWindow, UIBase):
             }
             QPushButton:pressed { background-color: #45a049; }
         """)
-        # 回到公共主显示时立刻刷一次现有探头/主控数据
-        if self.is_master_online() and getattr(self, "latest_master_summary", None) is not None:
-            self.on_master_summary_ui(self.latest_master_summary, self.master_client_id)
-        else:
-            self._refresh_home_from_probes(self.client_data)
-        if hasattr(self, "home_page") and hasattr(self.home_page, "schedule_web_flush"):
-            self.home_page.schedule_web_flush()
-        if hasattr(self, "alarm_log_page") and hasattr(self.alarm_log_page, "update_auth_controls"):
-            self.alarm_log_page.update_auth_controls()
+        self._apply_page_index(0)
         if getattr(self, "control_room_mode", False):
-            self._refresh_control_room_snapshot()
             self._apply_control_room_nav_labels()
 
     def update_ui_for_user_role(self):
@@ -2996,6 +3045,10 @@ class MainWindow(QMainWindow, UIBase):
             QEvent.TouchUpdate,
         ):
             self.update_operate_time()
+            if event.type() in (QEvent.MouseButtonPress, QEvent.TouchBegin):
+                home = getattr(self, "home_page", None)
+                if home is not None and hasattr(home, "note_user_input"):
+                    home.note_user_input()
 
         self._handle_secret_corner_event(obj, event)
 
@@ -3132,11 +3185,8 @@ class MainWindow(QMainWindow, UIBase):
         self.setWindowTitle(f"Gamma-ray Spectrometer - {username} ({role_name})")
 
         target = preferred_page if preferred_page is not None else 1
-        self.stacked_widget.setCurrentIndex(target)
-        self.bottom_nav.set_active_button(target)
+        self._apply_page_index(target)
         self.update_operate_time()
-        if hasattr(self, "home_page") and hasattr(self.home_page, "schedule_web_flush"):
-            self.home_page.schedule_web_flush()
 
         # 登录成功不弹框：界面切到管理页/顶栏模式变化即反馈
         self.log(f"Logged in: {username} ({actual_user.role.value})", 'INFO')

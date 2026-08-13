@@ -13,7 +13,7 @@ from PyQt5.QtCore import Qt, QObject, QUrl, pyqtSignal, pyqtSlot, QTimer
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QFrame, QPushButton, QSizePolicy,
 )
-from PyQt5.QtWebEngineWidgets import QWebEngineView
+from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEngineSettings
 from PyQt5.QtWebChannel import QWebChannel
 
 PROBE_OFFLINE_HOLD_SEC = 2.0
@@ -103,6 +103,10 @@ class HomePage(QWidget):
         self._health_rows = {}
         self._fault_rows = {}
         self._passage_busy = False
+        self._flush_pending = False
+        self._last_web_payload = None
+        self._defer_flush_until = 0.0
+        self._battery_cache = ("--%", 0.0)
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -120,6 +124,15 @@ class HomePage(QWidget):
         if not self.headless:
             self.browser = QWebEngineView(self)
             self.browser.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+            self.browser.setAttribute(Qt.WA_OpaquePaintEvent, True)
+            try:
+                st = self.browser.settings()
+                st.setAttribute(QWebEngineSettings.ScrollAnimatorEnabled, False)
+                st.setAttribute(QWebEngineSettings.PluginsEnabled, False)
+                st.setAttribute(QWebEngineSettings.JavascriptCanOpenWindows, False)
+                st.setAttribute(QWebEngineSettings.ErrorPageEnabled, False)
+            except Exception:
+                pass
             root.addWidget(self.browser, 1)
 
             self.bridge = HmiBridge(self)
@@ -213,14 +226,49 @@ class HomePage(QWidget):
         self.channel_reset_btn.setEnabled(False)
         self.channel_reset_btn.hide()
 
-    def schedule_web_flush(self):
+    def _web_page_visible(self):
+        if self.headless or self.browser is None:
+            return False
+        return bool(self.isVisible())
+
+    def note_user_input(self):
+        """Postpone JS push so a click is not queued behind applyHmiState."""
         if self.headless:
             return
+        self._defer_flush_until = time.monotonic() + 0.16
+        if self._web_page_visible():
+            self._flush_timer.start(180)
+
+    def schedule_web_flush(self, immediate=False):
+        if self.headless:
+            return
+        if immediate:
+            self._flush_pending = False
+            self._flush_timer.stop()
+            self._flush_to_web()
+            return
+        if not self._web_page_visible():
+            self._flush_pending = True
+            return
+        delay_ms = 220
+        remain = self._defer_flush_until - time.monotonic()
+        if remain > 0:
+            delay_ms = max(delay_ms, int(remain * 1000) + 40)
+            self._flush_timer.start(delay_ms)
+            return
         if not self._flush_timer.isActive():
-            self._flush_timer.start(50)
+            self._flush_timer.start(delay_ms)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        # 仅补推藏页期间积压的状态；已在当前页时由调用方决定是否 immediate
+        if self._flush_pending:
+            self._flush_pending = False
+            self.schedule_web_flush(immediate=True)
 
     def _on_page_ready(self):
         self._web_ready = True
+        self._last_web_payload = None
         self._flush_to_web()
 
     def _nav(self, page_index):
@@ -251,7 +299,7 @@ class HomePage(QWidget):
         if self.parent is not None and hasattr(self.parent, "login"):
             # Stay on home after login so card navigation becomes active there
             self.parent.login(preferred_page=0)
-            self.schedule_web_flush()
+            self.schedule_web_flush(immediate=True)
 
     def _on_js_reorder(self, from_index, to_index):
         """Swap two home probe slots (data order + location labels) and persist."""
@@ -302,14 +350,14 @@ class HomePage(QWidget):
             except Exception:
                 pass
 
-        self.schedule_web_flush()
+        self.schedule_web_flush(immediate=True)
 
     def _on_js_language(self):
         if self.parent is not None and hasattr(self.parent, "status_bar"):
             sb = self.parent.status_bar
             if hasattr(sb, "toggle_language"):
                 sb.toggle_language()
-                self.schedule_web_flush()
+                self.schedule_web_flush(immediate=True)
                 return
         # fallback
         try:
@@ -321,7 +369,7 @@ class HomePage(QWidget):
                 self.parent.on_language_changed(new_lang)
         except Exception:
             pass
-        self.schedule_web_flush()
+        self.schedule_web_flush(immediate=True)
 
     # ---- state → JS ----
 
@@ -600,22 +648,33 @@ class HomePage(QWidget):
         return "EN" if self._ui_lang() == "zh" else "中文"
 
     def _battery_text(self):
+        now = time.monotonic()
+        cached, ts = self._battery_cache
+        if now - ts < 15.0:
+            return cached
         try:
             from core.utils import get_battery_percentage
             level, _plugged = get_battery_percentage()
             if level is None:
-                return "--%"
-            return "%d%%" % int(level)
+                text = "--%"
+            else:
+                text = "%d%%" % int(level)
         except Exception:
-            return "--%"
+            text = "--%"
+        self._battery_cache = (text, now)
+        return text
 
     def _flush_to_web(self):
         if self.headless or self.browser is None:
             return
         if not self._web_ready:
+            self._flush_pending = True
             return
         state = self.build_hmi_state()
         payload = json.dumps(state, ensure_ascii=False)
+        if payload == self._last_web_payload:
+            return
+        self._last_web_payload = payload
         js = "if (window.applyHmiState) { applyHmiState(%s); }" % payload
         self.browser.page().runJavaScript(js)
 
@@ -767,8 +826,7 @@ class HomePage(QWidget):
 
     def set_master_link_status(self, online, master_id=None, lang="zh", link_only=False):
         if online:
-            mid = " #%s" % master_id if master_id is not None else ""
-            text = ("Master Online%s" % mid) if lang == "en" else ("主控在线%s" % mid)
+            text = "Master Online" if lang == "en" else "主控在线"
         elif link_only:
             text = "Master Linked (no L2)" if lang == "en" else "主控已连接(无L2)"
         else:
@@ -818,7 +876,7 @@ class HomePage(QWidget):
         for i, e in enumerate(self._probe_entries):
             e["name"] = self._live_probe_name(i, e)
             e["location"] = self._slot_location(i)
-        self.schedule_web_flush()
+        self.schedule_web_flush(immediate=True)
 
 
 def _install_label_hooks(page: "HomePage"):

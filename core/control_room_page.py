@@ -11,7 +11,7 @@ from PyQt5.QtWidgets import (
 
 from core.ui_tokens import (
     BG, PANEL, BORDER, OK, WARN, ALARM, INFO, TEXT, TEXT_DIM, MUTED,
-    RADIUS_CARD, RADIUS_BTN, cr_px, cr_cps_px,
+    RADIUS_CARD, RADIUS_BTN, cr_px, cr_cps_px, cps_digit_scale,
 )
 
 
@@ -68,26 +68,65 @@ class ProbeTile(QFrame):
         head.addWidget(self.loc_label)
         lay.addLayout(head)
 
+        self._cps_base_px = cr_cps_px(36)
+        self._cps_color = OK
         self.cps_label = QLabel("--")
         self.cps_label.setAlignment(Qt.AlignCenter)
-        self.cps_label.setStyleSheet(
-            f"color: {OK}; font-size: {cr_cps_px(36)}px; font-weight: bold; font-family: Consolas, monospace;"
-        )
-        lay.addWidget(self.cps_label, 1)
-
-        foot = QHBoxLayout()
+        self.cps_label.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Preferred)
+        self._apply_cps_typography("--")
         self.unit_label = QLabel("CPS")
-        self.unit_label.setStyleSheet(f"color: {MUTED}; font-size: {cr_px(13)}px;")
+        self.unit_label.setAlignment(Qt.AlignCenter)
+        self.unit_label.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
+        self.unit_label.setStyleSheet(
+            f"color: {MUTED}; font-size: {cr_px(16)}px; font-weight: 600;"
+        )
+        body_wrap = QWidget()
+        body_wrap.setStyleSheet("background: transparent;")
+        body_lay = QVBoxLayout(body_wrap)
+        body_lay.setContentsMargins(0, 0, 0, 0)
+        body_lay.addStretch(1)
+        cps_row = QHBoxLayout()
+        cps_row.setSpacing(8)
+        cps_row.addStretch(1)
+        cps_row.addWidget(self.cps_label, 0, Qt.AlignVCenter)
+        cps_row.addWidget(self.unit_label, 0, Qt.AlignVCenter)
+        cps_row.addStretch(1)
+        body_lay.addLayout(cps_row, 0)
+        body_lay.addStretch(1)
+        lay.addWidget(body_wrap, 1)
+
+        foot_wrap = QFrame()
+        foot_wrap.setObjectName("probeFoot")
+        foot_wrap.setStyleSheet(f"""
+            QFrame#probeFoot {{
+                border-top: 1px solid {BORDER};
+                padding-top: 6px;
+                margin-top: 2px;
+            }}
+            QFrame#probeFoot QLabel {{
+                background: transparent; border: none;
+            }}
+        """)
+        foot = QHBoxLayout(foot_wrap)
+        foot.setContentsMargins(0, 0, 0, 0)
         self.status_label = QLabel("")
-        self.status_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.status_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         self.status_label.setStyleSheet(
             f"color: {MUTED}; font-size: {cr_px(13)}px; font-weight: bold;"
         )
-        foot.addWidget(self.unit_label)
-        foot.addWidget(self.status_label, 1)
-        lay.addLayout(foot)
+        foot.addWidget(self.status_label, 0, Qt.AlignLeft)
+        foot.addStretch(1)
+        lay.addWidget(foot_wrap)
 
         self._apply_chrome("offline")
+
+    def _apply_cps_typography(self, text: str):
+        scale = cps_digit_scale(text)
+        px = max(12, int(round(self._cps_base_px * scale)))
+        self.cps_label.setStyleSheet(
+            f"color: {self._cps_color}; font-size: {px}px; font-weight: bold; "
+            f"font-family: Consolas, monospace;"
+        )
 
     def set_index(self, index: int):
         self._index = int(index)
@@ -154,8 +193,11 @@ class ProbeTile(QFrame):
             }}
             QFrame#probeTile QLabel {{ background: transparent; border: none; }}
         """)
-        self.cps_label.setStyleSheet(
-            f"color: {cps}; font-size: {cr_cps_px(36)}px; font-weight: bold; font-family: Consolas, monospace;"
+        self._cps_color = cps
+        self._apply_cps_typography(self.cps_label.text())
+        unit_color = WARN if kind == "alarm" else MUTED
+        self.unit_label.setStyleSheet(
+            f"color: {unit_color}; font-size: {cr_px(16)}px; font-weight: 600;"
         )
         self._chrome_kind = kind
 
@@ -167,9 +209,12 @@ class ProbeTile(QFrame):
         hit = bool(entry.get("hit", False))
         cps = int(entry.get("cps", 0) or 0)
         if online or cps:
-            self.cps_label.setText(str(cps))
+            cps_text = str(cps)
+            self.cps_label.setText(cps_text)
         else:
-            self.cps_label.setText("--")
+            cps_text = "--"
+            self.cps_label.setText(cps_text)
+        self._apply_cps_typography(cps_text)
         status_qss = f"font-size: {cr_px(13)}px; font-weight: bold;"
         if hit:
             self.status_label.setText(labels.get("alarm", "ALARM"))
@@ -254,11 +299,10 @@ class ControlRoomPage(QWidget):
 
         header.addStretch(1)
 
+        self._total_cps_base_px = cr_cps_px(30)
         self.total_cps_label = QLabel("0")
         self.total_cps_label.setAlignment(Qt.AlignCenter)
-        self.total_cps_label.setStyleSheet(
-            f"color: {OK}; font-size: {cr_cps_px(30)}px; font-weight: bold; padding: 2px 10px;"
-        )
+        self._apply_total_cps_typography("0")
         header.addWidget(self.total_cps_label)
         self.total_cps_unit = QLabel("CPS")
         self.total_cps_unit.setStyleSheet(f"color: {MUTED}; font-size: {cr_px(14)}px;")
@@ -523,9 +567,18 @@ class ControlRoomPage(QWidget):
         tile.set_reorder_enabled(self._can_reorder)
         return tile
 
+    def _apply_total_cps_typography(self, text: str):
+        scale = cps_digit_scale(text)
+        px = max(12, int(round(self._total_cps_base_px * scale)))
+        self.total_cps_label.setStyleSheet(
+            f"color: {OK}; font-size: {px}px; font-weight: bold; padding: 2px 10px;"
+        )
+
     def update_probes(self, entries, total_cps=0):
         self._probe_entries = list(entries or [])
-        self.total_cps_label.setText(str(int(total_cps or 0)))
+        total_text = str(int(total_cps or 0))
+        self.total_cps_label.setText(total_text)
+        self._apply_total_cps_typography(total_text)
         n = len(self._probe_entries)
         online = sum(1 for e in self._probe_entries if e.get("online"))
         from core.translation import _t
@@ -652,6 +705,7 @@ class ControlRoomPage(QWidget):
             if not events:
                 self.alarm_list.addItem(QListWidgetItem(_t("control_room_no_alarms")))
                 return
+            from core.alarm_log_page import format_alarm_event_client
             restore_row = -1
             for i, ev in enumerate(events[:30]):
                 try:
@@ -659,8 +713,9 @@ class ControlRoomPage(QWidget):
                 except Exception:
                     ts = "--:--:--"
                 st = _t("log_status_active") if ev.alarm_status else _t("log_status_cleared")
+                client = format_alarm_event_client(ev)
                 line = "%s  %s  %s  %.0f cps" % (
-                    ts, ev.client_id or "-", st, float(ev.count_rate or 0),
+                    ts, client or "-", st, float(ev.count_rate or 0),
                 )
                 item = QListWidgetItem(line)
                 if ev.alarm_status:

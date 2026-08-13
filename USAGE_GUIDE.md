@@ -13,6 +13,7 @@
 - 数据目录：
   - 报警日志默认位置：`~/Raysen/AlarmLogs`
   - 导出会包含：程序 `logs/`、`data/` 以及 `~/Raysen`
+  - 记录规则见 [ALARM_LOG.md](ALARM_LOG.md)（TCP+主控时一次通道硬报一条，不与探头辐射位重复）
 
 ---
 

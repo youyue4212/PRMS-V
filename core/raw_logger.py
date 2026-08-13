@@ -52,6 +52,7 @@ class RawLogger:
 
     def close(self):
         if self.current_file:
-            self.log(f"Raw packets has been written to {self.filepath}")
+            if self.log:
+                self.log(f"Raw packets has been written to {self.filepath}")
             self.current_file.close()
             self.current_file = None

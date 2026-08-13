@@ -25,7 +25,7 @@ source .venv_pack/bin/activate
 pip install -U pip wheel
 pip install pyinstaller
 # 按你现场需要安装运行依赖（可改成 -r requirements.txt）
-pip install PyQt5 pyqtgraph numpy pandas pyserial openpyxl psutil scipy
+pip install PyQt5 PyQtWebEngine pyqtgraph numpy pandas pyserial openpyxl psutil scipy
 
 # 2) 清理旧产物
 rm -rf "$SCRIPT_DIR/dist" "$SCRIPT_DIR/build"

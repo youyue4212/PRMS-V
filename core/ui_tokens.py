@@ -39,6 +39,21 @@ def cr_cps_px(n: int) -> int:
     """Scale CPS / count-rate numerals (larger than general UI text)."""
     return max(1, int(round(n * CONTROL_ROOM_FONT_SCALE * CONTROL_ROOM_CPS_EXTRA)))
 
+
+def cps_digit_scale(text) -> float:
+    """Shrink CPS numerals when digit count grows so the unit label stays separated."""
+    s = str(text or "").strip().replace(",", "")
+    if not s or s == "--":
+        return 1.0
+    n = len(s)
+    if n <= 5:
+        return 1.0
+    if n == 6:
+        return 0.82
+    if n == 7:
+        return 0.68
+    return 0.55
+
 # Common stylesheets
 PAGE_TITLE_QSS = f"""
     QLabel {{

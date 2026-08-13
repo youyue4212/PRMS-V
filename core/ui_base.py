@@ -15,6 +15,7 @@ import subprocess
 import pandas as pd
 import numpy as np
 import pyqtgraph as pg
+pg.setConfigOptions(antialias=False, useOpenGL=False)
 
 
 from core.config import ConfigManager
@@ -570,7 +571,7 @@ class UIBase():
         self._spectrogram_ranges_set = False
         self.plot_timer = QTimer()
         self.plot_timer.timeout.connect(self._on_plot_timer)
-        self.plot_timer.start(100)  # 10 Hz
+        self.plot_timer.start(250)  # 首页默认 4Hz；切到曲线/能谱页再升到 10Hz
 
         self.packet_counts = {'cmd': 0, 'spectrum': 0, 'errors': 0,'dev_msg':0}
         self.relay_states = None  # (r0, r1, r2) after first packet; None = not yet received
@@ -2385,20 +2386,38 @@ class UIBase():
         # 运行设备诊断自检
         self.diagnostics_manager.process_packet(actual_client_id, packet)
 
-        # 只置脏标志；实际重绘由 plot_timer（~10Hz）统一执行，避免每包全量重绘
+        # 只置脏标志；实际重绘由 plot_timer 统一执行（能谱页 ~10Hz，其它页 ~4Hz）
         self._plot_dirty = True
 
+    def _stacked_page_index(self):
+        sw = getattr(self, "stacked_widget", None)
+        if sw is None:
+            return -1
+        try:
+            return int(sw.currentIndex())
+        except Exception:
+            return -1
+
+    def _sync_plot_timer_interval(self, page_index=None):
+        """曲线/能谱页 10Hz，其它页 4Hz，减轻点击时主线程抢占。"""
+        timer = getattr(self, "plot_timer", None)
+        if timer is None:
+            return
+        if page_index is None:
+            page_index = self._stacked_page_index()
+        interval = 100 if page_index in (1, 2) else 250
+        if timer.interval() != interval:
+            timer.setInterval(interval)
+
     def _on_plot_timer(self):
-        """绘图节流定时器：有新数据时才刷新图表，固定 ~10Hz。"""
-        if self._plot_dirty:
-            self._plot_dirty = False
-            self.update_data()
+        """绘图节流：有新数据才刷新。未打开曲线/能谱页时不重绘 pyqtgraph。"""
+        if not self._plot_dirty:
+            return
+        self._plot_dirty = False
+        idx = self._stacked_page_index()
+        self.update_data(update_cps=(idx == 1), update_spectrum=(idx == 2))
 
-
-
-
-    
-    def update_data(self):
+    def update_data(self, update_cps=True, update_spectrum=True):
         # Use data from primary client for chart display
         time_series_data = []
         if self.primary_client_id and self.primary_client_id in self.client_time_series:
@@ -2409,51 +2428,49 @@ class UIBase():
             self.primary_client_id = first_client_id
             time_series_data = self.client_time_series[first_client_id]
             self.log(f"Auto-selected {first_client_id} as primary client", 'INFO')
-        
+
         if time_series_data:
-            timestamps, counters, temperatures, hvs, spec_counts = zip(*time_series_data)
-            if len(timestamps) >= 1:
-                # 横轴：本地 Unix 时间；只显示最近 N 分钟
-                window_min = int(getattr(self, "cps_window_minutes", 5) or 5)
-                if window_min not in CPS_WINDOW_CHOICES:
-                    window_min = 5
-                now = time.time()
-                t0 = now - window_min * 60
-                ts = np.asarray(timestamps, dtype=np.float64)
-                rates_all = np.asarray(counters, dtype=np.float64)
-                mask = ts >= t0
-                if np.any(mask):
-                    times = ts[mask]
-                    rates = rates_all[mask]
-                else:
-                    times = ts[-1:]
-                    rates = rates_all[-1:]
+            last = time_series_data[-1]
+            self.current_stat = {
+                'hv': last[3],
+                'rates': float(last[1]),
+                'temp': last[2] / 100
+            }
+            if self.data_updated_callback is not None:
+                self.data_updated_callback(self.current_stat, 0, self.client_data)
 
-                self.curve_cps.setData(times, rates)
-                if hasattr(self, "cps_widget") and hasattr(self.cps_widget, "setXRange"):
-                    self.cps_widget.setXRange(t0, now, padding=0)
-                    self.cps_widget.enableAutoRange('y', True)
+            if update_cps and hasattr(self, "curve_cps"):
+                timestamps, counters, temperatures, hvs, spec_counts = zip(*time_series_data)
+                if len(timestamps) >= 1:
+                    window_min = int(getattr(self, "cps_window_minutes", 5) or 5)
+                    if window_min not in CPS_WINDOW_CHOICES:
+                        window_min = 5
+                    now = time.time()
+                    t0 = now - window_min * 60
+                    ts = np.asarray(timestamps, dtype=np.float64)
+                    rates_all = np.asarray(counters, dtype=np.float64)
+                    mask = ts >= t0
+                    if np.any(mask):
+                        times = ts[mask]
+                        rates = rates_all[mask]
+                    else:
+                        times = ts[-1:]
+                        rates = rates_all[-1:]
 
-                # 更新当前状态（使用最后一个数据包的值）
-                self.current_stat = {
-                    'hv': hvs[-1],
-                    'rates': float(rates_all[-1]),
-                    'temp': temperatures[-1] / 100
-                }
-                
-                if self.data_updated_callback is not None:
-                    self.data_updated_callback(self.current_stat, 0, self.client_data)
+                    self.curve_cps.setData(times, rates)
+                    if hasattr(self, "cps_widget") and hasattr(self.cps_widget, "setXRange"):
+                        self.cps_widget.setXRange(t0, now, padding=0)
+                        self.cps_widget.enableAutoRange('y', True)
 
-            
-            if FILTER_ENABLED:
-                self.spectrum_data = alg.hampel_filter(self.spectrum_data, FILTER_WIN_SIZE, FILTER_NUM_SIGMA)
-
-            # Update channels array to match spectrum data shape
-            if len(self.channels) != len(self.spectrum_data) + 1:
-                self.channels = np.arange(len(self.spectrum_data) + 1)
-            
-            self.curve_spectrum.setData(self.channels, self.spectrum_data)
-            self.update_spectrogram()
+            if update_spectrum and hasattr(self, "curve_spectrum"):
+                if FILTER_ENABLED:
+                    self.spectrum_data = alg.hampel_filter(
+                        self.spectrum_data, FILTER_WIN_SIZE, FILTER_NUM_SIGMA
+                    )
+                if len(self.channels) != len(self.spectrum_data) + 1:
+                    self.channels = np.arange(len(self.spectrum_data) + 1)
+                self.curve_spectrum.setData(self.channels, self.spectrum_data)
+                self.update_spectrogram()
         
     def on_connection_status_changed(self, connected: bool, message: str):
         self.set_status_label(message, connected)
@@ -4039,12 +4056,28 @@ class UIBase():
             # 恢复信号
             self.client_selection_combo.blockSignals(False)
     
+    def _skip_probe_radiation_log(self, client_id: str) -> bool:
+        """通道机有主控时，操作员记录以主控硬报为准，不写探头辐射位。"""
+        if not getattr(self.config, "tcp_enabled", False):
+            return False
+        master_cid = getattr(self, "master_client_id", None)
+        if client_id and master_cid and client_id == master_cid:
+            return True
+        if master_cid:
+            return True
+        if hasattr(self, "is_master_online") and self.is_master_online():
+            return True
+        return False
+
     def log_alarm_event(self, packet: SpectrumPacket, client_id: str, alarm_status: bool):
         """
         记录报警事件到报警日志。
-        以设备报警位为准；ACTIVE 期间由 logger 跟踪峰值 CPS。
+        串口模式：以探头报警位为准。
+        TCP+主控：不写探头辐射位（由主控通道硬报统一记）。
         """
         try:
+            if self._skip_probe_radiation_log(client_id):
+                return
             alarm_logger = get_alarm_logger()
 
             if client_id is None:

@@ -263,15 +263,17 @@ class DiagnosticsManager:
                     if now - self.active_faults[client_id][FaultCode.E303] > 10.0:
                         self.remove_fault(client_id, FaultCode.E303)
                         
-        # E304: Temperature讀数异常 (e.g., exactly 0.0 or extreme static value)
-        # Check if temperature is exactly -128 or 127 (sensor disconnect values for some ICs)
-        if temp == -128.0 or temp == 127.0 or temp == 0.0:
-            # Note: 0.0 is possible but rare, we flag it if it stays exactly 0.0 for 10 packets
-            if len(self.temp_history[client_id]) == 10 and all(t == 0.0 for t in self.temp_history[client_id]):
+        # E304: 温度读数异常。-128/127 为部分 IC 断线固定值，立即报；
+        # 0.0°C 可能是真实读数，连续 10 次（含当前）才报。见 FAULT_CODES.md。
+        if temp in (-128.0, 127.0):
+            self.add_fault(client_id, FaultCode.E304)
+        elif temp == 0.0:
+            samples = list(self.temp_history[client_id]) + [temp]
+            if len(samples) >= 10 and all(t == 0.0 for t in samples[-10:]):
                 self.add_fault(client_id, FaultCode.E304)
         else:
             self.remove_fault(client_id, FaultCode.E304)
-            
+
         self.temp_history[client_id].append(temp)
 
         # 3. Count Rate (计数率) Diagnostics

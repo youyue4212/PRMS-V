@@ -103,8 +103,11 @@
         }
         .total-cps #totalCpsLabel { overflow: hidden; text-overflow: ellipsis; max-width: 9em; }
         .total-cps #totalCps {
-            font-size: 18px; font-weight: 800; font-family: Consolas, "Courier New", monospace;
+            --cps-scale: 1;
+            font-size: calc(18px * var(--cps-scale)); font-weight: 800;
+            font-family: Consolas, "Courier New", monospace;
             color: #00FF66; text-shadow: 0 0 8px rgba(0,255,102,0.3); flex-shrink: 0;
+            white-space: nowrap;
         }
         .status-online {
             flex-shrink: 0; white-space: nowrap;
@@ -306,7 +309,7 @@
         .original-probe-card {
             background: var(--hmi-panel); border: 2px solid var(--hmi-border); border-radius: var(--radius-card);
             padding: 12px 14px;
-            display: flex; flex-direction: column; justify-content: space-between;
+            display: grid; grid-template-rows: auto 1fr auto;
             cursor: pointer; transition: border-color 0.2s;
             min-height: 0; max-height: none; height: 100%; overflow: hidden;
         }
@@ -324,25 +327,39 @@
             max-width: 48%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
         }
         .probe-body {
-            flex: 1 1 auto;
+            grid-row: 2;
             display: flex; flex-direction: column;
             justify-content: center; align-items: center;
-            text-align: center; padding: 6px 0; min-height: 0; gap: 2px;
+            text-align: center; padding: 6px 0; min-height: 0;
+        }
+        .probe-cps-row {
+            display: inline-flex; align-items: baseline; justify-content: center;
+            gap: 8px; flex-wrap: nowrap; width: 100%; max-width: 100%;
+            min-width: 0; padding: 0 6px; box-sizing: border-box;
         }
         .probe-num {
-            font-size: clamp(56px, 7vh, 72px); font-weight: 800;
+            --cps-scale: 1;
+            font-size: calc(clamp(56px, 7vh, 72px) * var(--cps-scale));
+            font-weight: 800;
             font-family: "Microsoft YaHei", "Segoe UI", sans-serif;
             color: #00FF66; text-shadow: 0 0 18px rgba(0, 255, 102, 0.40);
             line-height: 1; letter-spacing: -1px;
             font-variant-numeric: tabular-nums;
+            flex: 0 1 auto; min-width: 0; max-width: calc(100% - 3.5em);
+            white-space: nowrap;
         }
         .original-probe-card.alarm .probe-num { animation: textGlowRed 0.8s infinite; }
         .original-probe-card.offline .probe-num { color: #888; text-shadow: none; }
         .probe-unit-label {
-            font-size: 14px; color: #8490A0; margin-top: 4px;
-            font-weight: 600; letter-spacing: 1px;
+            font-size: clamp(18px, 2.4vh, 24px); color: #8490A0;
+            font-weight: 600; letter-spacing: 0.5px;
+            flex: 0 0 auto; line-height: 1;
+            padding-bottom: 0.15em; white-space: nowrap;
         }
+        .original-probe-card.alarm .probe-unit-label { color: #B45309; }
+        .original-probe-card.offline .probe-unit-label { color: #666; }
         .probe-foot {
+            grid-row: 3;
             display: flex; justify-content: flex-start; align-items: center;
             border-top: 1px solid #232532; padding-top: 10px; margin-top: 6px;
             font-size: 15px; color: var(--hmi-muted); flex-shrink: 0; font-weight: 600;
@@ -719,6 +736,28 @@
         var canReorder = false;
         var _drag = { from: -1, active: false, moved: false, startX: 0, startY: 0, el: null };
 
+        function cpsDigitScale(text) {
+            var s = String(text == null ? '' : text).replace(/,/g, '').trim();
+            if (!s || s === '--') return 1;
+            var n = s.length;
+            if (n <= 5) return 1;
+            if (n === 6) return 0.82;
+            if (n === 7) return 0.68;
+            return 0.55;
+        }
+
+        function applyCpsScale(el, text) {
+            if (!el) return;
+            el.style.setProperty('--cps-scale', String(cpsDigitScale(text)));
+        }
+
+        function setTotalCpsDisplay(total) {
+            var el = $('totalCps');
+            if (!el) return;
+            el.innerText = total;
+            applyCpsScale(el, total);
+        }
+
         function renderProbes() {
             const container = $('probesContainer');
             container.innerHTML = '';
@@ -744,16 +783,19 @@
                     '<span class="probe-location-tag">' + (probe.location || '') + '</span>' +
                     '</div>' +
                     '<div class="probe-body">' +
-                    '<div class="probe-num">' + cpsShow + '</div>' +
-                    '<div class="probe-unit-label">CPS</div>' +
+                    '<div class="probe-cps-row">' +
+                    '<span class="probe-num">' + cpsShow + '</span>' +
+                    '<span class="probe-unit-label">CPS</span>' +
+                    '</div>' +
                     '</div>' +
                     '<div class="probe-foot">' +
                     '<div class="status-indicator">' + stateHtml + '</div>' +
                     '</div>';
                 bindProbeCardInteractions(card, index, probe);
+                applyCpsScale(card.querySelector('.probe-num'), cpsShow);
                 container.appendChild(card);
             });
-            if (!embedded) $('totalCps').innerText = total;
+            if (!embedded) setTotalCpsDisplay(total);
         }
 
         function clearDragOver() {
@@ -981,8 +1023,7 @@
             activeCount = Math.max(activeCount, args.length);
             var total = 0;
             for (var j = 0; j < activeCount; j++) total += Number(probes[j].cps) || 0;
-            var el = document.getElementById('totalCps');
-            if (el) el.innerText = total;
+            setTotalCpsDisplay(total);
             renderProbes();
         };
 
@@ -1008,7 +1049,7 @@
             if (ghost) ghost.style.display = canNavigate ? 'none' : '';
             if (state.modeLabel) { var mb0 = $('modeBadge'); if (mb0) mb0.innerText = state.modeLabel; }
 
-            if (state.totalCps != null) $('totalCps').innerText = state.totalCps;
+            if (state.totalCps != null) setTotalCpsDisplay(state.totalCps);
             if (state.masterLink) {
                 const el = $('masterLink');
                 el.innerText = state.masterLink.text || '';

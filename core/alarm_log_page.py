@@ -18,6 +18,53 @@ from PyQt5.QtWidgets import (
 from core.alarm_logger import get_alarm_logger, AlarmEvent
 
 
+def format_alarm_event_client(event: AlarmEvent) -> str:
+    from core.translation import _t
+    t = str(getattr(event, "alarm_type", "") or "")
+    if t == "MasterFault":
+        return _t("log_master_client")
+    if t == "ChannelMatch":
+        msg = str(getattr(event, "message", "") or "")
+        if " | " in msg:
+            probes = msg.split(" | ", 1)[0].strip()
+            if probes:
+                return probes
+        cid = str(getattr(event, "client_id", "") or "")
+        if cid == "master_channel":
+            return _t("log_master_client")
+        return cid or _t("log_master_client")
+    return str(getattr(event, "client_id", "") or "")
+
+
+def format_alarm_event_type(event: AlarmEvent) -> str:
+    from core.translation import _t
+    t = str(getattr(event, "alarm_type", "") or "")
+    if t == "MasterFault":
+        return _t("log_master_fault_type")
+    if t == "ChannelMatch":
+        return _t("log_type_channel_match")
+    if t in ("Radiation", "radiation", "Alarm"):
+        return _t("log_type_radiation")
+    return t or "--"
+
+
+def format_alarm_event_message(event: AlarmEvent) -> str:
+    t = str(getattr(event, "alarm_type", "") or "")
+    msg = str(getattr(event, "message", "") or "")
+    if t == "ChannelMatch":
+        if " | " in msg:
+            return msg.split(" | ", 1)[1].strip()
+        return msg
+    if t != "MasterFault":
+        return msg
+    client_id = str(getattr(event, "client_id", "") or "")
+    if client_id.startswith("master_fault_"):
+        code = client_id.replace("master_fault_", "", 1)
+        if code and code not in msg:
+            msg = ("%s %s" % (code, msg)).strip()
+    return msg
+
+
 class AlarmLogPage(QWidget):
     """Alarm log page"""
     
@@ -30,36 +77,17 @@ class AlarmLogPage(QWidget):
         self.setup_timer()
 
     def _format_event_client(self, event: AlarmEvent) -> str:
-        from core.translation import _t
-        if str(getattr(event, "alarm_type", "")) == "MasterFault":
-            return _t("log_master_client")
-        return str(getattr(event, "client_id", "") or "")
+        return format_alarm_event_client(event)
 
     def _format_event_type(self, event: AlarmEvent) -> str:
-        from core.translation import _t
-        t = str(getattr(event, "alarm_type", "") or "")
-        if t == "MasterFault":
-            return _t("log_master_fault_type")
-        if t == "ChannelMatch":
-            return _t("log_type_channel_match")
-        if t in ("Radiation", "radiation", "Alarm"):
-            return _t("log_type_radiation")
-        return t or "--"
+        return format_alarm_event_type(event)
 
     def _format_event_status(self, event: AlarmEvent) -> str:
         from core.translation import _t
         return _t("log_status_active") if bool(getattr(event, "alarm_status", False)) else _t("log_status_cleared")
 
     def _format_event_message(self, event: AlarmEvent) -> str:
-        msg = str(getattr(event, "message", "") or "")
-        if str(getattr(event, "alarm_type", "")) != "MasterFault":
-            return msg
-        client_id = str(getattr(event, "client_id", "") or "")
-        if client_id.startswith("master_fault_"):
-            code = client_id.replace("master_fault_", "", 1)
-            if code and code not in msg:
-                msg = ("%s %s" % (code, msg)).strip()
-        return msg
+        return format_alarm_event_message(event)
     
     def setup_ui(self):
         """Setup UI interface"""
@@ -414,6 +442,8 @@ class AlarmLogPage(QWidget):
     
     def refresh_display(self):
         """Refresh display with pagination support"""
+        if not self.isVisible():
+            return
         from core.translation import _t
         stats = self.alarm_logger.get_statistics()
 

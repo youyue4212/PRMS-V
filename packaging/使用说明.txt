@@ -1,0 +1,25 @@
+daq_tablet Windows 运行说明
+==========================
+
+本程序是「目录模式」打包，不能只拷贝一个 exe。
+
+正确结构（必须一起拷贝整个文件夹）：
+
+  daq_tablet\
+    daq_tablet.exe
+    _internal\          <-- 必须和 exe 在同一层
+      python314.dll     <-- 或 python312.dll / python313.dll
+      ...其它依赖
+
+错误做法（会立刻弹窗失败）：
+  - 只把 daq_tablet.exe 拷到桌面
+  - 只发 exe，不发 _internal 文件夹
+  此时会报：
+    Failed to load Python DLL '...Desktop\_internal\python314.dll'
+    LoadLibrary: 找不到指定的模块。
+
+正确做法：
+  1. 把整个 daq_tablet 文件夹拷到目标电脑（U 盘 / 共享盘均可）
+  2. 进入该文件夹，双击 daq_tablet.exe
+  3. 若仍提示缺少 DLL，安装 Microsoft Visual C++ 2015-2022 Redistributable (x64)
+     https://aka.ms/vs/17/release/vc_redist.x64.exe

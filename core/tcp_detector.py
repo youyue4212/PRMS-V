@@ -907,9 +907,6 @@ class TcpPacketWorker(QObject):
                                 "Master L2 header seen from %s (awaiting CRC)" % client_id, 'INFO'
                             )
                             self.master_link_seen.emit(client_id)
-                        elif self.master_client_id is None:
-                            self.master_client_id = client_id
-                            self.master_link_seen.emit(client_id)
                     parsed_packet = self.parse_master_summary_packet(packet_data)
                     if parsed_packet is None and is_master_frame_candidate(packet_data):
                         reason = explain_master_summary_reject(packet_data)

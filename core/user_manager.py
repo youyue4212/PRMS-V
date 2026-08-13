@@ -343,6 +343,8 @@ class UserManager(QObject):
     def change_password(self, username: str, old_password: str, 
                        new_password: str) -> Tuple[bool, str]:
         """修改密码"""
+        if self.current_user is None:
+            return False, "未登录，无法修改密码"
         # 用户只能修改自己的密码，管理员可以修改任何用户的密码
         if username != self.current_user.username and not self.can_manage_users():
             return False, "No permission to modify other users' passwords"

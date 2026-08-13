@@ -1,43 +1,61 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""
-PyInstaller ¹æ¸ñÎÄ¼ş£¨ÔÚ¡¸Ä¿±ê¼Ü¹¹¡¹µÄ»úÆ÷ÉÏÔËĞĞ´ò°ü£©
-ÓÃ·¨¼ûÍ¬Ä¿Â¼ build_linux.sh / build_windows.bat
-"""
-import sys
-from PyInstaller.utils.hooks import collect_data_files, collect_submodules
+# PyInstaller spec for daq_tablet (run build_windows.bat / build_linux.sh)
+import os
+
+from PyInstaller.utils.hooks import collect_data_files
 
 block_cipher = None
 
+spec_dir = os.path.dirname(os.path.abspath(SPEC))
+app_dir = os.path.abspath(os.path.join(spec_dir, ".."))
+
 hiddenimports = [
-    'PyQt5',
-    'pyqtgraph',
-    'numpy',
-    'pandas',
-    'serial',
-    'openpyxl',
-    'psutil',
-    'scipy',
+    "PyQt5",
+    "PyQt5.QtWebEngineWidgets",
+    "PyQt5.QtWebEngineCore",
+    "PyQt5.sip",
+    "PyQt5.QtSvg",
+    "pyqtgraph",
+    "numpy",
+    "pandas",
+    "serial",
+    "openpyxl",
+    "psutil",
+    "scipy",
 ]
 
-# ÊÕ¼¯ pyqtgraph µÈ¿ÉÄÜÓÃµ½µÄÊı¾İÎÄ¼ş
-datas = []
+datas = [
+    (os.path.join(app_dir, "hmi_web"), "hmi_web"),
+    (os.path.join(app_dir, "core", "icons"), os.path.join("core", "icons")),
+]
 try:
-    datas += collect_data_files('pyqtgraph')
+    datas += collect_data_files("pyqtgraph")
 except Exception:
     pass
 
+# UPX å‹ç¼© python3xx.dll / VCRUNTIME åï¼ŒWindows LoadLibrary å¸¸æŠ¥
+# â€œFailed to load Python DLL / æ‰¾ä¸åˆ°æŒ‡å®šçš„æ¨¡å—â€ï¼Œå› æ­¤é»˜è®¤å…³é—­ã€‚
+upx_exclude = [
+    "python3.dll",
+    "python314.dll",
+    "python313.dll",
+    "python312.dll",
+    "VCRUNTIME140.dll",
+    "VCRUNTIME140_1.dll",
+    "vcruntime140.dll",
+    "vcruntime140_1.dll",
+]
+
 a = Analysis(
-    ['../main.py'],
-    pathex=['..'],
+    [os.path.join(app_dir, "main.py")],
+    pathex=[app_dir],
     binaries=[],
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=['tkinter', 'matplotlib'],
-    win_no_prefer_redirects=False,
-    win_private_assemblies=False,
+    excludes=["tkinter", "matplotlib"],
     cipher=block_cipher,
     noarchive=False,
 )
@@ -49,12 +67,13 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name='daq_tablet',
+    name="daq_tablet",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
-    console=False,  # GUI ³ÌĞò£»µ÷ÊÔÊ±¿É¸Ä True ¿´±¨´í
+    upx=False,
+    upx_exclude=upx_exclude,
+    console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
@@ -68,7 +87,7 @@ coll = COLLECT(
     a.zipfiles,
     a.datas,
     strip=False,
-    upx=True,
-    upx_exclude=[],
-    name='daq_tablet',
+    upx=False,
+    upx_exclude=upx_exclude,
+    name="daq_tablet",
 )

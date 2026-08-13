@@ -518,9 +518,15 @@ class ClientsPage(QWidget):
         
         # Store client widgets
         self.client_widgets = {}
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.refresh_client_display()
     
     def refresh_client_display(self):
         """Refresh the client display with current data"""
+        if not self.isVisible():
+            return
         # Check current user role
         from core.user_manager import UserRole
         is_admin = False

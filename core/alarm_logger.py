@@ -146,10 +146,17 @@ class AlarmLogger:
         current_time = time.time()
         previous_status = self.active_alarms.get(client_id, False)
 
-        # 仍在报警中：只更新峰值，不写新行
+        # 仍在报警中：只更新峰值 / 文案，不写新行
         if previous_status and alarm_status:
             prev_peak = self.alarm_peak_count_rates.get(client_id, count_rate)
             self.alarm_peak_count_rates[client_id] = max(prev_peak, count_rate)
+            if message:
+                for ev in reversed(self.alarm_events):
+                    if ev.client_id == client_id and ev.alarm_status:
+                        ev.message = message
+                        ev.peak_count_rate = self.alarm_peak_count_rates[client_id]
+                        ev.count_rate = ev.peak_count_rate
+                        break
             return None
 
         # 无边沿变化则不记
@@ -302,10 +309,19 @@ class AlarmLogger:
             return True
         if not path.exists():
             return True
+        file_date = None
+        # 文件名 alarm_log_YYYYMMDD_HHMMSS.xlsx，优先用文件名日期（Linux ctime 会随写入更新）
         try:
-            file_date = datetime.fromtimestamp(os.path.getctime(path)).date()
-        except OSError:
-            return True
+            parts = path.stem.split("_")
+            if len(parts) >= 3 and len(parts[2]) == 8 and parts[2].isdigit():
+                file_date = datetime.strptime(parts[2], "%Y%m%d").date()
+        except (ValueError, IndexError):
+            file_date = None
+        if file_date is None:
+            try:
+                file_date = datetime.fromtimestamp(os.path.getctime(path)).date()
+            except OSError:
+                return True
         return file_date != datetime.now().date()
 
     def _ensure_excel_file(self, force_new: bool = False):
