@@ -25,13 +25,23 @@ def format_alarm_event_client(event: AlarmEvent) -> str:
         return _t("log_master_client")
     if t == "ChannelMatch":
         msg = str(getattr(event, "message", "") or "")
+        probes = ""
         if " | " in msg:
             probes = msg.split(" | ", 1)[0].strip()
-            if probes:
-                return probes
+        if probes in ("探头未标明", "Probe not identified", _t("log_hit_probes_none")):
+            probes = ""
+        if probes:
+            return probes
         cid = str(getattr(event, "client_id", "") or "")
         if cid == "master_channel":
-            return _t("log_master_client")
+            cps = 0
+            try:
+                cps = int(float(getattr(event, "count_rate", 0) or 0))
+            except (TypeError, ValueError):
+                cps = 0
+            if cps > 0:
+                return "%s %d cps" % (_t("log_channel_device"), cps)
+            return _t("log_channel_device")
         return cid or _t("log_master_client")
     return str(getattr(event, "client_id", "") or "")
 
@@ -758,7 +768,29 @@ class AlarmLogPage(QWidget):
         
         # Get events for current page (newest first)
         page_events = list(reversed(all_events))[start_idx:end_idx]
-        
+
+        bar = self.table_widget.verticalScrollBar()
+        scroll_val = bar.value()
+        if bar.isSliderDown():
+            return
+        page_changed = getattr(self, "_shown_page", None) != self.current_page
+        if page_changed:
+            scroll_val = 0
+        self._shown_page = self.current_page
+
+        sig = tuple(
+            (
+                getattr(ev, "timestamp", 0),
+                bool(ev.alarm_status),
+                str(getattr(ev, "message", "") or ""),
+                float(getattr(ev, "peak_count_rate", ev.count_rate) or 0),
+            )
+            for ev in page_events
+        )
+        if sig == getattr(self, "_page_table_sig", None) and self.table_widget.rowCount() == len(page_events):
+            return
+        self._page_table_sig = sig
+
         # Performance optimization: Disable visual updates during table population
         self.table_widget.setUpdatesEnabled(False)
         
@@ -810,6 +842,7 @@ class AlarmLogPage(QWidget):
         finally:
             # Re-enable visual updates
             self.table_widget.setUpdatesEnabled(True)
+            self.table_widget.verticalScrollBar().setValue(scroll_val)
     
     def update_pagination_controls(self):
         """Update pagination control states"""

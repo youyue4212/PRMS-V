@@ -1453,6 +1453,11 @@ class MainWindow(QMainWindow, UIBase):
             if hasattr(page, "sync_side_rad_from_alarm"):
                 page.sync_side_rad_from_alarm(page.alarm_status_label.text(), True)
             self._sync_channel_hard_alarm_log(True, packet)
+            probes = self._format_hit_probes_for_log(
+                packet, mask=int(getattr(self, "_channel_hard_alarm_hit_mask", 0) or 0)
+            )
+            if probes:
+                page.alarm_desc_label.setText("%s | %s" % (desc, probes))
         elif kind == "acked":
             page.alarm_title_icon.load(get_icon_svg('alarm_inactive'))
             page.alarm_indicator.load(get_icon_svg('alarm_inactive'))
@@ -1544,42 +1549,149 @@ class MainWindow(QMainWindow, UIBase):
                 kind in ("over_threshold", "soft_cleared", "fault"),
             )
 
-    def _format_hit_probes_for_log(self, packet) -> str:
-        """主控 hit_mask → 操作员可读的探头位置（槽位与主控 bit 一致）。"""
-        from core.translation import _t
-        if packet is None:
-            return _t("log_hit_probes_none")
-        mask = int(getattr(packet, "hit_probe_mask", 0) or 0)
+    def _probe_slot_label(self, index: int) -> str:
         try:
-            n = int(packet.active_probe_count() or 16)
+            loc = str(self.home_page._slot_location(index) or "").strip()
         except Exception:
-            n = 16
-        n = max(1, min(n, 16))
-        parts = []
-        for i in range(n):
-            if not (mask & (1 << i)):
-                continue
             loc = ""
+        if loc:
+            return loc
+        from core.translation import _t
+        return _t("probe_slot_name", n=index + 1)
+
+    def _format_probe_parts(self, indices, packet=None) -> str:
+        parts = []
+        probe_cps = []
+        try:
+            probe_cps = list(getattr(packet, "probe_cps", None) or []) if packet is not None else []
+        except Exception:
+            probe_cps = []
+        seen = set()
+        for i in indices:
             try:
-                loc = str(self.home_page._slot_location(i) or "").strip()
-            except Exception:
-                loc = ""
-            label = loc or _t("probe_slot_name", n=i + 1)
+                i = int(i)
+            except (TypeError, ValueError):
+                continue
+            if i < 0 or i > 15 or i in seen:
+                continue
+            seen.add(i)
             cps = 0
-            try:
-                probe_cps = getattr(packet, "probe_cps", None) or []
-                if i < len(probe_cps):
+            if i < len(probe_cps):
+                try:
                     cps = int(probe_cps[i] or 0)
-            except Exception:
-                cps = 0
+                except (TypeError, ValueError):
+                    cps = 0
+            label = self._probe_slot_label(i)
             if cps > 0:
                 parts.append("%s %d cps" % (label, cps))
             else:
                 parts.append(label)
-        return "、".join(parts) if parts else _t("log_hit_probes_none")
+        return "、".join(parts)
 
-    def _channel_hard_alarm_log_message(self, packet) -> str:
-        probes = self._format_hit_probes_for_log(packet)
+    def _infer_hit_indices(self, packet=None, mask=0):
+        """hit_mask 优先；0 时用首页 hit 标记，再退到在线且有计数的槽位。"""
+        mask = int(mask or 0)
+        if mask:
+            return [i for i in range(16) if mask & (1 << i)]
+        hits = []
+        try:
+            for i, e in enumerate(getattr(self.home_page, "_probe_entries", None) or []):
+                if e.get("hit"):
+                    hits.append(i)
+        except Exception:
+            hits = []
+        if hits:
+            return hits
+        if packet is None:
+            return []
+        probe_cps = list(getattr(packet, "probe_cps", None) or [])
+        online = int(getattr(packet, "online_mask", 0) or 0)
+        n = 0
+        try:
+            n = int(packet.active_probe_count() or 0)
+        except Exception:
+            n = 0
+        n = max(n, len(probe_cps), 2)
+        n = min(n, 16)
+        ranked = []
+        for i in range(n):
+            if online and not (online & (1 << i)):
+                continue
+            cps = 0
+            if i < len(probe_cps):
+                try:
+                    cps = int(probe_cps[i] or 0)
+                except (TypeError, ValueError):
+                    cps = 0
+            if cps > 0:
+                ranked.append((cps, i))
+        ranked.sort(reverse=True)
+        if not ranked:
+            return []
+        top = ranked[0][0]
+        # 窗符合/降级时常不带 hit_mask：把明显偏高的几路写进设备列
+        return [i for cps, i in ranked if cps >= max(1, int(top * 0.35))][:4]
+
+    def _reuse_active_channel_probes(self) -> str:
+        try:
+            from core.alarm_logger import get_alarm_logger
+            for ev in reversed(get_alarm_logger().get_recent_events(20) or []):
+                if getattr(ev, "client_id", "") != "master_channel":
+                    continue
+                if not getattr(ev, "alarm_status", False):
+                    continue
+                msg = str(getattr(ev, "message", "") or "")
+                if " | " in msg:
+                    probes = msg.split(" | ", 1)[0].strip()
+                    if probes:
+                        return probes
+                break
+        except Exception:
+            pass
+        return ""
+
+    def _format_hit_probes_for_log(self, packet=None, mask=None) -> str:
+        """主控 hit_mask 槽位 bit → 名称。bit0=第1路。mask=0 不写「未标明」，改推断或写通道。"""
+        if mask is None:
+            mask = int(getattr(packet, "hit_probe_mask", 0) or 0) if packet is not None else 0
+        indices = self._infer_hit_indices(packet, mask=int(mask or 0))
+        text = self._format_probe_parts(indices, packet)
+        if text:
+            return text
+        cached = str(getattr(self, "_channel_hard_alarm_probes_text", "") or "").strip()
+        if cached:
+            return cached
+        reused = self._reuse_active_channel_probes()
+        if reused:
+            return reused
+        from core.translation import _t
+        total = 0
+        if packet is not None:
+            try:
+                total = int(getattr(packet, "total_cps", 0) or 0)
+            except (TypeError, ValueError):
+                total = 0
+        if total > 0:
+            return "%s %d cps" % (_t("log_channel_device"), total)
+        return _t("log_channel_device")
+
+    def _latch_hard_alarm_hit_mask(self, active: bool, packet=None) -> int:
+        """硬报期间锁存 hit_mask：升起时拍照，之后只或上新出现的 bit，恢复后清掉。"""
+        latched = int(getattr(self, "_channel_hard_alarm_hit_mask", 0) or 0)
+        if not active:
+            return latched
+        cur = int(getattr(packet, "hit_probe_mask", 0) or 0) if packet is not None else 0
+        if not bool(getattr(self, "_channel_hard_alarm_active", False)):
+            self._channel_hard_alarm_hit_mask = cur
+        elif cur:
+            self._channel_hard_alarm_hit_mask = latched | cur
+        return int(getattr(self, "_channel_hard_alarm_hit_mask", 0) or 0)
+
+    def _channel_hard_alarm_log_message(self, packet, mask=None) -> str:
+        from core.translation import _t
+        probes = self._format_hit_probes_for_log(packet, mask=mask)
+        if probes:
+            self._channel_hard_alarm_probes_text = probes
         decision = ""
         if packet is not None:
             lang = "zh"
@@ -1595,12 +1707,12 @@ class MainWindow(QMainWindow, UIBase):
         return "%s | %s" % (probes, decision)
 
     def _sync_channel_hard_alarm_log(self, active: bool, packet=None):
-        """边沿写入通道符合硬报事件（alarm_logger client=master_channel）。"""
+        """边沿写入通道符合硬报。设备列用升起时锁存的 mask，不用恢复那一包。"""
         prev = bool(getattr(self, "_channel_hard_alarm_active", False))
-        msg = self._channel_hard_alarm_log_message(packet)
+        mask = self._latch_hard_alarm_hit_mask(bool(active), packet)
+        msg = self._channel_hard_alarm_log_message(packet, mask=mask)
         if prev == bool(active):
             if active and packet is not None:
-                # 持续硬报时刷新峰值 CPS / 命中探头
                 try:
                     from core.alarm_logger import get_alarm_logger
                     get_alarm_logger().log_alarm_event(
@@ -1622,7 +1734,6 @@ class MainWindow(QMainWindow, UIBase):
         try:
             from core.alarm_logger import get_alarm_logger
             cps = float(getattr(packet, "total_cps", 0) or 0) if packet else 0.0
-            mask = int(getattr(packet, "hit_probe_mask", 0) or 0) if packet else 0
             decision = int(getattr(packet, "decision_result", 0) or 0) if packet else 0
             get_alarm_logger().log_alarm_event(
                 client_id="master_channel",
@@ -1642,6 +1753,9 @@ class MainWindow(QMainWindow, UIBase):
             )
         except Exception as e:
             self.log("Channel hard-alarm log failed: %s" % e, "ERROR")
+        if not active:
+            self._channel_hard_alarm_hit_mask = 0
+            self._channel_hard_alarm_probes_text = ""
         self._refresh_alarm_log_nav_badge(radiation_alarm=bool(active))
 
     def _apply_home_latch_status(self, page, hard_alarm=False, latch_mode=False, offline=False):
@@ -1992,8 +2106,8 @@ class MainWindow(QMainWindow, UIBase):
             self._update_home_occupancy_probe(False, lang=lang)
             return
 
-        busy = packet.is_channel_busy()
         hard = bool(getattr(packet, "is_channel_alarm", lambda: False)())
+        passing = int(getattr(packet, "decision_result", 0) or 0) == 0x04
         if hard:
             # 硬报占用：与通行蓝区分，避免误判为普通过人
             page.occupancy_title_icon.load(get_icon_svg('occupancy_active'))
@@ -2007,7 +2121,7 @@ class MainWindow(QMainWindow, UIBase):
             page.occupancy_indicator_bar.setStyleSheet(
                 "QFrame { background-color: #ff4444; border-radius: 1px; }"
             )
-        elif busy:
+        elif passing:
             page.occupancy_title_icon.load(get_icon_svg('occupancy_active'))
             page.occupancy_indicator.load(get_icon_svg('occupancy_active'))
             page.occupancy_status_label.setText(_t("status_passing"))

@@ -173,11 +173,15 @@ class MasterSummaryPacket:
         return self.is_channel_alarm()
 
     def is_channel_busy(self) -> bool:
+        """通道占用显示态：只跟主控 decision，不自己用红外/雷达猜。
+
+        0x02/0x03 = 硬报占用；0x04 = 入口挡住且未硬报（人员经过）。
+        强制红外降级时主控不会出 0x04，此时即使 io_status 有挡光也不算经过。
+        出口红外只上报，不参与本判定。
+        """
         return (
-            self.ir_entry
-            or self.radar_gate
+            self.is_channel_alarm()
             or self.decision_result == MASTER_DECISION_PASSING_NO_ALARM
-            or self.is_channel_alarm()
         )
 
     def ui_alarm_kind(self) -> str:

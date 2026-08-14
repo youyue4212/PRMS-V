@@ -681,11 +681,14 @@ class ControlRoomPage(QWidget):
 
     def refresh_alarm_sidebar(self):
         from core.translation import _t
-        # Preserve selection across refresh
         prev_text = ""
         cur = self.alarm_list.currentItem()
         if cur is not None:
             prev_text = cur.text()
+        bar = self.alarm_list.verticalScrollBar()
+        scroll_val = bar.value()
+        if bar.isSliderDown():
+            return
         try:
             from core.alarm_logger import get_alarm_logger
             logger = get_alarm_logger()
@@ -701,29 +704,39 @@ class ControlRoomPage(QWidget):
 
             events = list(logger.get_recent_events(40) or [])
             events.reverse()
-            self.alarm_list.clear()
-            if not events:
-                self.alarm_list.addItem(QListWidgetItem(_t("control_room_no_alarms")))
-                return
             from core.alarm_log_page import format_alarm_event_client
+            lines = []
+            if not events:
+                lines.append(_t("control_room_no_alarms"))
+            else:
+                for ev in events[:30]:
+                    try:
+                        ts = datetime.fromtimestamp(float(ev.timestamp)).strftime("%H:%M:%S")
+                    except Exception:
+                        ts = "--:--:--"
+                    st = _t("log_status_active") if ev.alarm_status else _t("log_status_cleared")
+                    client = format_alarm_event_client(ev)
+                    lines.append("%s  %s  %s  %.0f cps" % (
+                        ts, client or "-", st, float(ev.count_rate or 0),
+                    ))
+            old_lines = [
+                self.alarm_list.item(i).text()
+                for i in range(self.alarm_list.count())
+                if self.alarm_list.item(i) is not None
+            ]
+            if lines == old_lines:
+                return
+            self.alarm_list.clear()
             restore_row = -1
-            for i, ev in enumerate(events[:30]):
-                try:
-                    ts = datetime.fromtimestamp(float(ev.timestamp)).strftime("%H:%M:%S")
-                except Exception:
-                    ts = "--:--:--"
-                st = _t("log_status_active") if ev.alarm_status else _t("log_status_cleared")
-                client = format_alarm_event_client(ev)
-                line = "%s  %s  %s  %.0f cps" % (
-                    ts, client or "-", st, float(ev.count_rate or 0),
-                )
+            for i, line in enumerate(lines):
                 item = QListWidgetItem(line)
-                if ev.alarm_status:
+                if events and i < len(events) and events[i].alarm_status:
                     item.setForeground(Qt.red)
                 self.alarm_list.addItem(item)
                 if prev_text and line == prev_text:
                     restore_row = i
             if restore_row >= 0:
                 self.alarm_list.setCurrentRow(restore_row)
+            bar.setValue(scroll_val)
         except Exception:
             pass
