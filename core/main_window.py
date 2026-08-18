@@ -771,7 +771,7 @@ class MainWindow(QMainWindow, UIBase):
         cr = getattr(self, "control_room_page", None)
         if cr is None:
             return
-        # Enrich location labels for display — always from Settings slot labels
+        from core.translation import _t
         enriched = []
         for i, e in enumerate(entries or []):
             row = dict(e)
@@ -780,12 +780,17 @@ class MainWindow(QMainWindow, UIBase):
                     row["location"] = self.home_page._slot_location(i)
                 except Exception:
                     row["location"] = row.get("location") or ""
-            if not row.get("name"):
+            cid = row.get("client_id")
+            live_name = ""
+            if cid and hasattr(self, "get_probe_label"):
                 try:
-                    from core.translation import _t
-                    row["name"] = _t("probe_slot_name", n=i + 1)
+                    live_name = str(self.get_probe_label(cid) or "").strip()
                 except Exception:
-                    row["name"] = "Probe %d" % (i + 1)
+                    live_name = ""
+            if live_name:
+                row["name"] = live_name
+            elif not row.get("name"):
+                row["name"] = _t("probe_slot_name", n=i + 1)
             enriched.append(row)
         if not enriched and hasattr(self, "home_page"):
             # placeholders
@@ -3331,6 +3336,9 @@ class MainWindow(QMainWindow, UIBase):
         """关闭事件 - 添加用户登出"""
         # 停止超时计时器
         self.timeout_manager.stop_timer()
+        timer = getattr(self, "_idle_home_timer", None)
+        if timer is not None:
+            timer.stop()
 
         # 刷盘并停止报警 Excel 后台写线程，避免退出丢末尾事件
         try:
@@ -3350,14 +3358,14 @@ class MainWindow(QMainWindow, UIBase):
     
     def eventFilter(self, obj, event):
         """事件过滤器：超时计时 + 左上角隐藏入口长按（兼容树莓派触摸）。"""
-        # 鼠标/键盘/触摸均刷新管理员空闲计时（部分板子 Touch 不合成 Mouse）
+        # 鼠标/键盘/触摸均刷新空闲计时（部分板子 Touch 不合成 Mouse）
+        # TouchUpdate 不计入回总览：电容屏幽灵移动会把人一直钉在子页
         if event.type() in (
             QEvent.MouseButtonPress,
             QEvent.MouseButtonDblClick,
             QEvent.KeyPress,
             QEvent.Wheel,
             QEvent.TouchBegin,
-            QEvent.TouchUpdate,
         ):
             self._note_ui_activity()
             self.update_operate_time()
@@ -3365,6 +3373,8 @@ class MainWindow(QMainWindow, UIBase):
                 home = getattr(self, "home_page", None)
                 if home is not None and hasattr(home, "note_user_input"):
                     home.note_user_input()
+        elif event.type() in (QEvent.TouchUpdate,):
+            self.update_operate_time()
 
         self._handle_secret_corner_event(obj, event)
 
@@ -3426,28 +3436,31 @@ class MainWindow(QMainWindow, UIBase):
 
     def _check_idle_return_home(self):
         """Leave overview unattended → come back. Duty wall must not stay on a subpage."""
-        sw = getattr(self, "stacked_widget", None)
-        if sw is None:
-            return
         try:
-            idx = int(sw.currentIndex())
+            sw = getattr(self, "stacked_widget", None)
+            if sw is None:
+                return
+            try:
+                idx = int(sw.currentIndex())
+            except Exception:
+                return
+            if idx == 0:
+                return
+            app = QApplication.instance()
+            if app is not None:
+                if app.activeModalWidget() is not None:
+                    return
+                if app.activePopupWidget() is not None:
+                    return
+            last = float(getattr(self, "_last_ui_activity_at", 0.0) or 0.0)
+            if last <= 0:
+                self._last_ui_activity_at = time.time()
+                return
+            if (time.time() - last) < self._idle_return_seconds():
+                return
+            self._return_home_after_idle()
         except Exception:
             return
-        if idx == 0:
-            return
-        app = QApplication.instance()
-        if app is not None:
-            if app.activeModalWidget() is not None:
-                return
-            if app.activePopupWidget() is not None:
-                return
-        last = float(getattr(self, "_last_ui_activity_at", 0.0) or 0.0)
-        if last <= 0:
-            self._last_ui_activity_at = time.time()
-            return
-        if (time.time() - last) < self._idle_return_seconds():
-            return
-        self._return_home_after_idle()
 
     def _return_home_after_idle(self):
         from core.translation import _t
@@ -3456,10 +3469,13 @@ class MainWindow(QMainWindow, UIBase):
             get_keyboard_manager().hide_keyboard()
         except Exception:
             pass
-        self._apply_page_index(0)
-        self._note_ui_activity()
-        self._show_transient_notice(_t("msg_idle_return_home"), msec=2500)
-        self.log("Idle on subpage -> returned to home/overview", "INFO")
+        try:
+            self._apply_page_index(0)
+            self._note_ui_activity()
+            self._show_transient_notice(_t("msg_idle_return_home"), msec=2500)
+            self.log("Idle on subpage -> returned to home/overview", "INFO")
+        except Exception:
+            return
 
     def update_operate_time(self):
         """更新操作时间（重置超时计时器）"""
@@ -3487,6 +3503,14 @@ class MainWindow(QMainWindow, UIBase):
         from core.translation import _t
         bar = getattr(self, "status_bar", None)
         if bar is None or not hasattr(bar, "user_label"):
+            return
+        try:
+            on_home = int(self.stacked_widget.currentIndex()) == 0
+        except Exception:
+            on_home = False
+        # 平板总览藏 Qt 状态栏；强行显示会把 Web 顶栏顶乱，只写日志
+        if on_home and not getattr(self, "control_room_mode", False):
+            self.log(text, "INFO")
             return
         bar.setVisible(True)
         bar.user_label.setVisible(True)
@@ -3557,6 +3581,7 @@ class MainWindow(QMainWindow, UIBase):
         target = preferred_page if preferred_page is not None else 1
         self._apply_page_index(target)
         self.update_operate_time()
+        self._note_ui_activity()
 
         # 登录成功不弹框：界面切到管理页/顶栏模式变化即反馈
         self.log(f"Logged in: {username} ({actual_user.role.value})", 'INFO')
@@ -3803,11 +3828,13 @@ class MainWindow(QMainWindow, UIBase):
             if hasattr(self, 'probe_locations_label'):
                 self.probe_locations_label.setText(_t("set_probe_locations"))
                 self.probe_locations_label.setToolTip(_t("tip_probe_locations"))
-            # Stock labels follow language; custom overrides stay
             try:
-                zh, en = self._stock_probe_slot_location_sets()
+                from core.translation import stock_probe_location_index
                 locs = list(getattr(self.config, "probe_slot_locations", None) or [])
-                if not locs or locs == zh or locs == en:
+                if locs and all(
+                    (not str(x).strip()) or stock_probe_location_index(x) >= 0
+                    for x in locs
+                ):
                     self.config.set_probe_slot_locations([])
             except Exception:
                 pass

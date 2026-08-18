@@ -712,6 +712,24 @@ class ControlRoomPage(QWidget):
         self.kpi_online._title.setText(_t("control_room_kpi_online"))
         self.total_cps_unit.setText("CPS")
         self.refresh_alarm_sidebar()
+        parent = getattr(self, "parent", None)
+        home = getattr(parent, "home_page", None) if parent is not None else None
+        for i, e in enumerate(self._probe_entries):
+            cid = e.get("client_id")
+            if cid and parent is not None and hasattr(parent, "get_probe_label"):
+                try:
+                    label = parent.get_probe_label(cid)
+                    if label:
+                        e["name"] = label
+                except Exception:
+                    pass
+            elif not e.get("name"):
+                e["name"] = _t("probe_slot_name", n=i + 1)
+            if home is not None and hasattr(home, "_slot_location"):
+                try:
+                    e["location"] = home._slot_location(i)
+                except Exception:
+                    pass
         self._relabel_tiles()
 
     def set_login_visible(self, visible: bool):

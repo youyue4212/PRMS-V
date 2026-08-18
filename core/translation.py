@@ -110,6 +110,7 @@ class TranslationManager:
             "master_l2_invalid": "L2无效",
             "probe_section_title": "各探头计数率",
             "probe_slot_name": "探头 {n}",
+            "probe_num": "{n}号",
             "probe_loc_0": "左侧 · 上",
             "probe_loc_1": "右侧 · 上",
             "probe_loc_2": "左侧 · 下",
@@ -646,6 +647,7 @@ class TranslationManager:
             "master_l2_invalid": "Invalid L2",
             "probe_section_title": "Per-Probe Count Rate",
             "probe_slot_name": "Probe {n}",
+            "probe_num": "Probe {n}",
             "probe_loc_0": "Left · Upper",
             "probe_loc_1": "Right · Upper",
             "probe_loc_2": "Left · Lower",
@@ -1139,6 +1141,28 @@ STOCK_PROBE_LOCS_ZH = ["左侧 · 上", "右侧 · 上", "左侧 · 下", "右�
 STOCK_PROBE_LOCS_EN = ["Left · Upper", "Right · Upper", "Left · Lower", "Right · Lower"]
 
 
+def _norm_probe_loc(text: str) -> str:
+    s = str(text or "")
+    for ch in ("·", "•", "・", "．", ".", "-", "_", "/", "\\"):
+        s = s.replace(ch, " ")
+    return "".join(s.split()).lower()
+
+
+_STOCK_LOC_NORM_INDEX = {}
+for _i, _zh in enumerate(STOCK_PROBE_LOCS_ZH):
+    _STOCK_LOC_NORM_INDEX[_norm_probe_loc(_zh)] = _i
+for _i, _en in enumerate(STOCK_PROBE_LOCS_EN):
+    _STOCK_LOC_NORM_INDEX[_norm_probe_loc(_en)] = _i
+
+
+def stock_probe_location_index(text) -> int:
+    """Return 0..3 if text is a stock left/right label, else -1."""
+    key = _norm_probe_loc(text)
+    if not key:
+        return -1
+    return int(_STOCK_LOC_NORM_INDEX.get(key, -1))
+
+
 def default_probe_location(index: int) -> str:
     """Default location label for display slot index (0-based)."""
     try:
@@ -1154,9 +1178,24 @@ def localize_probe_location(text, index=0) -> str:
     """Map persisted stock zh/en labels to current language; keep custom text."""
     raw = str(text or "").strip()
     if raw:
-        if raw in STOCK_PROBE_LOCS_ZH:
-            return _t("probe_loc_%d" % STOCK_PROBE_LOCS_ZH.index(raw))
-        if raw in STOCK_PROBE_LOCS_EN:
-            return _t("probe_loc_%d" % STOCK_PROBE_LOCS_EN.index(raw))
+        idx = stock_probe_location_index(raw)
+        if idx >= 0:
+            return _t("probe_loc_%d" % idx)
         return raw
     return default_probe_location(index)
+
+
+def canonical_probe_location(text, index=0) -> str:
+    """Persist stock labels in zh canonical form; empty means language default."""
+    raw = str(text or "").strip()
+    if not raw:
+        return ""
+    shown_default = default_probe_location(index)
+    if raw == shown_default or _norm_probe_loc(raw) == _norm_probe_loc(shown_default):
+        return ""
+    idx = stock_probe_location_index(raw)
+    if idx >= 0:
+        if idx == int(index):
+            return ""
+        return STOCK_PROBE_LOCS_ZH[idx]
+    return raw

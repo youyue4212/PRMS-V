@@ -3086,11 +3086,11 @@ class UIBase():
             cell_lay = QVBoxLayout(cell)
             cell_lay.setContentsMargins(0, 0, 0, 0)
             cell_lay.setSpacing(2)
-            slot_lbl = QLabel(_t("set_probe_loc_n", n=i + 1))
+            slot_lbl = QLabel(_t("probe_num", n=i + 1))
             edit = QLineEdit()
             saved_txt = str(saved[i]).strip() if i < len(saved) else ""
             edit.setText(localize_probe_location(saved_txt, i))
-            edit.setPlaceholderText(_t("set_probe_loc_n", n=i + 1))
+            edit.setPlaceholderText(_t("probe_loc_n", n=i + 1) if i > 3 else _t("probe_loc_%d" % i))
             edit.setToolTip(_t("tip_probe_locations"))
             edit.editingFinished.connect(self.on_probe_slot_locations_changed)
             cell_lay.addWidget(slot_lbl)
@@ -3102,18 +3102,16 @@ class UIBase():
 
     def on_probe_slot_locations_changed(self):
         """Save settings-page location labels and refresh home HMI."""
-        from core.translation import default_probe_location, localize_probe_location
+        from core.translation import canonical_probe_location
         if not hasattr(self, "probe_location_edits"):
             return
         locs = []
         all_default = True
         for i, edit in enumerate(self.probe_location_edits):
             text = (edit.text() or "").strip()
-            shown_default = localize_probe_location("", i)
-            if not text or text == shown_default or text == default_probe_location(i):
-                locs.append("")
-            else:
-                locs.append(text)
+            stored = canonical_probe_location(text, i)
+            locs.append(stored)
+            if stored:
                 all_default = False
         if all_default or not any(locs):
             self.config.set_probe_slot_locations([])
@@ -3140,13 +3138,15 @@ class UIBase():
             saved_txt = str(saved[i]).strip() if i < len(saved) else ""
             edit.blockSignals(True)
             edit.setText(localize_probe_location(saved_txt, i))
-            edit.setPlaceholderText(_t("set_probe_loc_n", n=i + 1))
+            edit.setPlaceholderText(
+                _t("probe_loc_%d" % i) if i <= 3 else _t("probe_loc_n", n=i + 1)
+            )
             edit.setToolTip(_t("tip_probe_locations"))
             edit.blockSignals(False)
         labels = getattr(self, "probe_location_slot_labels", None) or []
         for i, lbl in enumerate(labels):
             if lbl is not None:
-                lbl.setText(_t("set_probe_loc_n", n=i + 1))
+                lbl.setText(_t("probe_num", n=i + 1))
 
     def get_online_probe_client_ids(self, fresh_sec: float = 12.0):
         """
@@ -4077,9 +4077,6 @@ class UIBase():
         if not client_id or client_id == "system":
             return ""
 
-        from core.translation import TranslationManager
-        lang = TranslationManager().get_language()
-
         ip = self._extract_client_ip(client_id)
         live = (
             client_id in (getattr(self, "client_data", None) or {})
@@ -4099,7 +4096,8 @@ class UIBase():
             num = pid
 
         if num is not None:
-            return f"{num}\u53f7" if lang != "en" else f"Probe {num}"
+            from core.translation import _t
+            return _t("probe_num", n=num)
         return ""
 
     def forget_probe_ip(self, ip: str):

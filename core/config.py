@@ -60,17 +60,22 @@ class ConfigManager:
         # Previously auto-persisted stock labels → clear so language defaults apply
         if self.probe_slot_locations:
             en_stock = ["Left · Upper", "Right · Upper", "Left · Lower", "Right · Lower"]
-            # Normalize length for stock compare
-            locs4 = list(self.probe_slot_locations) + [""] * 4
-            locs4 = locs4[:4]
-            if locs4 == self._default_probe_slot_locations or locs4 == en_stock:
-                self.probe_slot_locations = []
-                self.settings.remove("PROBE_SLOT_LOCATIONS")
-            elif not any(locs4):
+
+            def _loc_key(s):
+                t = str(s or "").replace("·", " ").replace("•", " ").replace("・", " ")
+                return "".join(t.split()).lower()
+
+            stock_keys = set(_loc_key(x) for x in (self._default_probe_slot_locations + en_stock))
+            custom = False
+            for x in self.probe_slot_locations:
+                raw = str(x).strip()
+                if raw and _loc_key(raw) not in stock_keys:
+                    custom = True
+                    break
+            if not custom:
                 self.probe_slot_locations = []
                 self.settings.remove("PROBE_SLOT_LOCATIONS")
             else:
-                # Keep full custom list (may be >4); only normalize empty tails lightly
                 self.probe_slot_locations = [
                     str(x).strip() for x in self.probe_slot_locations
                 ][:16]
