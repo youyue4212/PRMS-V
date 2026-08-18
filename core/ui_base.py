@@ -582,12 +582,14 @@ class UIBase():
         self.client_spectrum_data = {}  # {client_id: spectrum_array} - Store spectrum data for each client
         self.client_latest_packets = {}  # {client_id: latest SpectrumPacket} - used for immediate display switching
         self.primary_client_id = None  # The client whose data is displayed in the chart
+        self._last_probe_cps_log_at = 0.0
 
         # Master L2 summary (homepage / hard-alarm authority)
         self.latest_master_summary = None
         self.master_client_id = None
         self.master_summary_callback = None
         self._master_was_online = False
+        self._last_master_ip = ""
         
         self.spectrum_data = np.zeros(self.config.adc_channels)  # Current displayed spectrum data
         self.temperature_data = []
@@ -647,6 +649,7 @@ class UIBase():
         if not client_id:
             return
         self.master_client_id = client_id
+        self._remember_master_endpoint(client_id)
         if hasattr(self, "worker") and self.worker is not None:
             try:
                 self.worker.master_client_id = client_id
@@ -668,6 +671,7 @@ class UIBase():
         self._master_was_online = True
         if client_id:
             self.master_client_id = client_id
+            self._remember_master_endpoint(client_id)
             if hasattr(self, "worker") and self.worker is not None:
                 try:
                     self.worker.master_client_id = client_id
@@ -680,6 +684,7 @@ class UIBase():
                     pass
         if self.master_summary_callback is not None:
             self.master_summary_callback(packet, client_id)
+        self._maybe_log_all_probe_cps()
 
     def _apply_cps_plot_labels(self):
         """Apply localized title/axis labels to count-rate plot."""
@@ -812,7 +817,7 @@ class UIBase():
             return container
         
         # 设置图表样式
-        self.cps_widget.setBackground('#2a2a2a')
+        self.cps_widget.setBackground('#1a1a1a')
         self._apply_cps_plot_labels()
         
         # 设置轴颜色
@@ -918,8 +923,8 @@ class UIBase():
             layout.addWidget(QLabel("Spectrum chart initialization failed"))
             return container
         
-        # 设置图表样式
-        self.spec_widget.setBackground('#2a2a2a')
+        # 设置图表样式：与页面同色，避免坐标轴下方多出一条灰带
+        self.spec_widget.setBackground('#1a1a1a')
         self._apply_spec_plot_labels()
         
         # 设置轴颜色
@@ -927,10 +932,18 @@ class UIBase():
         self.spec_widget.getAxis('bottom').setPen(pg.mkPen(color='#ffffff', width=1))
         self.spec_widget.getAxis('right').setPen(pg.mkPen(color='#666666', width=1))
         self.spec_widget.getAxis('top').setPen(pg.mkPen(color='#666666', width=1))
+        self.spec_widget.showAxis('right', False)
+        self.spec_widget.showAxis('top', False)
         
         # 设置轴文本颜色
         self.spec_widget.getAxis('left').setTextPen(pg.mkPen(color='#ffffff'))
         self.spec_widget.getAxis('bottom').setTextPen(pg.mkPen(color='#ffffff'))
+        try:
+            self.spec_widget.getAxis('bottom').setStyle(
+                autoExpandTextSpace=False, tickTextOffset=4
+            )
+        except Exception:
+            pass
         
         # 创建曲线 - 使用stepMode="center"显示阶梯状能谱
         from core.translation import _t
@@ -1150,10 +1163,28 @@ class UIBase():
                 self.log("Failed to send gain stabilizer command", 'ERROR')
                 self.gain_stabilizer_pending = False
 
+    def _make_settings_action_btn(self, text, color):
+        from core.ui_tokens import CR_CHROME_H, CR_CHROME_FONT_PX
+        desktop = bool(getattr(self, "control_room_mode", False))
+        h = CR_CHROME_H + 4 if desktop else 40
+        fs = CR_CHROME_FONT_PX if desktop else 14
+        btn = QPushButton(text)
+        btn.setMinimumHeight(h)
+        btn.setStyleSheet("""
+            QPushButton {
+                background-color: %s; color: white; border: none;
+                border-radius: 8px; font-size: %dpx; font-weight: bold;
+                padding: 0 18px; min-height: %dpx;
+            }
+            QPushButton:pressed { background-color: #333333; }
+            QPushButton:disabled { background-color: #555555; color: #999999; }
+        """ % (color, fs, h))
+        return btn
+
     def add_widgets_to_setting_layout(self, settings_layout):
        # Settings placeholder
-        
-        # Group 1: Communication Settings
+
+        from core.translation import _t
         self.comm_group = QGroupBox(_t("set_comm_settings"))
         comm_layout = QGridLayout(self.comm_group)
         
@@ -1285,6 +1316,12 @@ class UIBase():
         ctrl_layout.addWidget(self.expected_probe_spin, 1, 1)
         ctrl_layout.addWidget(self.adopt_probe_count_btn, 1, 2)
 
+        self.ir_installed_checkbox = QCheckBox(_t("set_ir_installed"))
+        self.ir_installed_checkbox.setToolTip(_t("tip_ir_installed"))
+        self.ir_installed_checkbox.setChecked(bool(getattr(self.config, "ir_installed", True)))
+        self.ir_installed_checkbox.stateChanged.connect(self.on_ir_installed_changed)
+        ctrl_layout.addWidget(self.ir_installed_checkbox, 2, 0, 1, 3)
+
         # UI mode: field tablet vs control-room PC (restart required)
         self.ui_mode_label = QLabel(_t("set_ui_mode"))
         self.ui_mode_label.setToolTip(_t("tip_ui_mode"))
@@ -1296,13 +1333,13 @@ class UIBase():
         self.ui_mode_combo.setCurrentIndex(idx if idx >= 0 else 0)
         self.ui_mode_combo.setToolTip(_t("tip_ui_mode"))
         self.ui_mode_combo.currentIndexChanged.connect(self.on_ui_mode_changed)
-        ctrl_layout.addWidget(self.ui_mode_label, 2, 0)
-        ctrl_layout.addWidget(self.ui_mode_combo, 2, 1, 1, 2)
+        ctrl_layout.addWidget(self.ui_mode_label, 3, 0)
+        ctrl_layout.addWidget(self.ui_mode_combo, 3, 1, 1, 2)
 
         # Home probe card location labels (count follows expected_probe_count)
         self.probe_locations_label = QLabel(_t("set_probe_locations"))
         self.probe_locations_label.setToolTip(_t("tip_probe_locations"))
-        ctrl_layout.addWidget(self.probe_locations_label, 3, 0, 1, 3)
+        ctrl_layout.addWidget(self.probe_locations_label, 4, 0, 1, 3)
         self.probe_location_wrap = QWidget()
         self.probe_location_grid = QGridLayout(self.probe_location_wrap)
         self.probe_location_grid.setContentsMargins(0, 0, 0, 0)
@@ -1311,7 +1348,7 @@ class UIBase():
         self.probe_location_slot_labels = []
         self.probe_location_cells = []
         self._rebuild_probe_location_edits()
-        ctrl_layout.addWidget(self.probe_location_wrap, 4, 0, 1, 3)
+        ctrl_layout.addWidget(self.probe_location_wrap, 5, 0, 1, 3)
 
         # One-click factory parameter reset (command 0x14 → probe TCP/serial)
         self.factory_reset_label = QLabel(_t("set_factory_reset"))
@@ -1321,9 +1358,9 @@ class UIBase():
         self.reset_defaults_all_btn = QPushButton(_t("btn_reset_all"))
         self.reset_defaults_all_btn.setToolTip(_t("tip_reset_defaults"))
         self.reset_defaults_all_btn.clicked.connect(lambda: self.reset_factory_defaults(all_probes=True))
-        ctrl_layout.addWidget(self.factory_reset_label, 5, 0)
-        ctrl_layout.addWidget(self.reset_defaults_current_btn, 5, 1)
-        ctrl_layout.addWidget(self.reset_defaults_all_btn, 5, 2)
+        ctrl_layout.addWidget(self.factory_reset_label, 6, 0)
+        ctrl_layout.addWidget(self.reset_defaults_current_btn, 6, 1)
+        ctrl_layout.addWidget(self.reset_defaults_all_btn, 6, 2)
 
         settings_layout.addWidget(self.ctrl_group)
 
@@ -1759,190 +1796,200 @@ class UIBase():
 
     
     def save_data(self, auto_save=False, auto_save_path=""):
-        # 检查权限 - 注意：这里不能直接调用check_permission_before_action，因为UIBase没有这个方法
-        # 权限检查应该在MainWindow的save_data方法中完成
-        # 这里只处理保存数据的逻辑
-        
-        # 自动保存时跳过数据检查，即使数据为0也要保存
-        if not auto_save and np.sum(self.spectrum_data)==0:
+        # 权限检查在 MainWindow.save_data；这里只写盘。
+        if auto_save:
+            # 自动保存：每路探头各写一份
+            self._auto_save_all_clients(force=bool(auto_save_path))
+            return
+
+        is_tcp_mode = bool(self.config.tcp_enabled)
+        client_id = self._manual_save_client_id()
+        if not client_id:
+            QMessageBox.warning(
+                self, _t("msg_no_client_data_title"), _t("msg_save_select_probe")
+            )
+            return
+
+        ts = self.client_time_series.get(client_id) or []
+        spec = self.client_spectrum_data.get(client_id)
+        has_spec = spec is not None and np.sum(spec) > 0
+        if not ts and not has_spec:
             QMessageBox.warning(self, _t("msg_no_data_title"), _t("msg_no_data_text"))
             return
-        
-        # Check if we're in TCP mode or serial mode
-        is_tcp_mode = self.config.tcp_enabled
-        
-        if is_tcp_mode:
-            # TCP mode: save data for specific client
-            client_id_to_save = self.primary_client_id
-            
-            # If no primary client is selected but we have clients, use the first one
-            if not client_id_to_save and self.client_time_series:
-                clients = list(self.client_time_series.keys())
-                if len(clients) == 1:
-                    client_id_to_save = clients[0]
-                else:
-                    # TODO: In the future, we could add a dialog to let user choose which client to save
-                    # For now, save the first client
-                    client_id_to_save = clients[0]
-                    if not auto_save:
-                        self.log(f"No primary client selected, saving data from first client: {client_id_to_save}", 'INFO')
-            
-            if not client_id_to_save:
-                if not auto_save:
-                    QMessageBox.warning(self, _t("msg_no_client_data_title"), _t("msg_no_client_data_text"))
-                return
-            
-            # Create filename with client ID for TCP mode
-            client_identifier = client_id_to_save
-            if "_" in client_id_to_save:
-                parts = client_id_to_save.split("_")
-                if len(parts) >= 3:
-                    # Extract IP and port
-                    ip_port = parts[2]
-                    # Replace colons with underscores for filename safety
-                    ip_port_safe = ip_port.replace(":", "_")
-                    client_identifier = f"client_{ip_port_safe}"
-            
-            default_filename = f"rayzen_spectrometer_data_{client_identifier}.xlsx"
-            dialog_title = _t("dlg_save_data_for", client=client_id_to_save)
-            
-        else:
-            # Serial mode: save all data (only one "client")
-            client_id_to_save = "serial_device"
-            default_filename = "rayzen_spectrometer_data.xlsx"
-            dialog_title = _t("dlg_save_data")
-        
-        if auto_save:
-            # Auto-save mode: use provided path or generate default
-            if auto_save_path:
-                filename = auto_save_path
-            else:
-                # Generate auto-save filename with timestamp
-                timestamp = time.strftime("%Y%m%d_%H%M%S")
-                if is_tcp_mode:
-                    filename = f"rayzen_spectrometer_data_{client_identifier}_auto_{timestamp}.xlsx"
-                else:
-                    filename = f"rayzen_spectrometer_data_auto_{timestamp}.xlsx"
-        else:
-            # Manual save: show file dialog
-            filename, _ = QFileDialog.getSaveFileName(
-                    self,
-                    dialog_title,
-                    default_filename,
-                    "Excel Files (*.xlsx);;All Files (*)"
+
+        label = self._export_probe_label(client_id, 0)
+        meta = self._export_probe_meta(client_id)
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        default_filename = "rayzen_spectrometer_data_%s.xlsx" % (
+            self._export_file_stem(client_id, timestamp)
+        )
+        filename, _ = QFileDialog.getSaveFileName(
+            self,
+            _t("dlg_save_data_for", client=label),
+            default_filename,
+            "Excel Files (*.xlsx);;All Files (*)",
+        )
+        if not filename:
+            return
+        try:
+            n_ts, spec_sum, size = self._write_client_excel(filename, client_id, is_tcp_mode)
+            loc = meta.get("location") or ""
+            ident = "%s %s" % (label, loc) if loc else label
+            self.log(
+                "Data saved to %s (probe=%s, ip=%s, points=%d, spectrum_sum=%.1f, bytes=%d)"
+                % (filename, ident.strip(), meta.get("ip") or "-", n_ts, spec_sum, size),
+                "INFO",
+            )
+            if hasattr(self, "log_output") and self.log_output is not None:
+                self.log_output.append(
+                    "<span style='color: green;'>Data saved to %s (%s)</span>"
+                    % (filename, label)
                 )
-        
-        if filename:
-            try:
-                if is_tcp_mode:
-                    # TCP mode: save data for specific client
-                    spectrum_data_to_save = self.client_spectrum_data.get(client_id_to_save, np.zeros(self.config.adc_channels))
-                    time_series_data = self.client_time_series.get(client_id_to_save, [])
-                    client_info = self.client_data.get(client_id_to_save, {})
-                else:
-                    # Serial mode: save all available data
-                    # 保存原始累加能谱（不做显示层的 hampel 滤波），与 TCP 模式保持一致。
-                    # 直接取原始累加数组 client_spectrum_data，避免依赖显示副本的刷新时机。
-                    raw_client_id = self.primary_client_id
-                    if raw_client_id and raw_client_id in self.client_spectrum_data:
-                        spectrum_data_to_save = self.client_spectrum_data[raw_client_id]
-                    elif self.client_spectrum_data:
-                        spectrum_data_to_save = next(iter(self.client_spectrum_data.values()))
-                    else:
-                        spectrum_data_to_save = self.spectrum_data
-                    
-                    # Combine all time series data (in serial mode, there should be only one "client")
-                    time_series_data = []
-                    for client_id, data_list in self.client_time_series.items():
-                        time_series_data.extend(data_list)
-                    
-                    # Get device info from the latest packet or client_data
-                    # For serial mode, try to get from client_data or use default
-                    client_info = {
-                        'product_id': '--',
-                        'sensitivity': '--',
-                        'last_update': time.time()
-                    }
-                    
-                    # Try to get device info from client_data if available
-                    if self.client_data:
-                        # Get the first client's data (should be the only one in serial mode)
-                        first_client_id = list(self.client_data.keys())[0] if self.client_data else None
-                        if first_client_id and first_client_id in self.client_data:
-                            client_data = self.client_data[first_client_id]
-                            client_info['product_id'] = client_data.get('product_id', '--')
-                            client_info['sensitivity'] = client_data.get('sensitivity', '--')
-                            client_info['last_update'] = client_data.get('last_update', time.time())
-                
-                # Save spectrum data
-                df_spectrum = pd.DataFrame({
-                    'Spectrum': spectrum_data_to_save
-                })
+        except Exception as e:
+            self.log("Save error: %s" % e, "ERROR")
+            if hasattr(self, "log_output") and self.log_output is not None:
+                self.log_output.append(
+                    "<span style='color: red;'>Save error: %s</span>" % e
+                )
 
-                # Save time series data
-                if time_series_data:
-                    timestamps, counters, temperatures, hvs, spec_counts = zip(*time_series_data)
-                    df_time_series = pd.DataFrame({
-                        'Timestamp': [
-                            time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(float(t)))
-                            for t in timestamps
-                        ],
-                        'Counter': counters,
-                        'Temperature': temperatures,
-                        'HV': hvs,
-                        'Spectrum_Counts': spec_counts
-                    })
-                else:
-                    df_time_series = pd.DataFrame(columns=['Timestamp', 'Counter', 'Temperature', 'HV', 'Spectrum_Counts'])
-                
-                # Save client/device information
-                df_client_info = pd.DataFrame({
-                    'Mode': ['TCP' if is_tcp_mode else 'Serial'],
-                    'Client_ID': [client_id_to_save],
-                    'Product_ID': [client_info.get('product_id', '--')],
-                    'Sensitivity': [client_info.get('sensitivity', '--')],
-                    'Last_Update': [time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(client_info.get('last_update', time.time())))]
-                })
-                
-                from core.excel_io import write_excel_atomic
-
-                def _write(tmp: str):
-                    with pd.ExcelWriter(tmp, engine="openpyxl") as writer:
-                        df_spectrum.to_excel(writer, sheet_name='Spectrum', index=False)
-                        df_time_series.to_excel(writer, sheet_name='TimeSeries', index=False)
-                        df_client_info.to_excel(writer, sheet_name='DeviceInfo', index=False)
-
-                size = write_excel_atomic(filename, _write, min_bytes=200)
-
-                if auto_save:
-                    self.log(
-                        f"Data auto-saved to {filename} (auto-save #{self.auto_save_counter}, bytes={size})",
-                        'INFO'
-                    )
-                    self.auto_save_counter += 1
-                else:
-                    if is_tcp_mode:
-                        self.log(f"Data saved to {filename} for client {client_id_to_save} (bytes={size})", 'INFO')
-                        self.log_output.append(f"<span style='color: green;'>Data saved to {filename} for client {client_id_to_save}</span>")
-                    else:
-                        self.log(f"Data saved to {filename} (bytes={size})", 'INFO')
-                        self.log_output.append(f"<span style='color: green;'>Data saved to {filename}</span>")
-            except Exception as e:
-                self.log(f"Save error: {str(e)}", 'ERROR')
-                if not auto_save:
-                    self.log_output.append(f"<span style='color: red;'>Save error: {str(e)}</span>")
+    def _manual_save_client_id(self):
+        """Manual export follows the probe currently selected on Overview/Spectrum."""
+        master = getattr(self, "master_client_id", None)
+        cid = getattr(self, "primary_client_id", None)
+        if cid and cid != master and cid not in ("system", "master"):
+            return cid
+        if not bool(getattr(self.config, "tcp_enabled", False)):
+            if "serial_client" in (self.client_time_series or {}):
+                return "serial_client"
+            ids = self._clients_with_saveable_data()
+            return ids[0] if ids else None
+        return None
     
+    def _export_fs_token(self, text: str) -> str:
+        s = str(text or "").replace("·", "-").replace(" ", "")
+        out = "".join(ch if (ch.isalnum() or ch in "-_.") else "_" for ch in s)
+        while "__" in out:
+            out = out.replace("__", "_")
+        return out.strip("._") or ""
+
+    def _export_probe_location(self, client_id: str) -> str:
+        """Resolve display-slot location for this TCP client. Do not guess by 1号→槽位0."""
+        sources = []
+        home = getattr(self, "home_page", None)
+        if home is not None:
+            sources.append((home, list(getattr(home, "_probe_entries", None) or [])))
+        cr = getattr(self, "control_room_page", None)
+        if cr is not None:
+            sources.append((cr, list(getattr(cr, "_probe_entries", None) or [])))
+        for owner, entries in sources:
+            for i, entry in enumerate(entries):
+                if str(entry.get("client_id") or "") != str(client_id or ""):
+                    continue
+                loc = str(entry.get("location") or "").strip()
+                if loc:
+                    return loc
+                if owner is not None and hasattr(owner, "_slot_location"):
+                    try:
+                        loc = str(owner._slot_location(i) or "").strip()
+                        if loc:
+                            return loc
+                    except Exception:
+                        pass
+                elif home is not None and hasattr(home, "_slot_location"):
+                    try:
+                        loc = str(home._slot_location(i) or "").strip()
+                        if loc:
+                            return loc
+                    except Exception:
+                        pass
+        return ""
+
+    def _export_probe_meta(self, client_id: str) -> dict:
+        """Human identity for files/logs: 1号 + 左侧-上 + IP."""
+        label = self._export_probe_label(client_id, 0)
+        ip = ""
+        if hasattr(self, "_extract_client_ip"):
+            ip = str(self._extract_client_ip(client_id) or "")
+        loc = self._export_probe_location(client_id)
+        product_id = ""
+        info = (getattr(self, "client_data", None) or {}).get(client_id) or {}
+        if info.get("product_id") not in (None, "", "--"):
+            product_id = str(info.get("product_id"))
+        return {
+            "label": label,
+            "location": loc,
+            "ip": ip,
+            "product_id": product_id,
+            "client_id": client_id,
+        }
+
+    def _export_file_stem(self, client_id: str, timestamp: str) -> str:
+        meta = self._export_probe_meta(client_id)
+        parts = [
+            self._export_fs_token(meta.get("label")),
+            self._export_fs_token(meta.get("location")),
+            self._export_endpoint_tag(client_id) or self._export_fs_token(meta.get("ip")),
+            str(timestamp or ""),
+        ]
+        return "_".join(p for p in parts if p)
+
+    def _export_endpoint_tag(self, client_id: str) -> str:
+        """IP or IP_port from client_id, unique when two sockets share a host."""
+        cid = str(client_id or "")
+        if not cid or cid in ("system", "master", "serial_client"):
+            return self._export_fs_token(cid)
+        tail = cid.split("_")[-1] if "_" in cid else cid
+        return self._export_fs_token(tail.replace(":", "_"))
+
+    def _export_client_tag(self, client_id: str) -> str:
+        tag = self._export_endpoint_tag(client_id)
+        if tag:
+            return tag
+        ip = ""
+        if hasattr(self, "_extract_client_ip"):
+            ip = self._extract_client_ip(client_id) or ""
+        if ip:
+            return self._export_fs_token(ip.replace(":", "_"))
+        return self._export_fs_token(str(client_id or "probe"))
+
+    def _export_probe_label(self, client_id: str, index: int) -> str:
+        label = ""
+        if hasattr(self, "get_probe_label"):
+            try:
+                label = str(self.get_probe_label(client_id) or "").strip()
+            except Exception:
+                label = ""
+        if label:
+            return label
+        ip = ""
+        if hasattr(self, "_extract_client_ip"):
+            ip = str(self._extract_client_ip(client_id) or "").strip()
+        if ip and ip not in ("serial",):
+            return ip
+        tag = self._export_endpoint_tag(client_id)
+        if tag:
+            return tag
+        try:
+            from core.translation import _t
+            return _t("probe_slot_name", n=index + 1)
+        except Exception:
+            return "Probe %d" % (index + 1)
+
     def _clients_with_saveable_data(self):
-        """Return client_ids that have non-empty time series or non-zero spectrum."""
+        """Return probe client_ids that have non-empty time series or non-zero spectrum."""
         ids = set(self.client_time_series.keys()) | set(self.client_spectrum_data.keys())
+        master = getattr(self, "master_client_id", None)
         result = []
         for cid in ids:
+            if not cid or cid in ("system", "master") or (master and cid == master):
+                continue
             ts = self.client_time_series.get(cid) or []
             spec = self.client_spectrum_data.get(cid)
             has_ts = len(ts) > 0
             has_spec = spec is not None and np.sum(spec) > 0
             if has_ts or has_spec:
                 result.append(cid)
+        result.sort(key=lambda c: (self._export_probe_label(c, 0), c))
         return result
 
     def _write_client_excel(self, filename, client_id_to_save, is_tcp_mode):
@@ -1952,33 +1999,51 @@ class UIBase():
         )
         time_series_data = list(self.client_time_series.get(client_id_to_save, []))
         client_info = self.client_data.get(client_id_to_save, {})
+        meta = self._export_probe_meta(client_id_to_save)
+        probe = meta.get("label") or self._export_probe_label(client_id_to_save, 0)
+        loc = meta.get("location") or ""
+        ip = meta.get("ip") or ""
+        spec_col = self._export_fs_token("_".join([probe, loc])) or "Spectrum"
+        spec_col = "Counts_%s" % spec_col if spec_col != "Spectrum" else "Spectrum"
 
-        df_spectrum = pd.DataFrame({'Spectrum': spectrum_data_to_save})
+        df_spectrum = pd.DataFrame({
+            "Channel": list(range(len(spectrum_data_to_save))),
+            spec_col: spectrum_data_to_save,
+        })
+        ts_cols = [
+            "Probe", "Location", "IP",
+            "Timestamp", "Counter", "Temperature", "HV", "Spectrum_Counts",
+        ]
         if time_series_data:
             timestamps, counters, temperatures, hvs, spec_counts = zip(*time_series_data)
+            n = len(timestamps)
             df_time_series = pd.DataFrame({
-                'Timestamp': [
-                    time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(float(t)))
+                "Probe": [probe] * n,
+                "Location": [loc] * n,
+                "IP": [ip] * n,
+                "Timestamp": [
+                    time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(float(t)))
                     for t in timestamps
                 ],
-                'Counter': counters,
-                'Temperature': temperatures,
-                'HV': hvs,
-                'Spectrum_Counts': spec_counts
+                "Counter": counters,
+                "Temperature": temperatures,
+                "HV": hvs,
+                "Spectrum_Counts": spec_counts,
             })
         else:
-            df_time_series = pd.DataFrame(
-                columns=['Timestamp', 'Counter', 'Temperature', 'HV', 'Spectrum_Counts']
-            )
+            df_time_series = pd.DataFrame(columns=ts_cols)
 
         df_client_info = pd.DataFrame({
-            'Mode': ['TCP' if is_tcp_mode else 'Serial'],
-            'Client_ID': [client_id_to_save],
-            'Product_ID': [client_info.get('product_id', '--')],
-            'Sensitivity': [client_info.get('sensitivity', '--')],
-            'Save_Time': [time.strftime("%Y-%m-%d %H:%M:%S")],
-            'TimeSeries_Points': [len(time_series_data)],
-            'Spectrum_Sum': [float(np.sum(spectrum_data_to_save))],
+            "Probe": [probe],
+            "Location": [loc or "--"],
+            "IP": [ip or "--"],
+            "Mode": ["TCP" if is_tcp_mode else "Serial"],
+            "Client_ID": [client_id_to_save],
+            "Product_ID": [client_info.get("product_id", "--")],
+            "Sensitivity": [client_info.get("sensitivity", "--")],
+            "Save_Time": [time.strftime("%Y-%m-%d %H:%M:%S")],
+            "TimeSeries_Points": [len(time_series_data)],
+            "Spectrum_Sum": [float(np.sum(spectrum_data_to_save))],
         })
 
         from core.excel_io import write_excel_atomic
@@ -2010,19 +2075,23 @@ class UIBase():
         is_tcp_mode = bool(self.config.tcp_enabled)
         saved = 0
         for client_id in clients:
-            client_identifier = client_id
-            if "_" in client_id:
-                parts = client_id.split("_")
-                if len(parts) >= 3:
-                    client_identifier = f"client_{parts[-1].replace(':', '_')}"
-            filename = os.path.join(
-                save_dir, f"data_auto_{client_identifier}_{timestamp}.xlsx"
-            )
+            stem = self._export_file_stem(client_id, timestamp)
+            filename = os.path.join(save_dir, "data_auto_%s.xlsx" % stem)
+            if os.path.exists(filename):
+                filename = os.path.join(
+                    save_dir,
+                    "data_auto_%s_%s.xlsx" % (stem, self._export_client_tag(client_id)),
+                )
             try:
                 n_ts, spec_sum, size = self._write_client_excel(filename, client_id, is_tcp_mode)
+                meta = self._export_probe_meta(client_id)
+                ident = " ".join(
+                    p for p in (meta.get("label"), meta.get("location")) if p
+                ) or client_id
                 self.log(
-                    f"Auto-saved {filename} (points={n_ts}, spectrum_sum={spec_sum:.1f}, bytes={size})",
-                    'INFO'
+                    "Auto-saved %s (probe=%s, points=%d, spectrum_sum=%.1f, bytes=%d)"
+                    % (filename, ident, n_ts, spec_sum, size),
+                    "INFO",
                 )
                 saved += 1
                 self.auto_save_counter += 1
@@ -2385,6 +2454,7 @@ class UIBase():
 
         # 运行设备诊断自检
         self.diagnostics_manager.process_packet(actual_client_id, packet)
+        self._maybe_log_all_probe_cps()
 
         # 只置脏标志；实际重绘由 plot_timer 统一执行（能谱页 ~10Hz，其它页 ~4Hz）
         self._plot_dirty = True
@@ -2536,6 +2606,7 @@ class UIBase():
 
         # 主控 TCP 断开：首页立即切离线（硬报警不再由 PC 拼）
         if client_id and client_id == self.master_client_id:
+            self._remember_master_endpoint(client_id)
             self.master_client_id = None
             if hasattr(self, "worker") and self.worker is not None:
                 try:
@@ -2929,6 +3000,30 @@ class UIBase():
 
     def on_expected_probe_count_changed(self, value):
         self.apply_expected_probe_count(int(value), source="spinbox")
+
+    def on_ir_installed_changed(self, _state=None):
+        if not hasattr(self, "ir_installed_checkbox"):
+            return
+        checked = bool(self.ir_installed_checkbox.isChecked())
+        self.config.update_settings(ir_installed=checked)
+        self.config.save_settings()
+        pkt = getattr(self, "latest_master_summary", None)
+        offline = not (hasattr(self, "is_master_online") and self.is_master_online())
+        if hasattr(self, "_update_home_occupancy"):
+            self._update_home_occupancy(pkt, master_offline=offline)
+        if hasattr(self, "_update_overview_occupancy_from_master"):
+            self._update_overview_occupancy_from_master(pkt, master_offline=offline)
+        if hasattr(self, "_update_settings_occupancy_from_master"):
+            self._update_settings_occupancy_from_master(pkt, master_offline=offline)
+        if hasattr(self, "_update_home_alarm_from_master"):
+            self._update_home_alarm_from_master(pkt, master_offline=offline)
+        if hasattr(self, "_update_home_health_and_faults"):
+            self._update_home_health_and_faults()
+        home = getattr(self, "home_page", None)
+        if home is not None and hasattr(home, "schedule_web_flush"):
+            home.schedule_web_flush(immediate=True)
+        if getattr(self, "control_room_mode", False) and hasattr(self, "_refresh_control_room_snapshot"):
+            self._refresh_control_room_snapshot()
 
     def on_ui_mode_changed(self, _index=None):
         from core.translation import _t
@@ -3370,6 +3465,29 @@ class UIBase():
             cid = getattr(self.worker, "master_client_id", None)
         return cid
 
+    def _remember_master_endpoint(self, client_id: str):
+        """Keep last master peer IP from the TCP socket / client_id."""
+        if not client_id:
+            return
+        ip = ""
+        worker = getattr(self, "worker", None)
+        if worker is not None:
+            info = (getattr(worker, "client_infos", None) or {}).get(client_id)
+            if info is not None:
+                ip = str(getattr(info, "ip_address", "") or "")
+        if not ip and hasattr(self, "_extract_client_ip"):
+            parsed = self._extract_client_ip(client_id)
+            if parsed and parsed not in ("serial", client_id):
+                ip = parsed
+        if ip:
+            self._last_master_ip = ip
+
+    def get_master_display_ip(self) -> str:
+        cid = self._get_master_client_id()
+        if cid:
+            self._remember_master_endpoint(cid)
+        return str(getattr(self, "_last_master_ip", "") or "")
+
     def control_master_relay(self, relay_num: int, state: bool):
         """
         Master single relay — same UX as probe checkbox:
@@ -3685,6 +3803,51 @@ class UIBase():
         
         for cid in expired_clients:
             del self.client_data[cid]
+
+    def _maybe_log_all_probe_cps(self, interval_sec=10.0):
+        """Throttle a human-readable per-probe CPS line into daq_log."""
+        try:
+            now = time.time()
+            last = float(getattr(self, "_last_probe_cps_log_at", 0.0) or 0.0)
+            if now - last < float(interval_sec):
+                return
+            master = getattr(self, "master_client_id", None)
+            parts = []
+            for cid, data in (getattr(self, "client_data", None) or {}).items():
+                if not cid or cid in ("system", "master") or (master and cid == master):
+                    continue
+                meta = self._export_probe_meta(cid)
+                label = meta.get("label") or cid
+                loc = str(meta.get("location") or "").replace(" ", "")
+                try:
+                    cps = int(float((data or {}).get("rates") or 0))
+                except (TypeError, ValueError):
+                    cps = 0
+                if loc:
+                    parts.append("%s/%s %d" % (label, loc, cps))
+                else:
+                    parts.append("%s %d" % (label, cps))
+            slot_txt = ""
+            pkt = getattr(self, "latest_master_summary", None)
+            if pkt is not None:
+                n = int(getattr(pkt, "probe_count_cfg", 0) or 0) or 2
+                slot_cps = list(getattr(pkt, "probe_cps", None) or [])[:n]
+                if slot_cps:
+                    # L2 index = hardware slot, not display-tile order after drag.
+                    names = [
+                        "slot%d=%d" % (i + 1, int(v or 0))
+                        for i, v in enumerate(slot_cps)
+                    ]
+                    slot_txt = " | L2: " + ", ".join(names)
+            if not parts and not slot_txt:
+                return
+            self._last_probe_cps_log_at = now
+            if parts:
+                self.log("Probe CPS: " + " | ".join(parts) + slot_txt, "INFO")
+            else:
+                self.log("Probe CPS:" + slot_txt, "INFO")
+        except Exception:
+            return
     
     def calculate_total_count_rate(self):
         """计算所有客户端的计数率总和（根据用户要求，不再使用）"""
@@ -3972,16 +4135,44 @@ class UIBase():
         ips = sorted(connected_ips)
         self._probe_ip_index = {k: i + 1 for i, k in enumerate(ips)}
 
+    def probe_online_and_target(self):
+        """(online, target) used by health card and E103 — same count, never diverge."""
+        try:
+            expected = int(getattr(self.config, "expected_probe_count", 0) or 0)
+        except (TypeError, ValueError):
+            expected = 0
+        online = 0
+        if hasattr(self, "get_online_probe_client_ids"):
+            online = len(self.get_online_probe_client_ids())
+        pkt = getattr(self, "latest_master_summary", None)
+        cfg_n = int(getattr(pkt, "probe_count_cfg", 0) or 0) if pkt is not None else 0
+        if expected > 0:
+            target = expected
+        else:
+            target = max(online, cfg_n, 1)
+        return online, target
+
+    def _sync_probe_count_fault(self):
+        """E103 when online probes < expected (missing one or all)."""
+        from core.diagnostics import FaultCode
+        dm = getattr(self, "diagnostics_manager", None)
+        if dm is None or not hasattr(dm, "add_fault"):
+            return
+        online, target = self.probe_online_and_target()
+        if target > 0 and online < target:
+            dm.add_fault("system", FaultCode.E103)
+        else:
+            dm.remove_fault("system", FaultCode.E103)
+
     def format_fault_operator_message(self, client_id: str, code: str) -> str:
         """Build operator-facing fault text with correct probe number (no IP, keep short)."""
         from core.translation import _t
-        if client_id == "master":
-            label = "主控" if _t("master_online") == "在线" else "Master"
-        elif client_id == "system":
-            label = ""
+        label = self._fault_device_label(client_id)
+        if str(code) == "E103" and hasattr(self, "probe_online_and_target"):
+            online, expected = self.probe_online_and_target()
+            body = _t("fault_op_E103", online=online, expected=expected)
         else:
-            label = self.get_probe_label(client_id)
-        body = _t("fault_op_" + str(code))
+            body = _t("fault_op_" + str(code))
         # 兼容旧 translation：清掉未替换占位符（写成拼接，避免源码里出现整串占位符）
         _ph = "{" + "probe" + "}"
         if _ph in body:
@@ -3994,6 +4185,47 @@ class UIBase():
         if label:
             return (label + " " + body).strip()
         return body
+
+    def _fault_device_label(self, client_id: str) -> str:
+        from core.translation import _t
+        if client_id == "master":
+            return "主控" if _t("master_online") == "在线" else "Master"
+        if not client_id or client_id == "system":
+            return ""
+        return self.get_probe_label(client_id)
+
+    def format_fault_home_message(self, client_id: str, code: str) -> str:
+        """Homepage / control room: phenomenon + short action, never the E/M code."""
+        from core.translation import _t
+        from core.diagnostics import FaultCode
+        code = str(code)
+        label = "" if client_id in ("master", "system") else self._fault_device_label(client_id)
+        if code == "E103" and hasattr(self, "probe_online_and_target"):
+            online, expected = self.probe_online_and_target()
+            missing = max(0, int(expected) - int(online))
+            if online <= 0:
+                body = _t("fault_home_E103_none", online=online, expected=expected)
+            else:
+                body = _t("fault_home_E103", missing=missing, online=online, expected=expected)
+        else:
+            body = _t("fault_home_" + code)
+            if body == ("fault_home_" + code):
+                name, _, _, _ = FaultCode.get_info(code)
+                body = name or _t("fault_home_unknown")
+        if label:
+            return (label + " " + body).strip()
+        return body
+
+    def format_fault_diag_message(self, client_id: str, code: str) -> str:
+        """Diagnostic page: keep the code for maintenance tickets."""
+        from core.diagnostics import FaultCode
+        code = str(code)
+        name, _, _, _ = FaultCode.get_info(code)
+        extra = ""
+        if code == "E103" and hasattr(self, "probe_online_and_target"):
+            online, expected = self.probe_online_and_target()
+            extra = "（%s/%s）" % (online, expected)
+        return ("%s %s%s" % (code, name, extra)).strip()
     
     def update_client_selection_combo(self):
         """

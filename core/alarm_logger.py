@@ -92,7 +92,7 @@ class AlarmLogger:
             daemon=True,
         )
         self._writer.start()
-        # 建文件丢给写线程，不在 UI 线程同步 flush/写盘
+        # 只挂接当天已有文件，不在启动时新建空表
         self._try_put(("ensure_file",), block=True, timeout=1.0)
 
     def _get_default_log_folder(self) -> Path:
@@ -275,16 +275,16 @@ class AlarmLogger:
                 if pending:
                     self._flush_pending(pending)
                     pending = []
-                self._ensure_excel_file(force_new=False)
+                self._ensure_excel_file(force_new=False, create=False)
                 continue
             if kind == "rotate":
                 if pending:
                     self._flush_pending(pending)
                     pending = []
-                self._ensure_excel_file(force_new=True)
+                self._ensure_excel_file(force_new=True, create=True)
                 continue
             if kind == "append":
-                self._ensure_excel_file(force_new=False)
+                self._ensure_excel_file(force_new=False, create=True)
                 pending.append(item[1])
                 if len(pending) >= batch_limit:
                     self._flush_pending(pending)
@@ -304,9 +304,31 @@ class AlarmLogger:
             self._flush_pending(pending)
         self._drain_spool_into_excel()
 
+    def _today_file_prefix(self) -> str:
+        return datetime.now().strftime("alarm_log_%Y%m%d_")
+
+    def _latest_today_file(self) -> Optional[Path]:
+        """Reuse today's newest alarm_log_YYYYMMDD_*.xlsx (skip in-progress temps)."""
+        try:
+            prefix = self._today_file_prefix()
+            candidates = []
+            for path in self.log_folder.glob(prefix + "*.xlsx"):
+                name = path.name
+                if ".writing." in name:
+                    continue
+                if not path.is_file():
+                    continue
+                candidates.append(path)
+            if not candidates:
+                return None
+            candidates.sort(key=lambda p: p.stat().st_mtime if p.exists() else 0, reverse=True)
+            return candidates[0]
+        except OSError:
+            return None
+
     def _file_needs_rotate(self, path: Optional[Path]) -> bool:
         if path is None:
-            return True
+            return False
         if not path.exists():
             return True
         file_date = None
@@ -324,13 +346,21 @@ class AlarmLogger:
                 return True
         return file_date != datetime.now().date()
 
-    def _ensure_excel_file(self, force_new: bool = False):
-        """仅写线程调用：保证当日有效 xlsx 存在。"""
+    def _ensure_excel_file(self, force_new: bool = False, create: bool = False):
+        """仅写线程调用。启动只复用当天文件；有报警才新建，避免一堆空表。"""
         with self._path_lock:
             path = self.current_excel_file
-        need_new = force_new or self._file_needs_rotate(path)
-        if not need_new:
-            return
+
+        if not force_new:
+            if path is not None and path.exists() and not self._file_needs_rotate(path):
+                return
+            existing = self._latest_today_file()
+            if existing is not None:
+                with self._path_lock:
+                    self.current_excel_file = existing
+                return
+            if not create:
+                return
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         new_path = self.log_folder / f"alarm_log_{timestamp}.xlsx"
@@ -344,7 +374,6 @@ class AlarmLogger:
             print(f"Created new alarm log file: {new_path} ({size} bytes)")
         except Exception as e:
             print(f"Failed to create alarm log file: {e}")
-            # 保留旧 path（若仍可用），否则置空；后续 append 会再试
             if path is None or not path.exists():
                 with self._path_lock:
                     self.current_excel_file = None
@@ -355,7 +384,7 @@ class AlarmLogger:
         with self._path_lock:
             path = self.current_excel_file
         if path is None:
-            self._ensure_excel_file(force_new=False)
+            self._ensure_excel_file(force_new=False, create=True)
             with self._path_lock:
                 path = self.current_excel_file
         if path is None:
@@ -447,7 +476,7 @@ class AlarmLogger:
                 return
 
         try:
-            self._ensure_excel_file(force_new=False)
+            self._ensure_excel_file(force_new=False, create=True)
             with self._path_lock:
                 path = self.current_excel_file
             if path is None:
@@ -497,9 +526,11 @@ class AlarmLogger:
             print("Alarm Excel shutdown: flush/join incomplete; check spool file if present")
 
     def _check_and_rotate_file(self):
-        """UI 仅发出轮转提示，不阻塞。"""
+        """UI 仅发出轮转提示，不阻塞。尚无当日文件时不建空表。"""
         with self._path_lock:
             path = self.current_excel_file
+        if path is None:
+            return
         if self._file_needs_rotate(path):
             self._try_put(("rotate",))
 

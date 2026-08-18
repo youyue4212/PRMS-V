@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 import time
 from datetime import datetime
 
@@ -39,10 +39,14 @@ PADDING = {
 class StatusBar(QWidget):
     """Android-style status bar with battery, connection status, and user info"""
     language_changed = pyqtSignal(str)
+    clear_requested = pyqtSignal()
+    save_requested = pyqtSignal()
+    users_requested = pyqtSignal()
     
     def __init__(self):
         super().__init__()
         self._hide_clock = False
+        self._desktop_compact = False
         self.setFixedHeight(40)  # 工控触控：状态栏略加高
         self.setStyleSheet("""
             QWidget {
@@ -100,6 +104,16 @@ class StatusBar(QWidget):
         """)
         self.timeout_label.setVisible(False)
 
+        self.ops_clear = self._make_ops_btn("#ff9800")
+        self.ops_save = self._make_ops_btn("#2196F3")
+        self.ops_users = self._make_ops_btn("#9C27B0")
+        self.ops_clear.clicked.connect(self.clear_requested.emit)
+        self.ops_save.clicked.connect(self.save_requested.emit)
+        self.ops_users.clicked.connect(self.users_requested.emit)
+        self.ops_clear.setVisible(False)
+        self.ops_save.setVisible(False)
+        self.ops_users.setVisible(False)
+
         # Spacer
         spacer = QSpacerItem(40, 20, QSizePolicy.Expanding, QSizePolicy.Minimum)
 
@@ -152,6 +166,9 @@ class StatusBar(QWidget):
         layout.addWidget(self.time_label)
         layout.addWidget(self.user_label)
         layout.addWidget(self.timeout_label)
+        layout.addWidget(self.ops_clear)
+        layout.addWidget(self.ops_save)
+        layout.addWidget(self.ops_users)
         layout.addItem(spacer)
         layout.addWidget(self.connection_icon_widget)
         layout.addWidget(self.status_label)
@@ -159,11 +176,82 @@ class StatusBar(QWidget):
 
         self.setLayout(layout)
 
+        self._retranslate_ops_buttons()
+
         # Timer to update time and battery
         self.timer = QTimer()
         self.timer.timeout.connect(self.update_data)
         self.timer.start(10000)
         self.update_data()
+
+    @staticmethod
+    def _make_ops_btn(color: str) -> QPushButton:
+        btn = QPushButton()
+        btn.setFixedHeight(26)
+        btn.setCursor(Qt.PointingHandCursor)
+        btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent; color: {color};
+                border: 1px solid {color}; border-radius: 4px;
+                padding: 0 8px; min-height: 26px; max-height: 26px;
+                font-size: 11px; font-weight: bold;
+            }}
+            QPushButton:pressed {{ background-color: {color}; color: #111; }}
+            QPushButton:disabled {{ color: #666; border-color: #555; }}
+        """)
+        return btn
+
+    def set_ops_buttons(self, show_clear=False, show_save=False, show_users=False):
+        """主控室：操作进设置页，状态栏不另占一排。"""
+        self.ops_clear.setVisible(bool(show_clear))
+        self.ops_save.setVisible(bool(show_save))
+        self.ops_users.setVisible(bool(show_users))
+
+    def set_desktop_compact(self, enabled: bool):
+        """主控室电脑：状态栏用 px 字号，与顶栏胶囊同一套高度。"""
+        from core.ui_tokens import CR_STATUS_BAR_H, CR_CHROME_H, CR_CHROME_FONT_PX
+        self._desktop_compact = bool(enabled)
+        if not self._desktop_compact:
+            return
+        self.setFixedHeight(CR_STATUS_BAR_H)
+        px_font = QFont("Microsoft YaHei")
+        px_font.setPixelSize(CR_CHROME_FONT_PX)
+        for lab in (self.time_label, self.user_label, self.timeout_label, self.status_label):
+            lab.setFont(px_font)
+        self.time_label.setStyleSheet(
+            f"color: white; font-size: {CR_CHROME_FONT_PX}px;"
+        )
+        self.status_label.setStyleSheet(
+            f"color: white; font-size: {CR_CHROME_FONT_PX}px; "
+            f"margin-left: 5px; margin-right: 10px;"
+        )
+        self.lang_btn.setFixedHeight(CR_CHROME_H)
+        self.lang_btn.setMinimumWidth(52)
+        self.lang_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: #333333;
+                color: #ff9800;
+                border: 1px solid #ff9800;
+                border-radius: 6px;
+                padding: 0 10px;
+                min-height: {CR_CHROME_H}px;
+                max-height: {CR_CHROME_H}px;
+                min-width: 52px;
+                font-size: {CR_CHROME_FONT_PX}px;
+                font-weight: bold;
+            }}
+            QPushButton:pressed {{
+                background-color: #ff9800;
+                color: black;
+            }}
+        """)
+
+    def _retranslate_ops_buttons(self):
+        from core.translation import _t
+        if hasattr(self, "ops_clear"):
+            self.ops_clear.setText(_t("btn_clear"))
+            self.ops_save.setText(_t("btn_save"))
+            self.ops_users.setText(_t("btn_user_mgmt"))
 
     def update_connection_status(self, is_connected: bool):
         """Update the connection icon dynamically"""
@@ -185,6 +273,10 @@ class StatusBar(QWidget):
         
         # Only show role, not username to avoid duplication like "admin (Admin)"
         self.user_label.setText(role_text)
+        font_px = ""
+        if getattr(self, "_desktop_compact", False):
+            from core.ui_tokens import CR_CHROME_FONT_PX
+            font_px = f"font-size: {CR_CHROME_FONT_PX}px;"
         self.user_label.setStyleSheet(f"""
             QLabel {{
                 margin-left: 10px;
@@ -193,6 +285,7 @@ class StatusBar(QWidget):
                 background-color: {color};
                 color: white;
                 font-weight: bold;
+                {font_px}
             }}
         """)
         self.user_label.setVisible(True)
@@ -255,15 +348,19 @@ class StatusBar(QWidget):
             color = "#4caf50"  # Green, sufficient time
         
         self.timeout_label.setText(time_str)
+        font_px = ""
+        if getattr(self, "_desktop_compact", False):
+            from core.ui_tokens import CR_CHROME_FONT_PX
+            font_px = f"font-size: {CR_CHROME_FONT_PX}px;"
         self.timeout_label.setStyleSheet(f"""
             QLabel {{
                 margin-left: 8px;
-                padding: 4px 10px;
-                border-radius: 6px;
+                padding: 2px 8px;
+                border-radius: 4px;
                 background-color: {color};
                 color: white;
                 font-weight: bold;
-                min-height: 24px;
+                {font_px}
             }}
         """)
         self.timeout_label.setVisible(True)
@@ -486,6 +583,8 @@ class BottomNavBar(QWidget):
         self._desktop_compact = False
         self._bar_height = 70
         self.setFixedHeight(self._bar_height)
+        self.setMinimumHeight(self._bar_height)
+        self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         # 只对 BottomNavBar 本身设置样式，不影响子组件
         self.setStyleSheet("""
             BottomNavBar {
@@ -555,25 +654,31 @@ class BottomNavBar(QWidget):
         self._alarm_log_badge = False
 
     def set_desktop_compact(self, enabled: bool):
-        """主控室电脑：略低于平板触控底栏，但保留桌面可读字号（勿用 48px/10pt）。"""
+        """主控室电脑：固定底栏高度，禁止被内容页挤扁；字号用 px 避免高 DPI 下 pt 撑破。"""
         self._desktop_compact = bool(enabled)
-        self._bar_height = 58 if self._desktop_compact else 70
+        self._bar_height = 64 if self._desktop_compact else 70
         self.setFixedHeight(self._bar_height)
-        icon_size = 24 if self._desktop_compact else 28
-        nav_font_pt = 13 if self._desktop_compact else 11
+        self.setMinimumHeight(self._bar_height)
+        self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        icon_size = 22 if self._desktop_compact else 28
+        nav_font = 13
+        if self._desktop_compact:
+            from core.ui_tokens import CR_CHROME_FONT_PX
+            nav_font = CR_CHROME_FONT_PX
         for container in self.button_widgets:
             container.setFixedHeight(self._bar_height)
+            container.setMinimumHeight(self._bar_height)
             if hasattr(container, "icon_widget"):
                 container.icon_widget.setFixedSize(icon_size, icon_size)
             if hasattr(container, "text_label"):
-                from PyQt5.QtGui import QFont
-                container.text_label.setFont(QFont(FONTS["tip"][0], nav_font_pt))
-            lay = container.layout()
-            if lay is not None and self._desktop_compact:
-                # outer container has nested layout; tighten via icon parent
-                pass
+                container.text_label.setStyleSheet(
+                    f"color: #cccccc; background: transparent; border: none; font-size: {nav_font}px;"
+                )
+            inner = getattr(container, "_inner_layout", None)
+            if inner is not None and self._desktop_compact:
+                inner.setContentsMargins(0, 4, 0, 4)
+                inner.setSpacing(1)
         self.refresh_hit_areas()
-        # re-apply active style so icon sizes refresh
         self.set_active_button(getattr(self, "_active_index", 0))
 
     def _alarm_log_icon_tag(self):
@@ -626,6 +731,7 @@ class BottomNavBar(QWidget):
         
         layout.addLayout(icon_layout)
         layout.addWidget(text_label)
+        container._inner_layout = layout
         
         # Create invisible button for click handling
         btn = QPushButton()
@@ -666,14 +772,22 @@ class BottomNavBar(QWidget):
         """按当前宽度重设底部导航按钮点击区域。"""
         h = getattr(self, "_bar_height", 70)
         self.setFixedHeight(h)
+        self.setMinimumHeight(h)
         for container in self.button_widgets:
             container.setFixedHeight(h)
+            container.setMinimumHeight(h)
             btn = getattr(container, '_hit_btn', None)
             if btn is not None:
                 btn.setFixedHeight(h)
                 btn.setGeometry(0, 0, max(container.width(), 1), h)
                 btn.raise_()
     
+    def _nav_font_px(self):
+        if getattr(self, "_desktop_compact", False):
+            from core.ui_tokens import CR_CHROME_FONT_PX
+            return CR_CHROME_FONT_PX
+        return 11
+
     def _apply_active_style(self, container, icon_tag, color):
         """Apply active style to button with custom color"""
         # 将 hex 颜色转换为 rgba
@@ -696,6 +810,7 @@ class BottomNavBar(QWidget):
                 font-weight: bold;
                 background-color: transparent;
                 border: none;
+                font-size: {self._nav_font_px()}px;
             }}
         """)
         # 为图标添加发光效果 - 在 SVG 中添加发光滤镜
@@ -746,12 +861,13 @@ class BottomNavBar(QWidget):
                 border-top: 3px solid transparent;
             }
         """)
-        container.text_label.setStyleSheet("""
-            QLabel {
+        container.text_label.setStyleSheet(f"""
+            QLabel {{
                 color: #cccccc;
                 background-color: transparent;
                 border: none;
-            }
+                font-size: {self._nav_font_px()}px;
+            }}
         """)
         # Update icon with inactive color — 提高对比，避免暗底看不清
         svg_data = get_icon_svg(icon_tag).decode().replace('currentColor', '#cccccc')

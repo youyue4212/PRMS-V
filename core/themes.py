@@ -32,43 +32,51 @@ def _qss_url(filename: str) -> str:
     return 'url("%s")' % _icon_file(filename)
 
 
-def build_dark_stylesheet() -> str:
+def build_dark_stylesheet(control_room: bool = False) -> str:
     arrow_up = _qss_url("arrow_up_white.svg")
     arrow_down = _qss_url("arrow_down_white.svg")
+    if control_room:
+        from core.ui_tokens import CR_CHROME_H, CR_CHROME_FONT_PX
+        font_px = CR_CHROME_FONT_PX
+        btn_h = CR_CHROME_H
+        btn_pad = "4px 12px"
+    else:
+        font_px = 14
+        btn_h = 44
+        btn_pad = "8px 14px"
     return """
 QWidget {{
     background-color: #1a1a1a;
     color: #E0E0E0;
     font-family: 'Microsoft YaHei', 'Segoe UI', sans-serif;
-    font-size: 14px;
+    font-size: {font_px}px;
 }}
 QGraphicsWidget {{
-        background-color: #2a2a2a;
-        border: 1px solid #555555;
-        border-radius: 10px;
-        color: #ffffff;
-        font-size: 10pt;
-        font-family: "Microsoft YaHei", "Arial";
-    }}
-    PlotItem {{
-        background: #1a1a1a;
-        border: 1px solid #666666;
-    }}
-    AxisItem {{
-        color: #cccccc;
-    }}
-    LegendItem {{
-        background-color: #333333;
-        border: 1px solid #555555;
-    }}
+    background-color: transparent;
+    border: none;
+    color: #ffffff;
+}}
+PlotItem {{
+    background: #1a1a1a;
+    border: none;
+}}
+AxisItem {{
+    color: #cccccc;
+    background-color: transparent;
+    border: none;
+}}
+LegendItem {{
+    background-color: #1a1a1a;
+    border: 1px solid #444444;
+}}
 
 QPushButton {{
     background-color: #2a2a2a;
     color: #E0E0E0;
     border: 1px solid #444444;
     border-radius: 8px;
-    padding: 8px 14px;
-    min-height: 44px;
+    padding: {btn_pad};
+    min-height: {btn_h}px;
 }}
 
 QPushButton:hover {{
@@ -181,7 +189,13 @@ QLabel {{
 
 QFrame {{
 }}
-""".format(arrow_up=arrow_up, arrow_down=arrow_down)
+""".format(
+        arrow_up=arrow_up,
+        arrow_down=arrow_down,
+        font_px=font_px,
+        btn_h=btn_h,
+        btn_pad=btn_pad,
+    )
 
 
 dark_stylesheet = build_dark_stylesheet()

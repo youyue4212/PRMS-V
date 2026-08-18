@@ -25,7 +25,7 @@ TOUCH_H = 44
 PAGE_TITLE_PX = 22
 
 # Control-room (PC) typography — tablet px baseline × scale for viewing distance
-CONTROL_ROOM_FONT_SCALE = 1.4
+CONTROL_ROOM_FONT_SCALE = 1.1
 # Count-rate digits (CPS) get an extra bump — primary readout at desk viewing distance
 CONTROL_ROOM_CPS_EXTRA = 1.32
 
@@ -38,6 +38,12 @@ def cr_px(n: int) -> int:
 def cr_cps_px(n: int) -> int:
     """Scale CPS / count-rate numerals (larger than general UI text)."""
     return max(1, int(round(n * CONTROL_ROOM_FONT_SCALE * CONTROL_ROOM_CPS_EXTRA)))
+
+
+# Duty-wall chrome: status bar + header pills/buttons share one size family
+CR_CHROME_H = cr_px(30)
+CR_CHROME_FONT_PX = cr_px(12)
+CR_STATUS_BAR_H = cr_px(36)
 
 
 def cps_digit_scale(text) -> float:
@@ -75,5 +81,69 @@ TOUCH_BTN_QSS = f"""
         font-weight: bold;
         padding: 0 16px;
         color: white;
+    }}
+"""
+
+# Settings page: one dark surface — groups outlined, not filled (avoids black/gray stripes)
+CR_SETTINGS_PAGE_QSS = f"""
+    QWidget {{
+        background-color: {BG};
+        color: {TEXT};
+    }}
+    QGroupBox {{
+        color: {TEXT};
+        font-size: {CR_CHROME_FONT_PX}px;
+        font-weight: bold;
+        border: 1px solid {BORDER};
+        border-radius: 8px;
+        margin-top: 12px;
+        padding: 12px 10px 10px 10px;
+        background-color: {BG};
+    }}
+    QGroupBox::title {{
+        subcontrol-origin: margin;
+        left: 10px;
+        padding: 0 6px;
+        color: {TEXT_DIM};
+        background-color: {BG};
+    }}
+    QGroupBox QLabel {{
+        color: {TEXT};
+        font-size: {CR_CHROME_FONT_PX}px;
+        font-weight: normal;
+        background: transparent;
+    }}
+    QCheckBox {{
+        color: {TEXT};
+        font-size: {CR_CHROME_FONT_PX}px;
+        spacing: 8px;
+        background: transparent;
+    }}
+    QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {{
+        min-height: {CR_CHROME_H}px;
+        max-height: {CR_CHROME_H + 4}px;
+        font-size: {CR_CHROME_FONT_PX}px;
+        padding: 2px 8px;
+        background: {BG_ELEVATED};
+        color: {TEXT};
+        border: 1px solid {BORDER_SOFT};
+        border-radius: 4px;
+    }}
+    QPushButton {{
+        min-height: {CR_CHROME_H}px;
+        font-size: {CR_CHROME_FONT_PX}px;
+        font-weight: bold;
+        padding: 0 12px;
+        border: none;
+        border-radius: {RADIUS_BTN}px;
+        color: white;
+        background-color: #455a64;
+    }}
+    QPushButton:pressed {{
+        background-color: #37474f;
+    }}
+    QPushButton:disabled {{
+        background-color: #555555;
+        color: #999999;
     }}
 """

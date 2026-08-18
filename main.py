@@ -96,18 +96,19 @@ def main():
     main._instance_lock = single_instance_lock
 
     from core.config import ConfigManager
+    from core.ui_tokens import CR_CHROME_FONT_PX
     ui_mode = str(getattr(ConfigManager(), "ui_mode", "tablet") or "tablet").lower()
     control_room = ui_mode == "control_room"
-    # 平板 9pt 触控；主控室 PC 用更大基准字号（子页/对话框一并受益）
-    base_pt = 12 if control_room and not is_rpi else 9
-    font = QFont("Microsoft YaHei", base_pt)
-    # 回退：无雅黑时用系统默认 UI 字体，避免 Arial 导致中文变 ?
+    # 平板：9pt 触控。主控室：px 字号，避免高 DPI 下 pt 把顶栏/状态栏撑破。
+    font = QFont("Microsoft YaHei")
     if not QFont("Microsoft YaHei").exactMatch():
-        font = QFont("Segoe UI", base_pt)
-    if is_rpi and font.pointSize() < 10:
-        font.setPointSize(10)
+        font = QFont("Segoe UI")
+    if control_room and not is_rpi:
+        font.setPixelSize(CR_CHROME_FONT_PX)
+    else:
+        font.setPointSize(10 if is_rpi else 9)
     app.setFont(font)
-    app.setStyleSheet(themes.dark_stylesheet)
+    app.setStyleSheet(themes.build_dark_stylesheet(control_room=control_room))
 
     current_user = None
     if args.login:

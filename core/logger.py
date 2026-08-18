@@ -66,7 +66,9 @@ class Logger:
         
         # Create file handler if it hasn't been added already
         if not any(isinstance(h, logging.FileHandler) for h in self.logger.handlers):
-            file_handler = logging.FileHandler(self.log_filename)
+            file_handler = logging.FileHandler(
+                self.log_filename, encoding="utf-8", errors="replace"
+            )
             file_handler.setLevel(getattr(self, 'output_level', logging.INFO))
             file_handler.setFormatter(self.formatter)
             self.logger.addHandler(file_handler)

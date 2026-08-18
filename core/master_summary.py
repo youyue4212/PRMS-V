@@ -309,24 +309,26 @@ def hit_slots(mask: int, count: int) -> List[int]:
     return [i for i in range(min(count, MASTER_MAX_PROBES)) if mask & (1 << i)]
 
 
-def format_io_brief(pkt: MasterSummaryPacket, lang: str = "zh") -> str:
+def format_io_brief(pkt: MasterSummaryPacket, lang: str = "zh", ir_installed: bool = True) -> str:
+    """IO 摘要。现场未接红外时不展示入口/出口挡光和「红外降级」。"""
+    show_ir = bool(ir_installed)
     if lang == "en":
         parts = []
-        if pkt.ir_entry:
+        if show_ir and pkt.ir_entry:
             parts.append("IR-IN")
-        if pkt.ir_exit:
+        if show_ir and pkt.ir_exit:
             parts.append("IR-OUT")
         if pkt.radar_gate:
             parts.append("RADAR")
         if pkt.relay0 or pkt.relay1 or pkt.relay2:
             parts.append("R%d%d%d" % (int(pkt.relay0), int(pkt.relay1), int(pkt.relay2)))
-        if pkt.ir_degraded:
+        if show_ir and pkt.ir_degraded:
             parts.append("IR-DEG")
         return ", ".join(parts) if parts else "Idle"
     parts = []
-    if pkt.ir_entry:
+    if show_ir and pkt.ir_entry:
         parts.append("\u5165\u53e3\u7ea2\u5916")
-    if pkt.ir_exit:
+    if show_ir and pkt.ir_exit:
         parts.append("\u51fa\u53e3\u7ea2\u5916")
     if pkt.radar_gate:
         parts.append("\u96f7\u8fbe")
@@ -334,6 +336,6 @@ def format_io_brief(pkt: MasterSummaryPacket, lang: str = "zh") -> str:
         parts.append(
             "\u7ee7\u7535\u5668 %d/%d/%d" % (int(pkt.relay0), int(pkt.relay1), int(pkt.relay2))
         )
-    if pkt.ir_degraded:
+    if show_ir and pkt.ir_degraded:
         parts.append("\u7ea2\u5916\u964d\u7ea7")
     return "\u3001".join(parts) if parts else "\u901a\u9053\u7a7a\u95f2"

@@ -95,6 +95,9 @@ class ConfigManager:
         if self.cps_window_minutes not in (1, 5, 15):
             self.cps_window_minutes = 5
 
+        # 本通道是否接了入口/出口红外。未接时健康卡显示「未接入」，不报故障码。
+        self.ir_installed = self._to_bool(self.settings.value("IR_INSTALLED", True), default=True)
+
     @staticmethod
     def _to_bool(value, default=False):
         if value is None:
@@ -204,7 +207,7 @@ class ConfigManager:
                        tcp_client_host=None, tcp_client_port=None, language=None,
                        hv_user_set=None,
                        expected_probe_count=None, cps_window_minutes=None,
-                       ui_mode=None):
+                       ui_mode=None, ir_installed=None):
         if language is not None:
             self.language = language
             self.settings.setValue("LANGUAGE", language)
@@ -214,6 +217,9 @@ class ConfigManager:
                 mode = "tablet"
             self.ui_mode = mode
             self.settings.setValue("UI_MODE", self.ui_mode)
+        if ir_installed is not None:
+            self.ir_installed = bool(ir_installed)
+            self.settings.setValue("IR_INSTALLED", self.ir_installed)
         if baudrate is not None:
             self.baudrate = baudrate
             self.settings.setValue("BAUDRATE", baudrate)

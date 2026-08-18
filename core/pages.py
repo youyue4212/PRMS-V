@@ -4,14 +4,14 @@ from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QLabel, QPushButton, QFrame, QSpacerItem, QSizePolicy,
-    QStackedWidget, QScrollArea
+    QStackedWidget, QScrollArea, QAbstractScrollArea
 )
 from PyQt5.QtSvg import QSvgWidget
 from PyQt5.QtGui import QFont
 
 from core.ui_components import DataCard, FONTS, PADDING
 from core.icons import get_icon_svg
-from core.ui_tokens import PAGE_TITLE_QSS, TOUCH_H, RADIUS_BTN, WARN, OK
+from core.ui_tokens import PAGE_TITLE_QSS, TOUCH_H, RADIUS_BTN, WARN, OK, CR_SETTINGS_PAGE_QSS, cr_px
 import time
 
 # Original overview page card height
@@ -263,9 +263,9 @@ class SpectrumPage(QWidget):
         splitter = QSplitter(Qt.Vertical)
         splitter.setStyleSheet("""
             QSplitter::handle {
-                background-color: #333333;
-                height: 1px;
-                margin: 4px 0;
+                background-color: #1a1a1a;
+                height: 6px;
+                margin: 0;
             }
         """)
         
@@ -300,19 +300,26 @@ class SettingsPage(QWidget):
         super().__init__()
         self.parent = parent
         main_layout = QVBoxLayout()
-        main_layout.setContentsMargins(20, 20, 20, 20)
+        main_layout.setContentsMargins(20, 12, 20, 8)
+        main_layout.setSpacing(8)
         
         self.title = QLabel("系统设置")
         self.title.setStyleSheet(PAGE_TITLE_QSS)
         main_layout.addWidget(self.title)
 
-        # Create scroll area for settings content
-        from PyQt5.QtWidgets import QScrollArea
-        
+        # 设置项很多：必须让滚动区可以缩到比内容更矮，否则全屏+高 DPI
+        # 时 QStackedWidget 会按内容高度把底栏顶出屏幕。
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QFrame.NoFrame)
         scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll_area.setMinimumHeight(0)
+        scroll_area.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        try:
+            scroll_area.setSizeAdjustPolicy(QAbstractScrollArea.AdjustIgnored)
+        except Exception:
+            pass
         scroll_area.setStyleSheet("""
             QScrollArea {
                 border: none;
@@ -323,25 +330,23 @@ class SettingsPage(QWidget):
             }
         """)
         
-        # Create container widget
         container_widget = QWidget()
+        container_widget.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
+        if getattr(parent, "control_room_mode", False):
+            container_widget.setStyleSheet(CR_SETTINGS_PAGE_QSS)
         container_layout = QVBoxLayout(container_widget)
         container_layout.setContentsMargins(5, 5, 15, 5)
-        container_layout.setSpacing(15)
+        container_layout.setSpacing(10)
         
-        # Add settings content to container layout
         parent.add_widgets_to_setting_layout(container_layout)
-        
-        # Add stretch
         container_layout.addStretch()
         
-        # Set container widget to scroll area
         scroll_area.setWidget(container_widget)
-        
-        # Add scroll area to main layout
         main_layout.addWidget(scroll_area, 1)
         
         self.setLayout(main_layout)
+        self.setMinimumHeight(0)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
     def retranslate_ui(self):
         """Retranslate UI elements based on current language"""
@@ -518,6 +523,80 @@ class ClientsPage(QWidget):
         
         # Store client widgets
         self.client_widgets = {}
+        self._apply_control_room_diag_chrome()
+
+    def _diag_px(self, n: int) -> int:
+        """Same px ladder as probe cards; control-room scales with cr_px."""
+        if getattr(self.parent, "control_room_mode", False):
+            return cr_px(n)
+        return int(n)
+
+    def _diag_style(self, role: str, color: str = None) -> str:
+        p = self._diag_px
+        color = color or "#ffffff"
+        if role == "title":
+            return "QLabel { color: %s; font-size: %dpx; font-weight: bold; }" % (color, p(16))
+        if role == "status":
+            return "QLabel { color: %s; font-size: %dpx; font-weight: normal; }" % (color, p(14))
+        if role == "alarm":
+            return (
+                "QLabel { color: %s; font-size: %dpx; font-weight: bold; margin-top: 2px; }"
+                % (color, p(14))
+            )
+        if role == "faults":
+            return (
+                "QLabel { color: %s; font-size: %dpx; font-weight: bold; margin-top: 2px; }"
+                % (color, p(12))
+            )
+        if role == "key":
+            return "QLabel { color: #aaaaaa; font-size: %dpx; font-weight: normal; }" % p(14)
+        if role == "val":
+            return "QLabel { color: %s; font-size: %dpx; font-weight: bold; }" % (color, p(16))
+        if role == "key2":
+            return "QLabel { color: #aaaaaa; font-size: %dpx; font-weight: normal; }" % p(12)
+        if role == "val2":
+            return "QLabel { color: #cccccc; font-size: %dpx; font-weight: normal; }" % p(12)
+        return "QLabel { color: %s; font-size: %dpx; }" % (color, p(14))
+
+    def _diag_card_qss(self) -> str:
+        return """
+            QFrame {
+                background-color: #2a2a2a;
+                border-radius: 10px;
+                border: 1px solid #333333;
+            }
+        """
+
+    def _apply_control_room_diag_chrome(self):
+        if not getattr(self.parent, "control_room_mode", False):
+            return
+        from core.ui_tokens import CR_CHROME_H, CR_CHROME_FONT_PX, TEXT, MUTED
+        title_px = cr_px(22)
+        self.clients_title.setStyleSheet(
+            "QLabel { color: %s; font-size: %dpx; font-weight: bold; "
+            "margin-bottom: 8px; background: transparent; border: none; }"
+            % (TEXT, title_px)
+        )
+        self.lock_title.setStyleSheet(
+            "QLabel { color: #ff9800; font-size: %dpx; font-weight: bold; margin-top: 6px; }"
+            % cr_px(18)
+        )
+        self.lock_desc.setStyleSheet(
+            "QLabel { color: %s; font-size: %dpx; margin-top: 4px; }" % (MUTED, cr_px(13))
+        )
+        self.unlock_btn.setFixedHeight(CR_CHROME_H)
+        self.refresh_btn.setFixedHeight(CR_CHROME_H)
+        for btn, bg, press in (
+            (self.unlock_btn, WARN, "#e65100"),
+            (self.refresh_btn, OK, "#45a049"),
+        ):
+            btn.setStyleSheet(
+                "QPushButton { background-color: %s; color: white; border: none; "
+                "border-radius: %dpx; font-size: %dpx; font-weight: bold; "
+                "padding: 0 16px; min-height: %dpx; }"
+                "QPushButton:pressed { background-color: %s; }"
+                % (bg, RADIUS_BTN, CR_CHROME_FONT_PX, CR_CHROME_H, press)
+            )
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -567,10 +646,25 @@ class ClientsPage(QWidget):
             widget = self.client_widgets.pop(master_key)
             self.scroll_layout.removeWidget(widget)
             widget.deleteLater()
+
+        system_key = "__system__"
+        system_data = self._collect_system_diag_data()
+        if system_data is not None:
+            insert_at = 1 if master_key in self.client_widgets else 0
+            if system_key not in self.client_widgets:
+                system_widget = self.create_system_widget(system_data)
+                self.client_widgets[system_key] = system_widget
+                self.scroll_layout.insertWidget(insert_at, system_widget)
+            else:
+                self.update_system_widget(self.client_widgets[system_key], system_data)
+        elif system_key in self.client_widgets:
+            widget = self.client_widgets.pop(system_key)
+            self.scroll_layout.removeWidget(widget)
+            widget.deleteLater()
         
         # Remove old client widgets
         for client_id, widget in list(self.client_widgets.items()):
-            if client_id == master_key:
+            if client_id in (master_key, system_key):
                 continue
             if client_id not in client_data:
                 self.scroll_layout.removeWidget(widget)
@@ -609,53 +703,117 @@ class ClientsPage(QWidget):
         dm = getattr(self.parent, "diagnostics_manager", None)
         if dm is not None:
             faults = sorted((dm.active_faults.get("master", {}) or {}).keys())
-        if not (master_cid or pkt is not None or faults):
+        if not (master_cid or pkt is not None or faults or getattr(self.parent, "_last_master_ip", "")):
             return None
+        from core.master_summary import format_io_brief
+        from core.translation import TranslationManager
+        try:
+            lang = TranslationManager().get_language()
+        except Exception:
+            lang = "zh"
+        ir_installed = bool(getattr(getattr(self.parent, "config", None), "ir_installed", True))
+        io_text = (
+            format_io_brief(pkt, lang, ir_installed=ir_installed) if pkt is not None else "--"
+        )
+        l2_time = "--"
+        if pkt is not None:
+            rx = float(getattr(pkt, "received_at", 0) or 0)
+            if rx > 0:
+                l2_time = datetime.fromtimestamp(rx).strftime("%H:%M:%S")
+        ip = "--"
+        getter = getattr(self.parent, "get_master_display_ip", None)
+        if callable(getter):
+            ip = getter() or "--"
+        elif master_cid and hasattr(self.parent, "_extract_client_ip"):
+            ip = self.parent._extract_client_ip(master_cid) or "--"
         return {
             "client_id": master_cid or "master",
             "online": online,
             "link_only": link_only,
-            "master_id": getattr(pkt, "master_id", None) if pkt is not None else None,
+            "master_id": ip,
             "decision": getattr(pkt, "decision_result", None) if pkt is not None else None,
-            "decision_text": pkt.decision_text("zh") if pkt is not None else None,
-            "ir_degraded": bool(getattr(pkt, "ir_degraded", False)) if pkt is not None else False,
+            "decision_text": pkt.decision_text(lang) if pkt is not None else None,
+            "ir_installed": ir_installed,
+            "ir_degraded": bool(ir_installed and getattr(pkt, "ir_degraded", False)) if pkt is not None else False,
             "hit_mask": int(getattr(pkt, "hit_probe_mask", 0) or 0) if pkt is not None else 0,
             "online_mask": int(getattr(pkt, "online_mask", 0) or 0) if pkt is not None else 0,
+            "io_text": io_text,
+            "l2_time": l2_time,
             "faults": faults,
         }
+
+    def _collect_system_diag_data(self):
+        dm = getattr(self.parent, "diagnostics_manager", None)
+        if dm is None:
+            return None
+        codes = sorted((dm.active_faults.get("system", {}) or {}).keys())
+        if not codes:
+            return None
+        fmt = getattr(self.parent, "format_fault_diag_message", None)
+        lines = []
+        for code in codes:
+            lines.append(fmt("system", code) if fmt else str(code))
+        return {"faults": lines}
+
+    def create_system_widget(self, data: dict) -> QFrame:
+        from core.translation import _t
+        widget = QFrame()
+        widget.setMinimumHeight(88)
+        widget.setMaximumHeight(120)
+        widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        widget.setStyleSheet(self._diag_card_qss())
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(15, 10, 15, 10)
+        layout.setSpacing(4)
+        title = QLabel(_t("system_diag_title"))
+        title.setStyleSheet(self._diag_style("title"))
+        layout.addWidget(title)
+        fault_label = QLabel("")
+        fault_label.setWordWrap(True)
+        fault_label.setStyleSheet(self._diag_style("faults", "#ffb74d"))
+        layout.addWidget(fault_label)
+        widget.data_labels = {"title": title, "faults": fault_label}
+        self.update_system_widget(widget, data)
+        return widget
+
+    def update_system_widget(self, widget: QFrame, data: dict):
+        from core.translation import _t
+        labels = widget.data_labels
+        labels["title"].setText(_t("system_diag_title"))
+        faults = data.get("faults", []) or []
+        if faults:
+            labels["faults"].setText(_t("probe_faults_active", faults="  |  ".join(faults)))
+            labels["faults"].setStyleSheet(self._diag_style("faults", "#ffb74d"))
+        else:
+            labels["faults"].setText(_t("system_diag_faults_normal"))
+            labels["faults"].setStyleSheet(self._diag_style("faults", "#4caf50"))
 
     def create_master_widget(self, data: dict) -> QFrame:
         from core.translation import _t
         widget = QFrame()
-        # Match probe card shell (same size/colors)
         widget.setMinimumHeight(140)
         widget.setMaximumHeight(160)
         widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        widget.setStyleSheet("""
-            QFrame {
-                background-color: #2a2a2a;
-                border-radius: 10px;
-                border: 1px solid #333333;
-            }
-        """)
+        widget.setStyleSheet(self._diag_card_qss())
         layout = QHBoxLayout(widget)
         layout.setContentsMargins(15, 10, 15, 10)
         layout.setSpacing(15)
 
         left = QVBoxLayout()
         left.setSpacing(3)
-        title = QLabel(_t("master_diag_title"))
-        title.setStyleSheet("color: white; font-size: 16px; font-weight: bold;")
+        title = QLabel("")
+        title.setStyleSheet(self._diag_style("title"))
         left.addWidget(title)
         client_id_label = QLabel("")
-        client_id_label.setStyleSheet("color: white; font-size: 14px; font-weight: normal;")
+        client_id_label.setStyleSheet(self._diag_style("title"))
+        client_id_label.hide()
         left.addWidget(client_id_label)
         link_label = QLabel("")
-        link_label.setStyleSheet("color: #4caf50; font-size: 14px; font-weight: bold; margin-top: 2px;")
+        link_label.setStyleSheet(self._diag_style("alarm", "#4caf50"))
         left.addWidget(link_label)
         fault_label = QLabel("")
         fault_label.setWordWrap(True)
-        fault_label.setStyleSheet("color: #4caf50; font-size: 12px; font-weight: bold; margin-top: 2px;")
+        fault_label.setStyleSheet(self._diag_style("faults", "#4caf50"))
         left.addWidget(fault_label)
         left.addStretch()
         layout.addLayout(left)
@@ -663,8 +821,10 @@ class ClientsPage(QWidget):
         right = QGridLayout()
         right.setHorizontalSpacing(20)
         right.setVerticalSpacing(5)
-        key_style = "color: #aaaaaa; font-size: 14px; font-weight: normal;"
-        val_style = "color: white; font-size: 16px; font-weight: bold;"
+        key_style = self._diag_style("key")
+        val_style = self._diag_style("val")
+        key2_style = self._diag_style("key2")
+        val2_style = self._diag_style("val2")
 
         decision_key = QLabel(_t("master_diag_decision_key"))
         decision_key.setStyleSheet(key_style)
@@ -688,11 +848,26 @@ class ClientsPage(QWidget):
         right.addWidget(hit_label, 2, 1)
 
         online_key = QLabel(_t("master_diag_online_key"))
-        online_key.setStyleSheet("color: #aaaaaa; font-size: 12px; font-weight: normal;")
+        online_key.setStyleSheet(key2_style)
         online_label = QLabel("--")
-        online_label.setStyleSheet("color: white; font-size: 14px; font-weight: bold;")
+        online_label.setStyleSheet(val2_style)
         right.addWidget(online_key, 0, 2)
         right.addWidget(online_label, 0, 3)
+
+        io_key = QLabel(_t("master_diag_io_key"))
+        io_key.setStyleSheet(key_style)
+        io_label = QLabel("--")
+        io_label.setStyleSheet(val_style)
+        io_label.setWordWrap(True)
+        right.addWidget(io_key, 1, 2)
+        right.addWidget(io_label, 1, 3)
+
+        l2_key = QLabel(_t("master_diag_l2_key"))
+        l2_key.setStyleSheet(key2_style)
+        l2_label = QLabel("--")
+        l2_label.setStyleSheet(val2_style)
+        right.addWidget(l2_key, 2, 2)
+        right.addWidget(l2_label, 2, 3)
 
         layout.addLayout(right)
 
@@ -705,10 +880,14 @@ class ClientsPage(QWidget):
             "mode": mode_label,
             "hit": hit_label,
             "online_mask": online_label,
+            "io": io_label,
+            "l2_time": l2_label,
             "decision_key": decision_key,
             "mode_key": mode_key,
             "hit_key": hit_key,
             "online_key": online_key,
+            "io_key": io_key,
+            "l2_key": l2_key,
         }
         self.update_master_widget(widget, data)
         return widget
@@ -716,13 +895,19 @@ class ClientsPage(QWidget):
     def update_master_widget(self, widget: QFrame, data: dict):
         from core.translation import _t
         labels = widget.data_labels
-        labels["title"].setText(_t("master_diag_title"))
-        labels["client_id"].setText(_t("master_diag_id", id=data.get("master_id", "--")))
+        ip_text = _t("master_diag_id", id=data.get("master_id") or "--")
+        labels["title"].setText(ip_text)
+        labels["title"].setStyleSheet(self._diag_style("title"))
+        labels["client_id"].setText(ip_text)
+        labels["client_id"].hide()
         if "decision_key" in labels:
             labels["decision_key"].setText(_t("master_diag_decision_key"))
             labels["mode_key"].setText(_t("master_diag_mode_key"))
             labels["hit_key"].setText(_t("master_diag_hit_key"))
             labels["online_key"].setText(_t("master_diag_online_key"))
+            if "io_key" in labels:
+                labels["io_key"].setText(_t("master_diag_io_key"))
+                labels["l2_key"].setText(_t("master_diag_l2_key"))
 
         if data.get("online"):
             link_text = _t("master_online")
@@ -734,9 +919,7 @@ class ClientsPage(QWidget):
             link_text = _t("master_offline")
             link_color = "#f44336"
         labels["link"].setText(_t("master_diag_link", status=link_text))
-        labels["link"].setStyleSheet(
-            "color: %s; font-size: 14px; font-weight: bold; margin-top: 2px;" % link_color
-        )
+        labels["link"].setStyleSheet(self._diag_style("alarm", link_color))
 
         decision_text = data.get("decision_text") or "--"
         if data.get("decision") is None:
@@ -749,6 +932,8 @@ class ClientsPage(QWidget):
 
         if data.get("link_only"):
             mode_text = _t("master_mode_invalid_l2")
+        elif not data.get("ir_installed", True):
+            mode_text = _t("master_mode_ir_not_installed")
         elif data.get("ir_degraded"):
             mode_text = _t("master_mode_degraded")
         else:
@@ -757,6 +942,9 @@ class ClientsPage(QWidget):
             labels["mode"].setText(mode_text)
             labels["hit"].setText("0x%04X" % int(data.get("hit_mask", 0) or 0))
             labels["online_mask"].setText("0x%04X" % int(data.get("online_mask", 0) or 0))
+            if "io" in labels:
+                labels["io"].setText(str(data.get("io_text") or "--"))
+                labels["l2_time"].setText(str(data.get("l2_time") or "--"))
         else:
             labels["mode"].setText(_t("master_diag_mode", mode=mode_text))
             if "masks" in labels:
@@ -770,15 +958,14 @@ class ClientsPage(QWidget):
 
         faults = data.get("faults", []) or []
         if faults:
-            labels["faults"].setText(_t("master_diag_faults_active", faults=", ".join(faults)))
-            labels["faults"].setStyleSheet(
-                "color: #ffb74d; font-size: 12px; font-weight: bold; margin-top: 2px;"
-            )
+            fmt = getattr(self.parent, "format_fault_diag_message", None)
+            shown = ", ".join(fmt("master", c) if fmt else str(c) for c in faults)
+            labels["faults"].setText(_t("master_diag_faults_active", faults=shown))
+            labels["faults"].setStyleSheet(self._diag_style("faults", "#ffb74d"))
         else:
             labels["faults"].setText(_t("master_diag_faults_normal"))
-            labels["faults"].setStyleSheet(
-                "color: #4caf50; font-size: 12px; font-weight: bold; margin-top: 2px;"
-            )
+            labels["faults"].setStyleSheet(self._diag_style("faults", "#4caf50"))
+
     def create_client_widget(self, client_id: str, data: dict) -> QFrame:
         """Create a widget for displaying client information"""
         from core.translation import _t
@@ -786,13 +973,7 @@ class ClientsPage(QWidget):
         widget.setMinimumHeight(140)
         widget.setMaximumHeight(160)
         widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        widget.setStyleSheet("""
-            QFrame {
-                background-color: #2a2a2a;
-                border-radius: 10px;
-                border: 1px solid #333333;
-            }
-        """)
+        widget.setStyleSheet(self._diag_card_qss())
         
         layout = QHBoxLayout()
         layout.setContentsMargins(15, 10, 15, 10)
@@ -803,13 +984,7 @@ class ClientsPage(QWidget):
         left_layout.setSpacing(3)
         
         client_id_label = QLabel(_t("probe_id", id=client_id))
-        client_id_label.setStyleSheet("""
-            QLabel {
-                color: white;
-                font-size: 16px;
-                font-weight: bold;
-            }
-        """)
+        client_id_label.setStyleSheet(self._diag_style("title"))
         left_layout.addWidget(client_id_label)
         
         # Last update time
@@ -819,38 +994,18 @@ class ClientsPage(QWidget):
         status_text = _t("status_active") if time_diff < 5 else _t("status_idle") if time_diff < 15 else _t("status_inactive")
         
         status_label = QLabel(_t("probe_status", status=status_text))
-        status_label.setStyleSheet(f"""
-            QLabel {{
-                color: {status_color};
-                font-size: 14px;
-                font-weight: normal;
-            }}
-        """)
+        status_label.setStyleSheet(self._diag_style("status", status_color))
         left_layout.addWidget(status_label)
         
         # Alarm status
         alarm_status = data.get('alarm', False)
         alarm_label = QLabel(_t("probe_alarm_active") if alarm_status else _t("probe_alarm_normal"))
-        alarm_label.setStyleSheet(f"""
-            QLabel {{
-                color: {'#ff4444' if alarm_status else '#4caf50'};
-                font-size: 14px;
-                font-weight: bold;
-                margin-top: 2px;
-            }}
-        """)
+        alarm_label.setStyleSheet(self._diag_style("alarm", "#ff4444" if alarm_status else "#4caf50"))
         left_layout.addWidget(alarm_label)
 
         # Faults status
         faults_label = QLabel(_t("probe_faults_normal"))
-        faults_label.setStyleSheet("""
-            QLabel {
-                color: #4caf50;
-                font-size: 12px;
-                font-weight: bold;
-                margin-top: 2px;
-            }
-        """)
+        faults_label.setStyleSheet(self._diag_style("faults", "#4caf50"))
         left_layout.addWidget(faults_label)
         
         left_layout.addStretch()
@@ -860,109 +1015,53 @@ class ClientsPage(QWidget):
         data_layout = QGridLayout()
         data_layout.setHorizontalSpacing(20)
         data_layout.setVerticalSpacing(5)
+        key_style = self._diag_style("key")
+        val_style = self._diag_style("val")
+        key2_style = self._diag_style("key2")
+        val2_style = self._diag_style("val2")
         
         # Count rate
         count_rate_label = QLabel(_t("label_rates"))
-        count_rate_label.setStyleSheet("""
-            QLabel {
-                color: #aaaaaa;
-                font-size: 14px;
-                font-weight: normal;
-            }
-        """)
+        count_rate_label.setStyleSheet(key_style)
         data_layout.addWidget(count_rate_label, 0, 0)
         
         count_rate_value = QLabel(f"{data.get('rates', 0)} cps")
-        count_rate_value.setStyleSheet("""
-            QLabel {
-                color: white;
-                font-size: 16px;
-                font-weight: bold;
-            }
-        """)
+        count_rate_value.setStyleSheet(val_style)
         data_layout.addWidget(count_rate_value, 0, 1)
         
         # Temperature
         temp_label = QLabel(_t("label_temp"))
-        temp_label.setStyleSheet("""
-            QLabel {
-                color: #aaaaaa;
-                font-size: 14px;
-                font-weight: normal;
-            }
-        """)
+        temp_label.setStyleSheet(key_style)
         data_layout.addWidget(temp_label, 1, 0)
         
         temp_value = QLabel(f"{data.get('temp', 0):.1f} " + chr(176) + "C")
-        temp_value.setStyleSheet("""
-            QLabel {
-                color: white;
-                font-size: 16px;
-                font-weight: bold;
-            }
-        """)
+        temp_value.setStyleSheet(val_style)
         data_layout.addWidget(temp_value, 1, 1)
         
         # High Voltage
         hv_label = QLabel(_t("label_hv"))
-        hv_label.setStyleSheet("""
-            QLabel {
-                color: #aaaaaa;
-                font-size: 14px;
-                font-weight: normal;
-            }
-        """)
+        hv_label.setStyleSheet(key_style)
         data_layout.addWidget(hv_label, 2, 0)
         
         hv_value = QLabel(f"{data.get('hv', 0):.1f} V")
-        hv_value.setStyleSheet("""
-            QLabel {
-                color: white;
-                font-size: 16px;
-                font-weight: bold;
-            }
-        """)
+        hv_value.setStyleSheet(val_style)
         data_layout.addWidget(hv_value, 2, 1)
         
         # Product ID and Sensitivity
         product_label = QLabel(_t("label_product_id"))
-        product_label.setStyleSheet("""
-            QLabel {
-                color: #aaaaaa;
-                font-size: 12px;
-                font-weight: normal;
-            }
-        """)
+        product_label.setStyleSheet(key2_style)
         data_layout.addWidget(product_label, 0, 2)
         
         product_value = QLabel(f"{data.get('product_id', 0)}")
-        product_value.setStyleSheet("""
-            QLabel {
-                color: #cccccc;
-                font-size: 12px;
-                font-weight: normal;
-            }
-        """)
+        product_value.setStyleSheet(val2_style)
         data_layout.addWidget(product_value, 0, 3)
         
         sensitivity_label = QLabel(_t("label_sensitivity"))
-        sensitivity_label.setStyleSheet("""
-            QLabel {
-                color: #aaaaaa;
-                font-size: 12px;
-                font-weight: normal;
-            }
-        """)
+        sensitivity_label.setStyleSheet(key2_style)
         data_layout.addWidget(sensitivity_label, 1, 2)
         
         sensitivity_value = QLabel(f"{data.get('sensitivity', 0)}")
-        sensitivity_value.setStyleSheet("""
-            QLabel {
-                color: #cccccc;
-                font-size: 12px;
-                font-weight: normal;
-            }
-        """)
+        sensitivity_value.setStyleSheet(val2_style)
         data_layout.addWidget(sensitivity_value, 1, 3)
         
         layout.addLayout(data_layout)
@@ -1002,51 +1101,30 @@ class ClientsPage(QWidget):
         status_text = _t("status_active") if time_diff < 5 else _t("status_idle") if time_diff < 15 else _t("status_inactive")
         
         labels['status'].setText(_t("probe_status", status=status_text))
-        labels['status'].setStyleSheet(f"""
-            QLabel {{
-                color: {status_color};
-                font-size: 12px;
-                font-weight: normal;
-            }}
-        """)
+        labels['status'].setStyleSheet(self._diag_style("status", status_color))
         
         # Update alarm status
         alarm_status = data.get('alarm', False)
         labels['alarm'].setText(_t("probe_alarm_active") if alarm_status else _t("probe_alarm_normal"))
-        labels['alarm'].setStyleSheet(f"""
-            QLabel {{
-                color: {'#ff4444' if alarm_status else '#4caf50'};
-                font-size: 12px;
-                font-weight: bold;
-                margin-top: 5px;
-            }}
-        """)
+        labels['alarm'].setStyleSheet(
+            self._diag_style("alarm", "#ff4444" if alarm_status else "#4caf50")
+        )
 
         # Update faults status
         client_id = data.get('client_id')
         if hasattr(self.parent, 'diagnostics_manager') and client_id:
             active_faults = self.parent.diagnostics_manager.active_faults.get(client_id, {})
             if active_faults:
-                faults_str = ", ".join(active_faults.keys())
+                fmt = getattr(self.parent, "format_fault_diag_message", None)
+                if fmt:
+                    faults_str = ", ".join(fmt(client_id, c) for c in active_faults.keys())
+                else:
+                    faults_str = ", ".join(active_faults.keys())
                 labels['faults'].setText(_t("probe_faults_active", faults=faults_str))
-                labels['faults'].setStyleSheet("""
-                    QLabel {
-                        color: #ff9800;
-                        font-size: 12px;
-                        font-weight: bold;
-                        margin-top: 5px;
-                    }
-                """)
+                labels['faults'].setStyleSheet(self._diag_style("faults", "#ff9800"))
             else:
                 labels['faults'].setText(_t("probe_faults_normal"))
-                labels['faults'].setStyleSheet("""
-                    QLabel {
-                        color: #4caf50;
-                        font-size: 12px;
-                        font-weight: bold;
-                        margin-top: 5px;
-                    }
-                """)
+                labels['faults'].setStyleSheet(self._diag_style("faults", "#4caf50"))
 
     def retranslate_ui(self):
         """Retranslate UI elements based on current language"""

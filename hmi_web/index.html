@@ -106,8 +106,8 @@
             --cps-scale: 1;
             font-size: calc(18px * var(--cps-scale)); font-weight: 800;
             font-family: Consolas, "Courier New", monospace;
-            color: #00FF66; text-shadow: 0 0 8px rgba(0,255,102,0.3); flex-shrink: 0;
-            white-space: nowrap;
+            color: #00FF66; text-shadow: 0 0 8px rgba(0,255,102,0.3); flex-shrink: 1;
+            min-width: 0; white-space: nowrap;
         }
         .status-online {
             flex-shrink: 0; white-space: nowrap;
@@ -178,7 +178,7 @@
             font-size: 16px; font-weight: 800; letter-spacing: 0.5px;
         }
         #totalCps {
-            font-size: 20px !important; font-weight: 800; color: #00FF66;
+            font-size: calc(18px * var(--cps-scale, 1)) !important; font-weight: 800; color: #00FF66;
             font-variant-numeric: tabular-nums; letter-spacing: 0.5px;
         }
         #masterLink {
@@ -288,6 +288,13 @@
             background: var(--hmi-warn); color: #000; border-color: var(--hmi-warn);
             box-shadow: 0 0 12px rgba(245,158,11,0.4);
         }
+        .passage-state-badge.alarm {
+            background: #ff4444; color: #fff; border-color: #ff4444;
+            box-shadow: 0 0 12px rgba(255,68,68,0.45);
+        }
+        .passage-state-badge.offline {
+            background: rgba(255,152,0,0.18); color: #ff9800; border-color: #ff9800;
+        }
 
         .probes-section {
             flex: 1 1 0;
@@ -331,30 +338,41 @@
             display: flex; flex-direction: column;
             justify-content: center; align-items: center;
             text-align: center; padding: 6px 0; min-height: 0;
+            width: 100%; overflow: hidden;
         }
         .probe-cps-row {
             display: inline-flex; align-items: baseline; justify-content: center;
-            gap: 8px; flex-wrap: nowrap; width: 100%; max-width: 100%;
-            min-width: 0; padding: 0 6px; box-sizing: border-box;
+            gap: 6px; flex-wrap: nowrap; width: 100%; max-width: 100%;
+            min-width: 0; padding: 0 4px; box-sizing: border-box;
+            overflow: hidden;
+        }
+        .probe-cps-row.stacked {
+            flex-direction: column;
+            align-items: center;
+            gap: 2px;
         }
         .probe-num {
             --cps-scale: 1;
-            font-size: calc(clamp(56px, 7vh, 72px) * var(--cps-scale));
+            font-size: calc(clamp(22px, 6.2vh, 72px) * var(--cps-scale));
             font-weight: 800;
             font-family: "Microsoft YaHei", "Segoe UI", sans-serif;
             color: #00FF66; text-shadow: 0 0 18px rgba(0, 255, 102, 0.40);
             line-height: 1; letter-spacing: -1px;
             font-variant-numeric: tabular-nums;
-            flex: 0 1 auto; min-width: 0; max-width: calc(100% - 3.5em);
+            flex: 0 1 auto; min-width: 0;
             white-space: nowrap;
         }
         .original-probe-card.alarm .probe-num { animation: textGlowRed 0.8s infinite; }
         .original-probe-card.offline .probe-num { color: #888; text-shadow: none; }
         .probe-unit-label {
-            font-size: clamp(18px, 2.4vh, 24px); color: #8490A0;
+            font-size: clamp(12px, 2vh, 24px); color: #8490A0;
             font-weight: 600; letter-spacing: 0.5px;
             flex: 0 0 auto; line-height: 1;
-            padding-bottom: 0.15em; white-space: nowrap;
+            padding-bottom: 0.12em; white-space: nowrap;
+        }
+        .probe-cps-row.stacked .probe-unit-label {
+            padding-bottom: 0;
+            font-size: clamp(11px, 1.6vh, 18px);
         }
         .original-probe-card.alarm .probe-unit-label { color: #B45309; }
         .original-probe-card.offline .probe-unit-label { color: #666; }
@@ -424,8 +442,10 @@
         body.nav-enabled .clickable-card:hover {
             border-color: var(--hmi-info); background: #191B22;
         }
-        /* Public mode: fault card still opens read-only alarm log */
+        /* Public: fault card opens alarm log; health card still clickable (login then diagnostics) */
+        body.alarm-log-enabled #card_health,
         body.alarm-log-enabled #card_fault { cursor: pointer; }
+        body.alarm-log-enabled #card_health:hover,
         body.alarm-log-enabled #card_fault:hover {
             border-color: var(--hmi-info); background: #191B22;
         }
@@ -454,7 +474,16 @@
         }
         .kv-val.green { color: var(--hmi-ok); }
         .kv-val.amber { color: var(--hmi-warn); }
-        .kv-val.red { color: var(--hmi-alarm); }
+        .kv-val.muted { color: var(--hmi-muted); }
+        .kv-val.multiline {
+            white-space: pre-line;
+            overflow: hidden;
+            text-align: right;
+            display: -webkit-box;
+            -webkit-line-clamp: 3;
+            -webkit-box-orient: vertical;
+            line-height: 1.35;
+        }
         .detail-link {
             position: absolute; right: 14px; bottom: 10px;
             background: transparent; border: none; padding: 6px 2px;
@@ -489,7 +518,7 @@
             max-width: 100%; flex: 1; min-width: 0; line-height: 1.5;
             font-size: 14px;
         }
-        #healthDesc, #lastFaultText {
+        #healthDesc {
             max-width: 100%;
             flex: 1 1 auto;
             min-width: 0;
@@ -499,6 +528,14 @@
             font-size: 11px;
             letter-spacing: 0;
             line-height: 1.3;
+        }
+        #lastFaultText {
+            max-width: 100%;
+            flex: 1 1 auto;
+            min-width: 0;
+            font-size: 13px;
+            letter-spacing: 0;
+            line-height: 1.35;
         }
         .info-item:has(#healthDesc) {
             gap: 6px;
@@ -663,7 +700,6 @@
                 </div>
                 <div class="kv-list">
                     <div class="kv-row"><span class="kv-key" id="kvLastFault">最近故障</span><span class="kv-val" id="lastFaultText">无未处理故障</span></div>
-                    <div class="kv-row"><span class="kv-key" id="kvIrShield">红外屏蔽</span><span class="kv-val green" id="faultIrShield">无</span></div>
                 </div>
             </div>
 
@@ -720,7 +756,7 @@
                 ['labelRadStatus', 'radStatus'], ['labelAlarmLatch', 'alarmLatch'],
                 ['healthCardTitle', 'healthTitle'], ['faultCardTitle', 'faultTitle'],
                 ['kvProbeComm', 'kvProbeComm'], ['kvIrStatus', 'kvIrStatus'], ['kvMasterHw', 'kvMasterHw'],
-                ['kvLastFault', 'kvLastFault'], ['kvIrShield', 'kvIrShield'],
+                ['kvLastFault', 'kvLastFault'],
                 ['detailLinkHealth', 'clickDetail'], ['detailLinkFault', 'clickDetail']
             ];
             for (var i = 0; i < map.length; i++) {
@@ -729,6 +765,10 @@
             }
             var titleEl = $('systemTitle');
             if (titleEl && UI.titleTip) titleEl.title = UI.titleTip;
+            var hc = $('card_health');
+            if (hc && UI.tipHealth) hc.title = UI.tipHealth;
+            var fc = $('card_fault');
+            if (fc && UI.tipFault) fc.title = UI.tipFault;
             document.documentElement.style.setProperty('--detail-hint', UI.clickDetail || 'Details >');
             if (UI.title) document.title = UI.title;
         }
@@ -749,6 +789,43 @@
         function applyCpsScale(el, text) {
             if (!el) return;
             el.style.setProperty('--cps-scale', String(cpsDigitScale(text)));
+        }
+
+        function _cpsRowOverflows(row) {
+            return row.scrollWidth > row.clientWidth + 1;
+        }
+
+        function _shrinkCpsToFit(num, row, startScale) {
+            var scale = startScale;
+            num.style.setProperty('--cps-scale', String(scale));
+            var n = 0;
+            while (_cpsRowOverflows(row) && scale > 0.28 && n++ < 20) {
+                scale *= 0.88;
+                num.style.setProperty('--cps-scale', String(scale));
+            }
+            return scale;
+        }
+
+        function fitProbeCpsRows() {
+            var rows = document.querySelectorAll('.probe-cps-row');
+            for (var i = 0; i < rows.length; i++) {
+                var row = rows[i];
+                var num = row.querySelector('.probe-num');
+                if (!num || row.clientWidth <= 0) continue;
+                var digit = cpsDigitScale(num.innerText);
+                row.classList.remove('stacked');
+                _shrinkCpsToFit(num, row, digit);
+                if (_cpsRowOverflows(row)) {
+                    row.classList.add('stacked');
+                    _shrinkCpsToFit(num, row, digit);
+                }
+            }
+        }
+
+        function scheduleFitCps() {
+            requestAnimationFrame(function () {
+                requestAnimationFrame(fitProbeCpsRows);
+            });
         }
 
         function setTotalCpsDisplay(total) {
@@ -796,6 +873,7 @@
                 container.appendChild(card);
             });
             if (!embedded) setTotalCpsDisplay(total);
+            scheduleFitCps();
         }
 
         function clearDragOver() {
@@ -886,15 +964,26 @@
             }, 3000);
         }
 
-        function setPassage(busy, text) {
-            isPassing = !!busy;
+        function setPassage(busy, text, kind) {
+            kind = kind || (busy ? 'passing' : 'vacant');
+            isPassing = (kind === 'passing' || kind === 'alarm');
             const badge = $('passageBadge');
             const icon = $('personIcon');
-            if (busy) {
+            if (kind === 'alarm') {
+                icon.classList.add('passing');
+                icon.innerText = '🚶';
+                badge.className = 'passage-state-badge alarm';
+                badge.innerText = text || ('🏃 ' + (UI.occupiedAlarm || UI.passing || ''));
+            } else if (kind === 'passing') {
                 icon.classList.add('passing');
                 icon.innerText = '🚶';
                 badge.className = 'passage-state-badge active';
                 badge.innerText = text || ('🏃 ' + (UI.passing || ''));
+            } else if (kind === 'offline') {
+                icon.classList.remove('passing');
+                icon.innerText = '🚪';
+                badge.className = 'passage-state-badge offline';
+                badge.innerText = text || ('🏃 ' + (UI.vacant || ''));
             } else {
                 icon.classList.remove('passing');
                 icon.innerText = '🚪';
@@ -988,14 +1077,9 @@
         }
 
         function openPage(pageType) {
-            if (pageType === 'fault') {
-                if (!(canOpenAlarmLog || canNavigate)) return;
-                if (bridge && bridge.openFault) { bridge.openFault(); return; }
-            }
-            if (!canNavigate) return;
-            if (bridge) {
-                if (pageType === 'health' && bridge.openHealth) { bridge.openHealth(); return; }
-            }
+            if (!bridge) return;
+            if (pageType === 'fault' && bridge.openFault) { bridge.openFault(); return; }
+            if (pageType === 'health' && bridge.openHealth) { bridge.openHealth(); return; }
         }
         function closePage() { $('pageModal').classList.remove('active'); }
 
@@ -1036,7 +1120,10 @@
             if (!state) return;
             embedded = true;
             document.body.classList.add('embedded');
-            setTimeout(layoutSidebarCards, 0);
+            setTimeout(function () {
+                layoutSidebarCards();
+                scheduleFitCps();
+            }, 0);
 
             if (state.ui) applyUiLabels(state.ui);
             canNavigate = !!state.canNavigate;
@@ -1077,11 +1164,18 @@
                 setAlarmBanner(state.alarm.kind || 'normal');
                 if (state.alarm.title) $('alarmText').innerText = state.alarm.title;
                 if (state.alarm.desc) $('alarmSubText').innerText = state.alarm.desc;
+                setResetStyle(!!state.alarm.latched, state.alarm.resetEnabled !== false && !!state.alarm.latched);
+                if (state.alarm.sideTag) {
+                    $('sideHeaderTag').innerText = state.alarm.sideTag;
+                    if (state.alarm.sideTagColor) $('sideHeaderTag').style.color = state.alarm.sideTagColor;
+                }
                 if (state.alarm.sideRad) {
                     $('sideRadStat').innerText = state.alarm.sideRad;
-                    $('sideRadStat').className = state.alarm.latched ? 'info-value red-flash' : 'info-value green';
+                    var radClass = 'info-value green';
+                    if (state.alarm.latched) radClass = 'info-value red-flash';
+                    else if (state.alarm.kind === 'offline' || state.alarm.kind === 'warn') radClass = 'info-value amber';
+                    $('sideRadStat').className = radClass;
                 }
-                setResetStyle(!!state.alarm.latched, state.alarm.resetEnabled !== false && !!state.alarm.latched);
                 if (state.alarm.latchText) {
                     var ls = $('alarmLatchStatus');
                     if (ls) {
@@ -1092,7 +1186,7 @@
                     }
                 }
             }
-            if (state.passage) setPassage(!!state.passage.busy, state.passage.text);
+            if (state.passage) setPassage(!!state.passage.busy, state.passage.text, state.passage.kind);
             if (state.health) {
                 var hs = state.health.status || '';
                 if (state.health.warn && hs && hs.indexOf('\u26a0') < 0) hs = '\u26a0 ' + hs;
@@ -1117,12 +1211,7 @@
                 var lastEl = $('lastFaultText');
                 if (lastEl) {
                     lastEl.innerText = frows.lastFault || state.fault.desc || '';
-                    lastEl.className = 'kv-val' + (frows.lastTone ? (' ' + frows.lastTone) : '');
-                }
-                var irEl = $('faultIrShield');
-                if (irEl) {
-                    irEl.innerText = frows.irShield || '';
-                    irEl.className = 'kv-val' + (frows.irTone ? (' ' + frows.irTone) : '');
+                    lastEl.className = 'kv-val multiline' + (frows.lastTone ? (' ' + frows.lastTone) : '');
                 }
                 $('card_fault').className = 'side-card clickable-card' + (state.fault.warn ? ' warn' : '');
             }
@@ -1157,7 +1246,10 @@
                 document.body.classList.add('embedded');
                 embedded = true;
                 layoutSidebarCards();
-                window.addEventListener('resize', layoutSidebarCards);
+                window.addEventListener('resize', function () {
+                    layoutSidebarCards();
+                    scheduleFitCps();
+                });
                 if (bridge && bridge.pageReady) bridge.pageReady();
             });
         }

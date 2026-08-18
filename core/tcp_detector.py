@@ -956,11 +956,18 @@ class TcpPacketWorker(QObject):
                             self.client_infos[client_id].packets_received += 1
                             self.client_infos[client_id].last_active = time.time()
                         if self.stats['master_packets'] == 1 or (self.stats['master_packets'] % 30) == 0:
+                            n_slots = int(parsed_packet.probe_count_cfg or 0) or 2
+                            slot_cps = list(parsed_packet.probe_cps or [])[:n_slots]
+                            slot_txt = ",".join(
+                                "%d:%d" % (i + 1, int(v or 0))
+                                for i, v in enumerate(slot_cps)
+                            ) or "-"
                             self.has_log.emit(
-                                "Master L2 OK from %s: total_cps=%d probes=%d decision=0x%02X (#%d)"
+                                "Master L2 OK from %s: total_cps=%d slot_cps=[%s] probes=%d decision=0x%02X (#%d)"
                                 % (
                                     client_id,
                                     int(parsed_packet.total_cps),
+                                    slot_txt,
                                     int(parsed_packet.probe_count_cfg),
                                     int(parsed_packet.decision_result),
                                     self.stats['master_packets'],

@@ -2,6 +2,7 @@ import sys
 import glob
 import time
 import random
+import re
 import struct
 import serial
 import os
@@ -49,8 +50,8 @@ from core.pages import OverviewPage, SpectrumPage, SettingsPage, ClientsPage
 from core.home_page import HomePage
 from core.control_room_page import ControlRoomPage
 
-# 概览报警卡内说明区最多显示行数（超出部分在卡片内滚动，完整内容放 tooltip）
-_FAULT_DESC_MAX_LINES = 2
+# 故障摘要 / 概览说明：主页显示前 1～3 条，超出部分放 tooltip
+_FAULT_DESC_MAX_LINES = 3
 _MASTER_FAULT_CLIENT_ID = "master"
 
 
@@ -90,6 +91,9 @@ INSTANCE_ACTIVATE_SERVER = "daq_tablet_activate"
 class MainWindow(QMainWindow, UIBase):
     # 左上角隐藏入口热区（相对主窗口坐标，像素）。树莓派触摸宜略大。
     _SECRET_CORNER_SIZE = 80
+    # 离开总览后无操作自动返回：监视短、登录稍长（管理员 3 分钟仍会退出）
+    _IDLE_RETURN_PUBLIC_SEC = 45
+    _IDLE_RETURN_LOGGED_IN_SEC = 120
     """Main application window"""
     def __init__(self, current_user=None):
         super().__init__()
@@ -134,8 +138,8 @@ class MainWindow(QMainWindow, UIBase):
         
         # Status bar - 添加用户信息显示
         self.status_bar = StatusBar()
-        if self.control_room_mode:
-            self.status_bar.setFixedHeight(46)
+        if self.control_room_mode and hasattr(self.status_bar, "set_desktop_compact"):
+            self.status_bar.set_desktop_compact(True)
         if current_user and 'username' in current_user:
             self.status_bar.update_user_info(current_user['username'], current_user['role'])
         else:
@@ -152,8 +156,9 @@ class MainWindow(QMainWindow, UIBase):
         self.control_room_page = ControlRoomPage(self)
         self.control_room_page.probe_selected.connect(self._on_control_room_probe)
         self.control_room_page.open_alarm_log.connect(lambda: self.switch_page(4))
+        self.control_room_page.open_diagnostics.connect(lambda: self.switch_page(3))
         self.control_room_page.reset_requested.connect(self.request_channel_alarm_reset)
-        self.control_room_page.login_requested.connect(lambda: self.login(preferred_page=0))
+        self.control_room_page.login_requested.connect(self._on_control_room_session_btn)
         self.control_room_page.reorder_requested.connect(self._on_control_room_reorder)
         self.overview_page = OverviewPage(self)
         self.spectrum_page = SpectrumPage(self)
@@ -180,6 +185,16 @@ class MainWindow(QMainWindow, UIBase):
         self.stacked_widget.addWidget(self.clients_page)
         self.stacked_widget.addWidget(self.alarm_log_page)
         self.stacked_widget.addWidget(self.settings_page)
+
+        # 各页内容（尤其设置页）高度可能超过屏幕；禁止把底栏顶出去。
+        self.stacked_widget.setMinimumHeight(0)
+        self.stacked_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        for i in range(self.stacked_widget.count()):
+            page = self.stacked_widget.widget(i)
+            if page is None:
+                continue
+            page.setMinimumHeight(0)
+            page.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         
         main_layout.addWidget(self.stacked_widget, 1)
         
@@ -272,6 +287,11 @@ class MainWindow(QMainWindow, UIBase):
         button_layout.addWidget(self.logout_btn)
         
         self.button_container.setLayout(button_layout)
+        if self.control_room_mode:
+            lay = self.button_container.layout()
+            if lay is not None:
+                lay.setContentsMargins(16, 4, 16, 4)
+            self._apply_control_room_ops_chrome()
         main_layout.addWidget(self.button_container)
         
         # Bottom navigation
@@ -302,6 +322,9 @@ class MainWindow(QMainWindow, UIBase):
         
         # 连接语言切换信号
         self.status_bar.language_changed.connect(self.on_language_changed)
+        self.status_bar.clear_requested.connect(self.clear_data)
+        self.status_bar.save_requested.connect(lambda: self.save_data())
+        self.status_bar.users_requested.connect(self.show_user_management)
         
         # 绑定全局操作事件（所有点击/输入均更新操作时间，重置计时器）
         self.installEventFilter(self)
@@ -326,6 +349,11 @@ class MainWindow(QMainWindow, UIBase):
         self.device_mon_timer.start(1000)  # Check every second
         # Initial check
         self.check_device_connection()
+
+        self._last_ui_activity_at = time.time()
+        self._idle_home_timer = QTimer(self)
+        self._idle_home_timer.timeout.connect(self._check_idle_return_home)
+        self._idle_home_timer.start(1000)
         
         # 根据用户权限更新UI（未登录=主显示监视模式）
         self.update_ui_for_user_role()
@@ -425,6 +453,7 @@ class MainWindow(QMainWindow, UIBase):
             connected_clients,
             ignore_clients=[cid for cid in [getattr(self, "master_client_id", None)] if cid],
         )
+        self._sync_probe_count_fault()
         self._update_master_diagnostics()
         purged = getattr(self.diagnostics_manager, "purged_offline_clients", None) or []
         try:
@@ -449,7 +478,10 @@ class MainWindow(QMainWindow, UIBase):
         """切换页面。主显示(0)与报警日志(4)公共只读可进；其它页需登录。"""
         public_ok = index in (0, 4)
         if not public_ok and not self.is_logged_in():
-            # 需要登录；取消则静默回主显示，不再弹「需要登录」
+            # 主控室公共值班：不弹登录，只允许总览和报警日志
+            if getattr(self, "control_room_mode", False):
+                return
+            # 平板：需要登录；取消则静默回主显示
             if self.login(preferred_page=index, required_for_page=True):
                 return
             self._apply_page_index(0)
@@ -458,6 +490,7 @@ class MainWindow(QMainWindow, UIBase):
         self._apply_page_index(index)
         # 更新操作时间（重置超时计时器）
         self.update_operate_time()
+        self._note_ui_activity()
 
     def _apply_page_index(self, index):
         """切页后的统一收尾：状态栏、首页/曲线刷新、绘图节拍。登录/退出也走这里。"""
@@ -494,6 +527,7 @@ class MainWindow(QMainWindow, UIBase):
             self._sync_plot_timer_interval(index)
         if hasattr(self, "alarm_log_page") and hasattr(self.alarm_log_page, "update_auth_controls"):
             self.alarm_log_page.update_auth_controls()
+        self._sync_control_room_action_bar()
 
     def _apply_public_chrome(self, index: int):
         """公共模式 UI：主显示藏底栏；报警日志显示底栏便于返回。主控室模式常显底栏。"""
@@ -809,16 +843,96 @@ class MainWindow(QMainWindow, UIBase):
                 latch = page.alarm_status_label.text()
             except Exception:
                 pass
-            cr.set_channel_alarm(active, latch)
+            cr.set_channel_alarm(
+                active,
+                latch,
+                getattr(page, "_alarm_web_kind", lambda: "normal")(),
+            )
             # occupancy
-            busy = bool(getattr(page, "_passage_busy", False))
+            occ_kind = getattr(page, "_occupancy_kind", None) or (
+                "passing" if bool(getattr(page, "_passage_busy", False)) else "vacant"
+            )
             st = page.occupancy_status_label.text() if hasattr(page, "occupancy_status_label") else "--"
             desc = page.occupancy_desc_label.text() if hasattr(page, "occupancy_desc_label") else ""
-            cr.set_occupancy(busy, st, desc)
+            cr.set_occupancy(occ_kind, st, desc)
+            cr.set_health_summary(
+                getattr(page, "health_status_label", None) and page.health_status_label.text() or "",
+                getattr(page, "_health_rows", None) or {},
+                bool(getattr(page, "health_status_label", None) and (
+                    "故障" in page.health_status_label.text()
+                    or "降级" in page.health_status_label.text()
+                    or "FAULT" in page.health_status_label.text().upper()
+                    or "DEGRAD" in page.health_status_label.text().upper()
+                )),
+            )
+            cr.set_fault_summary(
+                getattr(page, "fault_status_label", None) and page.fault_status_label.text() or "",
+                (getattr(page, "_fault_rows", None) or {}).get("lastFault")
+                or (getattr(page, "fault_desc_label", None) and page.fault_desc_label.text())
+                or "",
+                bool((getattr(page, "_fault_rows", None) or {}).get("lastTone")),
+            )
         self._sync_control_room_from_home()
         cr.refresh_alarm_sidebar()
         cr.set_login_visible(not self.is_logged_in())
         cr.set_reorder_enabled(self.is_logged_in())
+
+    def _apply_control_room_ops_chrome(self):
+        """主控室操作条用桌面字号/高度，避免登录后样式被改回触控 44px。"""
+        if not getattr(self, "control_room_mode", False):
+            return
+        from core.ui_tokens import CR_CHROME_H, CR_CHROME_FONT_PX
+        bar_h = CR_CHROME_H + 4
+        for btn in (
+            getattr(self, "acquisition_btn", None),
+            getattr(self, "save_data_btn", None),
+            getattr(self, "user_management_btn", None),
+            getattr(self, "logout_btn", None),
+        ):
+            if btn is None:
+                continue
+            btn.setFixedHeight(bar_h)
+            qss = btn.styleSheet() or ""
+            qss = re.sub(r"font-size:\s*\d+px", "font-size: %dpx" % CR_CHROME_FONT_PX, qss)
+            if "min-height:" in qss:
+                qss = re.sub(r"min-height:\s*\d+px", "min-height: %dpx" % bar_h, qss)
+            else:
+                qss = qss.replace("QPushButton {", "QPushButton { min-height: %dpx;" % bar_h, 1)
+            btn.setStyleSheet(qss)
+
+    def _sync_control_room_action_bar(self):
+        """主控室：总览值班墙不放操作条；概览/能谱等登录后显示清除、保存、用户管理。"""
+        if not hasattr(self, "button_container"):
+            return
+        logged = self.is_logged_in()
+        cr = bool(getattr(self, "control_room_mode", False))
+        page = 0
+        if hasattr(self, "stacked_widget") and self.stacked_widget is not None:
+            page = int(self.stacked_widget.currentIndex())
+        if cr:
+            # 0=总览值班墙、5=设置：不放操作条；1=概览、2=能谱登录后显示
+            self.button_container.setVisible(bool(logged and page in (1, 2)))
+            if logged:
+                self._apply_control_room_ops_chrome()
+            if hasattr(self, "status_bar") and hasattr(self.status_bar, "set_ops_buttons"):
+                self.status_bar.set_ops_buttons(False, False, False)
+        elif logged:
+            self.button_container.setVisible(True)
+            if hasattr(self, "status_bar") and hasattr(self.status_bar, "set_ops_buttons"):
+                self.status_bar.set_ops_buttons(False, False, False)
+        else:
+            self.button_container.setVisible(False)
+            if hasattr(self, "status_bar") and hasattr(self.status_bar, "set_ops_buttons"):
+                self.status_bar.set_ops_buttons(False, False, False)
+        if hasattr(self, "bottom_nav") and self.bottom_nav is not None:
+            self.bottom_nav.refresh_hit_areas()
+            self.bottom_nav.updateGeometry()
+
+    def _on_control_room_session_btn(self):
+        if self.is_logged_in():
+            self.logout()
+        else:
+            self.login(preferred_page=0)
 
     def _on_control_room_reorder(self, from_index, to_index):
         page = getattr(self, "home_page", None)
@@ -832,9 +946,7 @@ class MainWindow(QMainWindow, UIBase):
 
     def _on_control_room_probe(self, client_id):
         if not self.is_logged_in():
-            # login() 成功会先切到 preferred_page；随后仍要打开对应探头
-            if not self.login(preferred_page=1, required_for_page=True):
-                return
+            return
         self.open_probe_overview(client_id)
 
     def _apply_control_room_nav_labels(self):
@@ -991,29 +1103,51 @@ class MainWindow(QMainWindow, UIBase):
         pkt = getattr(self, "latest_master_summary", None)
         master_online = bool(pkt is not None and self.is_master_online())
         master_faults = self._master_fault_entries()
-        try:
-            expected = int(getattr(self.config, "expected_probe_count", 0) or 0)
-        except (TypeError, ValueError):
-            expected = 0
-        probe_online = len(self.get_online_probe_client_ids()) if hasattr(self, "get_online_probe_client_ids") else 0
-        target = expected if expected > 0 else max(probe_online, int(getattr(pkt, "probe_count_cfg", 0) or 0), 1)
-        ir_degraded = bool(pkt is not None and getattr(pkt, "ir_degraded", False))
-
-        # --- structured health KV rows for Web HMI ---
-        probe_tone = "green" if probe_online >= target and target > 0 else "amber"
-        probe_comm = _t("health_probe_online", online=probe_online, expected=target)
-        if ir_degraded:
+        probe_online, target = self.probe_online_and_target()
+        ir_installed = bool(getattr(self.config, "ir_installed", True))
+        ir_degraded_raw = bool(pkt is not None and getattr(pkt, "ir_degraded", False))
+        if not ir_installed:
+            ir_status, ir_tone = _t("health_ir_not_installed"), "muted"
+            ir_degraded = False
+        elif ir_degraded_raw:
             ir_status, ir_tone = _t("health_ir_degraded"), "amber"
+            ir_degraded = True
         else:
             ir_status, ir_tone = _t("health_ir_ok"), "green"
+            ir_degraded = False
 
+        self._sync_probe_count_fault()
+
+        active_faults = getattr(self.diagnostics_manager, "get_all_active_faults", lambda: [])()
+        unique_msgs = []
+        probe_comm_fault = bool(target > 0 and probe_online < target)
+        probe_hw_msgs = []
+        _probe_comm_codes = (FaultCode.E101, FaultCode.E102, FaultCode.E103)
+        for client_id, code, _, _, _, _ in active_faults:
+            msg = self.format_fault_home_message(client_id, code)
+            if msg and msg not in unique_msgs:
+                unique_msgs.append(msg)
+            if client_id == _MASTER_FAULT_CLIENT_ID:
+                continue
+            if code in _probe_comm_codes:
+                probe_comm_fault = True
+            elif msg and msg not in probe_hw_msgs:
+                probe_hw_msgs.append(msg)
+
+        # --- structured health KV rows for Web HMI ---
+        probe_tone = "green" if (not probe_comm_fault and probe_online >= target and target > 0) else "amber"
+        probe_comm = _t("health_probe_online", online=probe_online, expected=target)
+
+        offline_mf = FaultCode.M101 in master_faults or FaultCode.M102 in master_faults
         if master_faults:
             page.health_indicator.load(get_icon_svg('alarm_inactive'))
-            offline_mf = FaultCode.M101 in master_faults or FaultCode.M102 in master_faults
             page.health_status_label.setText(
                 _t("status_health_offline") if offline_mf else _t("status_health_fault")
             )
-            reason = " / ".join(master_faults)
+            reason = " / ".join(
+                self.format_fault_home_message(_MASTER_FAULT_CLIENT_ID, code)
+                for code in master_faults
+            )
             if offline_mf:
                 # Offline alone: no yellow card/tag — amber only on Master HW row.
                 self._set_home_status_style(
@@ -1031,6 +1165,33 @@ class MainWindow(QMainWindow, UIBase):
                 page.health_desc_label.setText(_t("desc_health_master_fault", reason=reason))
                 master_hw, master_tone = _t("health_master_fault"), "amber"
                 self._set_home_aux_card_border(page.health_card, page.health_indicator_bar, "#ff9800")
+        elif probe_comm_fault:
+            page.health_indicator.load(get_icon_svg('alarm_inactive'))
+            page.health_status_label.setText(_t("status_health_probe_comm"))
+            self._set_home_status_style(
+                page.health_status_label, "#ff9800",
+                "rgba(255, 152, 0, 0.12)", "rgba(255, 152, 0, 0.35)"
+            )
+            page.health_desc_label.setText(
+                _t("desc_health_probe_comm", online=probe_online, expected=target)
+            )
+            master_hw, master_tone = (
+                (_t("health_master_ok"), "green") if master_online
+                else (_t("health_master_offline"), "amber")
+            )
+            self._set_home_aux_card_border(page.health_card, page.health_indicator_bar, "#ff9800")
+        elif probe_hw_msgs:
+            page.health_indicator.load(get_icon_svg('alarm_inactive'))
+            page.health_status_label.setText(_t("status_health_fault"))
+            self._set_home_status_style(
+                page.health_status_label, "#ff9800",
+                "rgba(255, 152, 0, 0.12)", "rgba(255, 152, 0, 0.35)"
+            )
+            page.health_desc_label.setText(
+                _t("desc_health_probe_hw", reason=" / ".join(probe_hw_msgs[:2]))
+            )
+            master_hw, master_tone = _t("health_master_ok"), "green"
+            self._set_home_aux_card_border(page.health_card, page.health_indicator_bar, "#ff9800")
         elif ir_degraded:
             page.health_indicator.load(get_icon_svg('occupancy_active'))
             page.health_status_label.setText(_t("status_health_degraded"))
@@ -1068,29 +1229,7 @@ class MainWindow(QMainWindow, UIBase):
             "masterTone": master_tone,
         }
 
-        active_faults = getattr(self.diagnostics_manager, "get_all_active_faults", lambda: [])()
-        unique_msgs = []
-        for client_id, code, _, _, _, _ in active_faults:
-            msg = self.format_fault_operator_message(client_id, code)
-            if msg and msg not in unique_msgs:
-                unique_msgs.append(msg)
-
         n_fault = len(unique_msgs)
-        if ir_degraded:
-            # Prefer channel hint from hit_mask / probe index when available
-            ch = 2
-            try:
-                mask = int(getattr(pkt, "hit_mask", 0) or 0)
-                if mask:
-                    for bit in range(16):
-                        if mask & (1 << bit):
-                            ch = bit + 1
-                            break
-            except Exception:
-                ch = 2
-            ir_shield, ir_shield_tone = _t("fault_ir_shield_ch", ch=ch), "amber"
-        else:
-            ir_shield, ir_shield_tone = _t("fault_ir_shield_none"), "green"
 
         if unique_msgs:
             text, tooltip = _format_fault_description(unique_msgs)
@@ -1103,7 +1242,7 @@ class MainWindow(QMainWindow, UIBase):
             page.fault_desc_label.setText(text)
             page.fault_desc_scroll.setToolTip(tooltip)
             self._set_home_aux_card_border(page.fault_card, page.fault_indicator_bar, "#ff9800")
-            last_fault, last_tone = text.split("\n")[0].strip() if text else _t("fault_none_pending"), "amber"
+            last_fault, last_tone = text, "amber"
         else:
             page.fault_indicator.load(get_icon_svg('occupancy_inactive'))
             page.fault_status_label.setText(_t("status_fault_count", n=0))
@@ -1119,8 +1258,6 @@ class MainWindow(QMainWindow, UIBase):
         page._fault_rows = {
             "lastFault": last_fault,
             "lastTone": last_tone,
-            "irShield": ir_shield,
-            "irTone": ir_shield_tone,
         }
 
     def _refresh_home_from_probes(self, client_data=None):
@@ -1357,7 +1494,7 @@ class MainWindow(QMainWindow, UIBase):
         0x01 仅黄提示；0x05 显示已确认（mask 仍满时提示辐射仍偏高）。
         """
         from core.translation import _t
-        from core.master_summary import format_io_brief, MASTER_DECISION_OVER_THRESHOLD
+        from core.master_summary import MASTER_DECISION_OVER_THRESHOLD
         import time as _time
 
         page = self.home_page
@@ -1369,11 +1506,13 @@ class MainWindow(QMainWindow, UIBase):
             self._over_thresh_soft_cleared = False
             if reset_btn is not None:
                 reset_btn.setEnabled(False)
+            if hasattr(page, "set_alarm_kind"):
+                page.set_alarm_kind("offline")
             if hasattr(page, "set_channel_reset_alarm_active"):
                 page.set_channel_reset_alarm_active(False)
             page.alarm_title_icon.load(get_icon_svg('alarm_inactive'))
             page.alarm_indicator.load(get_icon_svg('alarm_inactive'))
-            page.alarm_status_label.setText(_t("master_offline"))
+            page.alarm_status_label.setText(_t("status_rad_offline"))
             self._set_home_status_style(
                 page.alarm_status_label, "#ff9800",
                 "rgba(255, 152, 0, 0.12)", "rgba(255, 152, 0, 0.35)"
@@ -1382,7 +1521,7 @@ class MainWindow(QMainWindow, UIBase):
             self._set_home_alarm_card_border("#ff9800")
             self._apply_home_latch_status(page, hard_alarm=False, latch_mode=False, offline=True)
             if hasattr(page, "sync_side_rad_from_alarm"):
-                page.sync_side_rad_from_alarm(_t("master_offline"), False)
+                page.sync_side_rad_from_alarm(_t("status_rad_offline"), False)
             self._sync_channel_hard_alarm_log(False, None)
             return
 
@@ -1394,7 +1533,8 @@ class MainWindow(QMainWindow, UIBase):
         desc = _t("desc_master_alarm", decision=packet.decision_text(lang), time=current_time)
         if packet.relay_output and kind == "channel_alarm":
             desc = "%s | %s" % (desc, _t("desc_relay_hold"))
-        if kind == "channel_alarm" and getattr(packet, "ir_degraded", False):
+        ir_deg = self._ir_degraded_ui(packet)
+        if kind == "channel_alarm" and ir_deg:
             desc = "%s | %s" % (desc, _t("desc_ir_degraded"))
 
         soft_cleared = False
@@ -1424,6 +1564,15 @@ class MainWindow(QMainWindow, UIBase):
             self._over_thresh_probes_clear_since = None
             self._over_thresh_soft_cleared = False
 
+        # 先写 kind，避免中途 web flush 出现「● 离线 + 系统正常」
+        if hasattr(page, "set_alarm_kind"):
+            if kind == "channel_alarm":
+                page.set_alarm_kind("channel_alarm")
+            elif kind in ("over_threshold", "soft_cleared", "fault", "acked"):
+                page.set_alarm_kind(kind)
+            else:
+                page.set_alarm_kind("normal")
+
         pending_reset = (
             float(getattr(self, "_pending_channel_reset_at", 0) or 0) > 0
             or bool(getattr(self, "_awaiting_l2_acked", False))
@@ -1440,7 +1589,7 @@ class MainWindow(QMainWindow, UIBase):
         if kind == "channel_alarm":
             page.alarm_title_icon.load(get_icon_svg('alarm_active'))
             page.alarm_indicator.load(get_icon_svg('alarm_active'))
-            if getattr(packet, "ir_degraded", False):
+            if ir_deg:
                 page.alarm_status_label.setText(_t("status_channel_alarm_degraded"))
             else:
                 page.alarm_status_label.setText(_t("status_channel_alarm"))
@@ -1539,7 +1688,7 @@ class MainWindow(QMainWindow, UIBase):
                 page.alarm_status_label, "#4caf50",
                 "rgba(76, 175, 80, 0.1)", "rgba(76, 175, 80, 0.3)"
             )
-            page.alarm_desc_label.setText(format_io_brief(packet, lang=lang))
+            page.alarm_desc_label.setText(self._io_brief(packet, lang))
             self._set_home_alarm_card_border(None)
             self._sync_channel_hard_alarm_log(False, packet)
 
@@ -2082,6 +2231,36 @@ class MainWindow(QMainWindow, UIBase):
         self._awaiting_l2_acked_at = 0.0
         self._pending_channel_reset_at = 0.0
 
+    def _ir_installed(self) -> bool:
+        return bool(getattr(self.config, "ir_installed", True))
+
+    def _ir_degraded_ui(self, packet) -> bool:
+        """Only show IR-degraded when the site actually wired IR."""
+        if not self._ir_installed():
+            return False
+        return bool(packet is not None and getattr(packet, "ir_degraded", False))
+
+    def _io_brief(self, packet, lang="zh") -> str:
+        from core.master_summary import format_io_brief
+        return format_io_brief(packet, lang=lang, ir_installed=self._ir_installed())
+
+    def _occupancy_kind_from_packet(self, packet, master_offline=False) -> str:
+        """vacant | passing | alarm | offline — 未接红外时不把 0x04 当成人员经过。"""
+        if master_offline or packet is None:
+            return "offline"
+        if bool(getattr(packet, "is_channel_alarm", lambda: False)()):
+            return "alarm"
+        if int(getattr(packet, "decision_result", 0) or 0) == 0x04 and self._ir_installed():
+            return "passing"
+        return "vacant"
+
+    def _set_home_occupancy_kind(self, kind: str):
+        page = getattr(self, "home_page", None)
+        if page is None:
+            return
+        page._occupancy_kind = str(kind or "vacant")
+        page._passage_busy = page._occupancy_kind in ("passing", "alarm")
+
     def _update_home_occupancy_probe(self, busy, lang="zh"):
         """Master offline: do not invent occupancy from probes."""
         from core.translation import _t
@@ -2097,19 +2276,18 @@ class MainWindow(QMainWindow, UIBase):
         page.occupancy_indicator_bar.setStyleSheet(
             "QFrame { background-color: #ff9800; border-radius: 1px; }"
         )
+        self._set_home_occupancy_kind("offline")
 
     def _update_home_occupancy(self, packet, lang="zh", master_offline=False):
         from core.translation import _t
-        from core.master_summary import format_io_brief
         page = self.home_page
         if master_offline or packet is None:
             self._update_home_occupancy_probe(False, lang=lang)
             return
 
-        hard = bool(getattr(packet, "is_channel_alarm", lambda: False)())
-        passing = int(getattr(packet, "decision_result", 0) or 0) == 0x04
-        if hard:
-            # 硬报占用：与通行蓝区分，避免误判为普通过人
+        kind = self._occupancy_kind_from_packet(packet, master_offline=False)
+        brief = self._io_brief(packet, lang)
+        if kind == "alarm":
             page.occupancy_title_icon.load(get_icon_svg('occupancy_active'))
             page.occupancy_indicator.load(get_icon_svg('occupancy_active'))
             page.occupancy_status_label.setText(_t("status_occupied_alarm"))
@@ -2117,11 +2295,11 @@ class MainWindow(QMainWindow, UIBase):
                 page.occupancy_status_label, "#ff4444",
                 "rgba(255, 68, 68, 0.15)", "rgba(255, 68, 68, 0.4)"
             )
-            page.occupancy_desc_label.setText(format_io_brief(packet, lang=lang))
+            page.occupancy_desc_label.setText(brief)
             page.occupancy_indicator_bar.setStyleSheet(
                 "QFrame { background-color: #ff4444; border-radius: 1px; }"
             )
-        elif passing:
+        elif kind == "passing":
             page.occupancy_title_icon.load(get_icon_svg('occupancy_active'))
             page.occupancy_indicator.load(get_icon_svg('occupancy_active'))
             page.occupancy_status_label.setText(_t("status_passing"))
@@ -2129,7 +2307,7 @@ class MainWindow(QMainWindow, UIBase):
                 page.occupancy_status_label, "#2196f3",
                 "rgba(33, 150, 243, 0.15)", "rgba(33, 150, 243, 0.4)"
             )
-            page.occupancy_desc_label.setText(format_io_brief(packet, lang=lang))
+            page.occupancy_desc_label.setText(brief)
             page.occupancy_indicator_bar.setStyleSheet(
                 "QFrame { background-color: #2196f3; border-radius: 1px; }"
             )
@@ -2141,10 +2319,11 @@ class MainWindow(QMainWindow, UIBase):
                 page.occupancy_status_label, "#4caf50",
                 "rgba(76, 175, 80, 0.1)", "rgba(76, 175, 80, 0.3)"
             )
-            page.occupancy_desc_label.setText(format_io_brief(packet, lang=lang))
+            page.occupancy_desc_label.setText(brief)
             page.occupancy_indicator_bar.setStyleSheet(
                 "QFrame { background-color: #4caf50; border-radius: 1px; }"
             )
+        self._set_home_occupancy_kind(kind)
 
     def _refresh_alarm_log_nav_badge(self, radiation_alarm=None, has_faults=None):
         """底栏报警日志：仅活动硬报/辐射报警时亮红点（设备故障不算）。"""
@@ -2237,7 +2416,9 @@ class MainWindow(QMainWindow, UIBase):
             from core.translation import _t
             unique_op_msgs = []
             for client_id, code, _, _, _, _ in active_faults:
-                if hasattr(self, "format_fault_operator_message"):
+                if hasattr(self, "format_fault_home_message"):
+                    translated_msg = self.format_fault_home_message(client_id, code)
+                elif hasattr(self, "format_fault_operator_message"):
                     translated_msg = self.format_fault_operator_message(client_id, code)
                 else:
                     # 勿直接 _t(fault_op_*)：旧文案含 {probe} 会原样显示成 “probe...”
@@ -2317,14 +2498,13 @@ class MainWindow(QMainWindow, UIBase):
                 "background-color: #ffe0b2; color: #000000;"
             )
             return
-        busy = packet.is_channel_busy()
-        hard = bool(getattr(packet, "is_channel_alarm", lambda: False)())
-        if hard:
+        kind = self._occupancy_kind_from_packet(packet, master_offline=False)
+        if kind == "alarm":
             self.occupancy_status_label.setText(_t("status_occupied_alarm"))
             self.occupancy_status_label.setStyleSheet(
                 "background-color: #ffcdd2; color: #000000;"
             )
-        elif busy:
+        elif kind == "passing":
             self.occupancy_status_label.setText(_t("status_passing"))
             self.occupancy_status_label.setStyleSheet(
                 "background-color: #bbdefb; color: #000000;"
@@ -2336,9 +2516,8 @@ class MainWindow(QMainWindow, UIBase):
             )
 
     def _update_overview_occupancy_from_master(self, packet=None, master_offline=False):
-        """概览页占用卡：跟主控 L2 is_channel_busy / format_io_brief。"""
+        """概览页占用卡：跟主控 L2，未接红外时不显示人员经过/红外降级。"""
         from core.translation import _t
-        from core.master_summary import format_io_brief
 
         if not hasattr(self, "overview_page"):
             return
@@ -2355,21 +2534,20 @@ class MainWindow(QMainWindow, UIBase):
             self._set_overview_status_text(self.overview_page.occupancy_status_label, "#ff9800")
             self.overview_page.occupancy_desc_label.setText(_t("desc_master_offline"))
             self.overview_page.occupancy_desc_label.setStyleSheet("""
-                QLabel { color: #888888; font-size: 12px; }
+                QLabel { color: #888888; font-size: 11px; background: transparent; border: none; }
             """)
             self._set_overview_accent_bar(self.overview_page.occupancy_indicator_bar, "#ff9800")
             self._set_overview_card_shell(self.overview_page.occupancy_card, "#444444")
             return
 
-        busy = packet.is_channel_busy()
-        hard = bool(getattr(packet, "is_channel_alarm", lambda: False)())
+        kind = self._occupancy_kind_from_packet(packet, master_offline=False)
         try:
             from core.translation import TranslationManager
-            brief = format_io_brief(packet, lang=TranslationManager().current_lang)
+            brief = self._io_brief(packet, lang=TranslationManager().current_lang)
         except Exception:
-            brief = format_io_brief(packet, lang="zh")
+            brief = self._io_brief(packet, lang="zh")
 
-        if hard:
+        if kind == "alarm":
             self.start_occupancy_flashing()
             self.overview_page.occupancy_title_icon.load(get_icon_svg('occupancy_active'))
             self.overview_page.occupancy_status_label.setText(_t("status_occupied_alarm"))
@@ -2378,14 +2556,16 @@ class MainWindow(QMainWindow, UIBase):
             self.overview_page.occupancy_desc_label.setStyleSheet("""
                 QLabel {
                     color: #ff8888;
-                    font-size: 14px;
+                    font-size: 11px;
                     font-weight: bold;
-                    margin-top: 2px;
+                    margin-top: 0px;
+                    background: transparent;
+                    border: none;
                 }
             """)
             self._set_overview_accent_bar(self.overview_page.occupancy_indicator_bar, "#ff4444")
             self._set_overview_card_shell(self.overview_page.occupancy_card, "#ff4444")
-        elif busy:
+        elif kind == "passing":
             self.start_occupancy_flashing()
             self.overview_page.occupancy_title_icon.load(get_icon_svg('occupancy_active'))
             self.overview_page.occupancy_status_label.setText(_t("status_passing"))
@@ -2394,9 +2574,11 @@ class MainWindow(QMainWindow, UIBase):
             self.overview_page.occupancy_desc_label.setStyleSheet("""
                 QLabel {
                     color: #90caf9;
-                    font-size: 14px;
+                    font-size: 11px;
                     font-weight: bold;
-                    margin-top: 2px;
+                    margin-top: 0px;
+                    background: transparent;
+                    border: none;
                 }
             """)
             self._set_overview_accent_bar(self.overview_page.occupancy_indicator_bar, "#2196F3")
@@ -2411,9 +2593,11 @@ class MainWindow(QMainWindow, UIBase):
             self.overview_page.occupancy_desc_label.setStyleSheet("""
                 QLabel {
                     color: #aaaaaa;
-                    font-size: 14px;
+                    font-size: 11px;
                     font-weight: normal;
-                    margin-top: 2px;
+                    margin-top: 0px;
+                    background: transparent;
+                    border: none;
                 }
             """)
             self._set_overview_accent_bar(self.overview_page.occupancy_indicator_bar, "#4caf50")
@@ -2522,7 +2706,6 @@ class MainWindow(QMainWindow, UIBase):
             return
         
         role = self.current_user['role']
-        self.button_container.setVisible(True)
         self.bottom_nav.setVisible(True)
         self.acquisition_btn.setVisible(True)
         self.save_data_btn.setVisible(True)
@@ -2643,6 +2826,7 @@ class MainWindow(QMainWindow, UIBase):
         self.update_settings_controls_for_role(role)
         if hasattr(self, "alarm_log_page") and hasattr(self.alarm_log_page, "update_auth_controls"):
             self.alarm_log_page.update_auth_controls()
+        self._sync_control_room_action_bar()
     
     def update_settings_controls_for_role(self, role):
         """根据用户角色更新设置页面控件状态"""
@@ -2730,6 +2914,8 @@ class MainWindow(QMainWindow, UIBase):
             self.expected_probe_spin.setEnabled(can_modify_settings)
         if hasattr(self, 'adopt_probe_count_btn'):
             self.adopt_probe_count_btn.setEnabled(can_modify_settings)
+        if hasattr(self, 'ir_installed_checkbox'):
+            self.ir_installed_checkbox.setEnabled(can_modify_settings)
         if hasattr(self, 'probe_location_edits'):
             for edit in self.probe_location_edits:
                 edit.setEnabled(can_modify_settings)
@@ -2755,6 +2941,19 @@ class MainWindow(QMainWindow, UIBase):
         
         if hasattr(self, 'auto_save_path_btn'):
             self.auto_save_path_btn.setEnabled(can_modify_settings and self.auto_save_enabled)
+
+        if hasattr(self, "settings_users_btn"):
+            self.settings_users_btn.setEnabled(
+                self.user_manager.has_permission(Permission.MANAGE_USERS)
+            )
+        if hasattr(self, "settings_clear_btn"):
+            self.settings_clear_btn.setEnabled(
+                self.user_manager.has_permission(Permission.CLEAR_DATA)
+            )
+        if hasattr(self, "settings_save_btn"):
+            self.settings_save_btn.setEnabled(
+                self.user_manager.has_permission(Permission.SAVE_DATA)
+            )
         
         # 更新按钮文本提示
         if not can_modify_settings:
@@ -3154,10 +3353,13 @@ class MainWindow(QMainWindow, UIBase):
         # 鼠标/键盘/触摸均刷新管理员空闲计时（部分板子 Touch 不合成 Mouse）
         if event.type() in (
             QEvent.MouseButtonPress,
+            QEvent.MouseButtonDblClick,
             QEvent.KeyPress,
+            QEvent.Wheel,
             QEvent.TouchBegin,
             QEvent.TouchUpdate,
         ):
+            self._note_ui_activity()
             self.update_operate_time()
             if event.type() in (QEvent.MouseButtonPress, QEvent.TouchBegin):
                 home = getattr(self, "home_page", None)
@@ -3214,6 +3416,51 @@ class MainWindow(QMainWindow, UIBase):
         elif et in (QEvent.MouseButtonRelease, QEvent.TouchEnd, QEvent.TouchCancel):
             self._secret_hold_timer.stop()
 
+    def _note_ui_activity(self):
+        self._last_ui_activity_at = time.time()
+
+    def _idle_return_seconds(self):
+        if self.is_logged_in():
+            return int(self._IDLE_RETURN_LOGGED_IN_SEC)
+        return int(self._IDLE_RETURN_PUBLIC_SEC)
+
+    def _check_idle_return_home(self):
+        """Leave overview unattended → come back. Duty wall must not stay on a subpage."""
+        sw = getattr(self, "stacked_widget", None)
+        if sw is None:
+            return
+        try:
+            idx = int(sw.currentIndex())
+        except Exception:
+            return
+        if idx == 0:
+            return
+        app = QApplication.instance()
+        if app is not None:
+            if app.activeModalWidget() is not None:
+                return
+            if app.activePopupWidget() is not None:
+                return
+        last = float(getattr(self, "_last_ui_activity_at", 0.0) or 0.0)
+        if last <= 0:
+            self._last_ui_activity_at = time.time()
+            return
+        if (time.time() - last) < self._idle_return_seconds():
+            return
+        self._return_home_after_idle()
+
+    def _return_home_after_idle(self):
+        from core.translation import _t
+        try:
+            from core.software_keyboard import get_keyboard_manager
+            get_keyboard_manager().hide_keyboard()
+        except Exception:
+            pass
+        self._apply_page_index(0)
+        self._note_ui_activity()
+        self._show_transient_notice(_t("msg_idle_return_home"), msec=2500)
+        self.log("Idle on subpage -> returned to home/overview", "INFO")
+
     def update_operate_time(self):
         """更新操作时间（重置超时计时器）"""
         if self.current_user and self.current_user['role'] == UserRole.ADMIN:
@@ -3237,6 +3484,7 @@ class MainWindow(QMainWindow, UIBase):
 
     def _show_transient_notice(self, text, msec=3500):
         """顶栏短时提示，不挡监测主区（非模态）。"""
+        from core.translation import _t
         bar = getattr(self, "status_bar", None)
         if bar is None or not hasattr(bar, "user_label"):
             return
@@ -3255,14 +3503,22 @@ class MainWindow(QMainWindow, UIBase):
         """)
 
         def _restore():
+            on_home = self.stacked_widget.currentIndex() == 0
             if self.is_logged_in() and isinstance(getattr(self, "current_user", None), dict):
                 user = self.current_user
-                on_home = self.stacked_widget.currentIndex() == 0
-                bar.setVisible(not on_home)
-                bar.update_user_info(user.get("username"), user.get("role"))
+                if getattr(self, "control_room_mode", False):
+                    bar.setVisible(True)
+                else:
+                    bar.setVisible(not on_home)
+                if bar.isVisible():
+                    bar.update_user_info(user.get("username"), user.get("role"))
             else:
-                bar.user_label.setVisible(False)
-                bar.setVisible(False)
+                if getattr(self, "control_room_mode", False):
+                    bar.setVisible(True)
+                    bar.update_user_info(_t("status_public_mode"), None)
+                else:
+                    bar.user_label.setVisible(False)
+                    bar.setVisible(not on_home)
 
         QTimer.singleShot(int(msec), _restore)
     
@@ -3374,7 +3630,8 @@ class MainWindow(QMainWindow, UIBase):
     def _refresh_layout_after_fullscreen(self):
         """全屏生效后强制刷新底栏等布局，避免残留小窗尺寸。"""
         if hasattr(self, 'bottom_nav') and self.bottom_nav is not None:
-            self.bottom_nav.setFixedHeight(70)
+            bar_h = int(getattr(self.bottom_nav, "_bar_height", 70) or 70)
+            self.bottom_nav.setFixedHeight(bar_h)
             self.bottom_nav.refresh_hit_areas()
             self.bottom_nav.updateGeometry()
         cw = self.centralWidget()
@@ -3471,12 +3728,25 @@ class MainWindow(QMainWindow, UIBase):
             
         self.save_data_btn.setText(_t("btn_save"))
         self.user_management_btn.setText(_t("btn_user_mgmt"))
+        if hasattr(self, "status_bar") and hasattr(self.status_bar, "_retranslate_ops_buttons"):
+            self.status_bar._retranslate_ops_buttons()
         # Viewer shows Login; Admin shows Logout
         if self.current_user and self.current_user.get('role') == UserRole.VIEWER:
             self.logout_btn.setText(_t("btn_login"))
         else:
             self.logout_btn.setText(_t("btn_logout"))
         
+        if hasattr(self, "admin_ops_group"):
+            self.admin_ops_group.setTitle(_t("set_admin_ops"))
+            if hasattr(self, "admin_ops_hint"):
+                self.admin_ops_hint.setText(_t("tip_admin_ops"))
+            if hasattr(self, "settings_users_btn"):
+                self.settings_users_btn.setText(_t("btn_user_mgmt"))
+            if hasattr(self, "settings_clear_btn"):
+                self.settings_clear_btn.setText(_t("btn_clear"))
+            if hasattr(self, "settings_save_btn"):
+                self.settings_save_btn.setText(_t("btn_save"))
+
         # Retranslate settings page group boxes dynamically
         if hasattr(self, 'comm_group'):
             self.comm_group.setTitle(_t("set_comm_settings"))
@@ -3514,6 +3784,9 @@ class MainWindow(QMainWindow, UIBase):
             if hasattr(self, 'adopt_probe_count_btn'):
                 self.adopt_probe_count_btn.setText(_t("btn_adopt_probe_count"))
                 self.adopt_probe_count_btn.setToolTip(_t("tip_adopt_probe_count"))
+            if hasattr(self, 'ir_installed_checkbox'):
+                self.ir_installed_checkbox.setText(_t("set_ir_installed"))
+                self.ir_installed_checkbox.setToolTip(_t("tip_ir_installed"))
             if hasattr(self, "ui_mode_label"):
                 self.ui_mode_label.setText(_t("set_ui_mode"))
                 self.ui_mode_label.setToolTip(_t("tip_ui_mode"))

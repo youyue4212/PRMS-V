@@ -12,6 +12,7 @@ from PyQt5.QtWidgets import (
 from core.ui_tokens import (
     BG, PANEL, BORDER, OK, WARN, ALARM, INFO, TEXT, TEXT_DIM, MUTED,
     RADIUS_CARD, RADIUS_BTN, cr_px, cr_cps_px, cps_digit_scale,
+    CR_CHROME_H, CR_CHROME_FONT_PX,
 )
 
 
@@ -45,8 +46,9 @@ class ProbeTile(QFrame):
         self._index = -1
         self._press_pos = None
         self._dragging = False
+        self._nav_enabled = False
         self.setObjectName("probeTile")
-        self.setCursor(Qt.PointingHandCursor)
+        self.setCursor(Qt.ArrowCursor)
         self.setMinimumSize(220, 168)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.setAcceptDrops(False)
@@ -162,12 +164,26 @@ class ProbeTile(QFrame):
                 self.clicked.emit(self._client_id)
             self._press_pos = None
             self._dragging = False
-            self.setCursor(Qt.OpenHandCursor if self.property("canReorder") else Qt.PointingHandCursor)
+            self._apply_cursor()
         super().mouseReleaseEvent(event)
 
     def set_reorder_enabled(self, enabled: bool):
         self.setProperty("canReorder", bool(enabled))
-        self.setCursor(Qt.OpenHandCursor if enabled else Qt.PointingHandCursor)
+        self._apply_cursor()
+
+    def set_nav_enabled(self, enabled: bool):
+        self._nav_enabled = bool(enabled)
+        self._apply_cursor()
+
+    def _apply_cursor(self):
+        if self._dragging:
+            self.setCursor(Qt.ClosedHandCursor)
+        elif self.property("canReorder"):
+            self.setCursor(Qt.OpenHandCursor)
+        elif getattr(self, "_nav_enabled", False):
+            self.setCursor(Qt.PointingHandCursor)
+        else:
+            self.setCursor(Qt.ArrowCursor)
 
     def set_drop_highlight(self, on: bool):
         if on:
@@ -230,11 +246,58 @@ class ProbeTile(QFrame):
             self._apply_chrome("offline")
 
 
+class ClickCard(QFrame):
+    """Sidebar card that opens a page on click."""
+    clicked = pyqtSignal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._nav_enabled = False
+        self.setObjectName("crCard")
+        self.setCursor(Qt.ArrowCursor)
+        self.setStyleSheet(f"""
+            QFrame#crCard {{
+                background-color: {PANEL};
+                border: 1px solid {BORDER};
+                border-radius: {RADIUS_CARD}px;
+            }}
+            QFrame#crCard QLabel {{
+                background: transparent;
+                border: none;
+            }}
+        """)
+
+    def set_nav_enabled(self, enabled: bool):
+        self._nav_enabled = bool(enabled)
+        self.setCursor(Qt.PointingHandCursor if enabled else Qt.ArrowCursor)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.LeftButton and getattr(self, "_nav_enabled", False):
+            self.clicked.emit()
+        super().mouseReleaseEvent(event)
+
+    def set_warn(self, on: bool):
+        border = WARN if on else BORDER
+        width = 2 if on else 1
+        self.setStyleSheet(f"""
+            QFrame#crCard {{
+                background-color: {PANEL};
+                border: {width}px solid {border};
+                border-radius: {RADIUS_CARD}px;
+            }}
+            QFrame#crCard QLabel {{
+                background: transparent;
+                border: none;
+            }}
+        """)
+
+
 class ControlRoomPage(QWidget):
     """PC control-room home: probe wall + duty sidebar."""
 
     probe_selected = pyqtSignal(object)
     open_alarm_log = pyqtSignal()
+    open_diagnostics = pyqtSignal()
     reset_requested = pyqtSignal()
     login_requested = pyqtSignal()
     reorder_requested = pyqtSignal(int, int)
@@ -247,6 +310,8 @@ class ControlRoomPage(QWidget):
         self._labels = {}
         self._layout_sig = None
         self._can_reorder = False
+        self._nav_enabled = False
+        self._reset_wanted = False
         self._drag_from = -1
         self._drag_hover = -1
         self._build_ui()
@@ -268,34 +333,57 @@ class ControlRoomPage(QWidget):
         self._can_reorder = bool(enabled)
         for t in self._tiles:
             t.set_reorder_enabled(self._can_reorder)
-        self.hint_label.setText(self._hint_text())
 
-    def _hint_text(self):
+    def set_nav_enabled(self, enabled: bool):
+        """未登录只看总览/日志；登录后探头卡、健康卡、故障卡才可跳转。"""
+        self._nav_enabled = bool(enabled)
+        cursor = Qt.PointingHandCursor if self._nav_enabled else Qt.ArrowCursor
+        for card in (getattr(self, "_health_card", None), getattr(self, "_fault_card", None)):
+            if card is None:
+                continue
+            card.set_nav_enabled(self._nav_enabled)
+            card.setCursor(cursor)
+        for t in self._tiles:
+            t.set_nav_enabled(self._nav_enabled)
+        self._refresh_nav_tooltips()
+        if hasattr(self, "reset_btn"):
+            self.reset_btn.setEnabled(
+                bool(self._nav_enabled and getattr(self, "_reset_wanted", False))
+            )
+
+    def _refresh_nav_tooltips(self):
         from core.translation import _t
-        if self._can_reorder:
-            return _t("control_room_hint_reorder")
-        return _t("control_room_hint")
+        if hasattr(self, "_health_card"):
+            self._health_card.setToolTip(
+                _t("tip_health_card_nav") if self._nav_enabled else ""
+            )
+        if hasattr(self, "_fault_card"):
+            self._fault_card.setToolTip(
+                _t("tip_fault_card_nav") if self._nav_enabled else ""
+            )
 
     def _build_ui(self):
         root = QVBoxLayout(self)
-        root.setContentsMargins(16, 10, 16, 10)
-        root.setSpacing(10)
+        root.setContentsMargins(12, 8, 12, 8)
+        root.setSpacing(8)
 
         # ---- Header (desktop-readable) ----
         header = QHBoxLayout()
-        header.setSpacing(10)
+        header.setSpacing(8)
 
         self.title_label = QLabel()
         self.title_label.setStyleSheet(
-            f"color: {TEXT}; font-size: {cr_px(20)}px; font-weight: bold; background: transparent; border: none;"
+            f"color: {TEXT}; font-size: {cr_px(18)}px; font-weight: bold; background: transparent; border: none;"
         )
-        header.addWidget(self.title_label)
+        header.addWidget(self.title_label, 0, Qt.AlignVCenter)
 
         self.master_link_label = QLabel("--")
         self.master_link_label.setAlignment(Qt.AlignCenter)
-        self.master_link_label.setMinimumWidth(cr_px(140))
+        self.master_link_label.setWordWrap(False)
+        self.master_link_label.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
+        self.master_link_label.setFixedHeight(CR_CHROME_H)
         self.master_link_label.setStyleSheet(self._pill_qss(MUTED))
-        header.addWidget(self.master_link_label)
+        header.addWidget(self.master_link_label, 0, Qt.AlignVCenter)
 
         header.addStretch(1)
 
@@ -303,46 +391,33 @@ class ControlRoomPage(QWidget):
         self.total_cps_label = QLabel("0")
         self.total_cps_label.setAlignment(Qt.AlignCenter)
         self._apply_total_cps_typography("0")
-        header.addWidget(self.total_cps_label)
+        header.addWidget(self.total_cps_label, 0, Qt.AlignVCenter)
         self.total_cps_unit = QLabel("CPS")
-        self.total_cps_unit.setStyleSheet(f"color: {MUTED}; font-size: {cr_px(14)}px;")
-        header.addWidget(self.total_cps_unit)
+        self.total_cps_unit.setStyleSheet(f"color: {MUTED}; font-size: {cr_px(16)}px; font-weight: 600;")
+        header.addWidget(self.total_cps_unit, 0, Qt.AlignVCenter)
 
         self.alarm_banner = QLabel()
         self.alarm_banner.setAlignment(Qt.AlignCenter)
-        self.alarm_banner.setMinimumWidth(cr_px(120))
+        self.alarm_banner.setWordWrap(False)
+        self.alarm_banner.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
+        self.alarm_banner.setFixedHeight(CR_CHROME_H)
         self.alarm_banner.setStyleSheet(self._pill_qss(OK))
-        header.addWidget(self.alarm_banner)
+        header.addWidget(self.alarm_banner, 0, Qt.AlignVCenter)
 
-        btn_h = cr_px(36)
         self.reset_btn = QPushButton()
-        self.reset_btn.setFixedHeight(btn_h)
+        self.reset_btn.setFixedHeight(CR_CHROME_H)
         self.reset_btn.setEnabled(False)
-        self.reset_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: #455a64; color: white; border: none;
-                border-radius: {RADIUS_BTN}px; font-size: {cr_px(12)}px; font-weight: bold;
-                padding: 0 14px; min-height: {btn_h}px;
-            }}
-            QPushButton:enabled {{ background-color: {ALARM}; }}
-            QPushButton:pressed:enabled {{ background-color: #c62828; }}
-            QPushButton:disabled {{ background-color: #333; color: #777; }}
-        """)
+        self.reset_btn.setStyleSheet(
+            self._header_btn_qss("#455a64", press="#c62828", enabled_bg=ALARM)
+        )
         self.reset_btn.clicked.connect(self.reset_requested.emit)
-        header.addWidget(self.reset_btn)
+        header.addWidget(self.reset_btn, 0, Qt.AlignVCenter)
 
         self.login_btn = QPushButton()
-        self.login_btn.setFixedHeight(btn_h)
-        self.login_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {OK}; color: white; border: none;
-                border-radius: {RADIUS_BTN}px; font-size: {cr_px(12)}px; font-weight: bold;
-                padding: 0 14px; min-height: {btn_h}px;
-            }}
-            QPushButton:pressed {{ background-color: #45a049; }}
-        """)
+        self.login_btn.setFixedHeight(CR_CHROME_H)
+        self.login_btn.setStyleSheet(self._header_btn_qss(OK, press="#45a049"))
         self.login_btn.clicked.connect(self.login_requested.emit)
-        header.addWidget(self.login_btn)
+        header.addWidget(self.login_btn, 0, Qt.AlignVCenter)
 
         root.addLayout(header)
 
@@ -366,7 +441,7 @@ class ControlRoomPage(QWidget):
         wall_head = QHBoxLayout()
         self.probe_section_title = QLabel()
         self.probe_section_title.setStyleSheet(
-            f"color: {TEXT_DIM}; font-size: {cr_px(14)}px; font-weight: bold;"
+            f"color: {TEXT_DIM}; font-size: {CR_CHROME_FONT_PX}px; font-weight: bold;"
         )
         wall_head.addWidget(self.probe_section_title, 1)
         self.online_summary = QLabel()
@@ -413,11 +488,12 @@ class ControlRoomPage(QWidget):
         side.addLayout(kpi_row)
 
         occ_card = _card_frame()
+        self._occ_card = occ_card
         occ_lay = QVBoxLayout(occ_card)
         occ_lay.setContentsMargins(12, 10, 12, 10)
         self.occ_title = QLabel()
         self.occ_title.setStyleSheet(
-            f"color: {TEXT_DIM}; font-size: {cr_px(12)}px; font-weight: bold;"
+            f"color: {TEXT_DIM}; font-size: {CR_CHROME_FONT_PX}px; font-weight: bold;"
         )
         self.occ_status = QLabel("--")
         self.occ_status.setStyleSheet(
@@ -431,26 +507,85 @@ class ControlRoomPage(QWidget):
         occ_lay.addWidget(self.occ_desc)
         side.addWidget(occ_card)
 
+        health_card = ClickCard()
+        health_card.clicked.connect(self.open_diagnostics.emit)
+        health_lay = QVBoxLayout(health_card)
+        health_lay.setContentsMargins(12, 10, 12, 10)
+        health_lay.setSpacing(4)
+        health_head = QHBoxLayout()
+        self.health_title = QLabel()
+        self.health_title.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        self.health_title.setStyleSheet(
+            f"color: {TEXT_DIM}; font-size: {CR_CHROME_FONT_PX}px; font-weight: bold;"
+        )
+        self.health_status = QLabel("--")
+        self.health_status.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.health_status.setWordWrap(False)
+        self.health_status.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
+        self.health_status.setStyleSheet(
+            f"color: {OK}; font-size: {cr_px(13)}px; font-weight: bold;"
+        )
+        health_head.addWidget(self.health_title, 1, Qt.AlignVCenter)
+        health_head.addWidget(self.health_status, 0, Qt.AlignVCenter)
+        health_lay.addLayout(health_head)
+        self.health_probe = QLabel("--")
+        self.health_ir = QLabel("--")
+        self.health_master = QLabel("--")
+        for lab in (self.health_probe, self.health_ir, self.health_master):
+            lab.setStyleSheet(f"color: {TEXT}; font-size: {cr_px(12)}px;")
+            health_lay.addWidget(lab)
+        self._health_card = health_card
+        side.addWidget(health_card)
+
+        fault_card = ClickCard()
+        fault_card.clicked.connect(self.open_diagnostics.emit)
+        fault_lay = QVBoxLayout(fault_card)
+        fault_lay.setContentsMargins(12, 10, 12, 10)
+        fault_lay.setSpacing(4)
+        fault_head = QHBoxLayout()
+        self.fault_title = QLabel()
+        self.fault_title.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        self.fault_title.setStyleSheet(
+            f"color: {TEXT_DIM}; font-size: {CR_CHROME_FONT_PX}px; font-weight: bold;"
+        )
+        self.fault_status = QLabel("--")
+        self.fault_status.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.fault_status.setWordWrap(False)
+        self.fault_status.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
+        self.fault_status.setStyleSheet(
+            f"color: {OK}; font-size: {cr_px(13)}px; font-weight: bold;"
+        )
+        fault_head.addWidget(self.fault_title, 1, Qt.AlignVCenter)
+        fault_head.addWidget(self.fault_status, 0, Qt.AlignVCenter)
+        fault_lay.addLayout(fault_head)
+        self.fault_text = QLabel("")
+        self.fault_text.setWordWrap(True)
+        self.fault_text.setStyleSheet(f"color: {MUTED}; font-size: {cr_px(12)}px;")
+        fault_lay.addWidget(self.fault_text)
+        self._fault_card = fault_card
+        side.addWidget(fault_card)
+
         alarm_card = _card_frame()
         alarm_lay = QVBoxLayout(alarm_card)
         alarm_lay.setContentsMargins(12, 10, 12, 10)
         alarm_head = QHBoxLayout()
         self.alarm_list_title = QLabel()
         self.alarm_list_title.setStyleSheet(
-            f"color: {TEXT_DIM}; font-size: {cr_px(12)}px; font-weight: bold;"
+            f"color: {TEXT_DIM}; font-size: {CR_CHROME_FONT_PX}px; font-weight: bold;"
         )
-        alarm_head.addWidget(self.alarm_list_title, 1)
+        alarm_head.addWidget(self.alarm_list_title, 1, Qt.AlignVCenter)
         self.open_log_btn = QPushButton()
-        self.open_log_btn.setFixedHeight(cr_px(32))
+        self.open_log_btn.setFixedHeight(CR_CHROME_H)
         self.open_log_btn.setStyleSheet(f"""
             QPushButton {{
                 background-color: #333; color: {INFO}; border: 1px solid {INFO};
-                border-radius: 6px; font-size: {cr_px(12)}px; font-weight: bold; padding: 0 10px;
+                border-radius: 6px; font-size: {CR_CHROME_FONT_PX}px; font-weight: bold;
+                padding: 0 12px; min-height: {CR_CHROME_H}px; max-height: {CR_CHROME_H}px;
             }}
             QPushButton:pressed {{ background-color: {INFO}; color: white; }}
         """)
         self.open_log_btn.clicked.connect(self.open_alarm_log.emit)
-        alarm_head.addWidget(self.open_log_btn)
+        alarm_head.addWidget(self.open_log_btn, 0, Qt.AlignVCenter)
         alarm_lay.addLayout(alarm_head)
 
         self.alarm_list = QListWidget()
@@ -478,10 +613,6 @@ class ControlRoomPage(QWidget):
         body.addLayout(side, 3)
         root.addLayout(body, 1)
 
-        self.hint_label = QLabel()
-        self.hint_label.setStyleSheet(f"color: {MUTED}; font-size: {cr_px(11)}px;")
-        root.addWidget(self.hint_label)
-
     def _make_kpi(self):
         card = _card_frame()
         lay = QVBoxLayout(card)
@@ -500,13 +631,61 @@ class ControlRoomPage(QWidget):
         return card
 
     @staticmethod
-    def _pill_qss(color: str) -> str:
+    def _hex_rgba(color: str, alpha: float) -> str:
+        h = (color or "#888888").lstrip("#")
+        if len(h) < 6:
+            h = "888888"
+        r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+        return "rgba(%d, %d, %d, %.2f)" % (r, g, b, alpha)
+
+    @staticmethod
+    def _pill_qss(color: str, emphasis: bool = False) -> str:
+        if emphasis:
+            px = cr_px(16)
+            return f"""
+                QLabel {{
+                    color: {color}; font-size: {px}px; font-weight: bold;
+                    padding: 6px 18px; border: 2px solid {color};
+                    border-radius: 8px;
+                    background: {ControlRoomPage._hex_rgba(color, 0.22)};
+                }}
+            """
         return f"""
             QLabel {{
-                color: {color}; font-size: {cr_px(12)}px; font-weight: bold;
-                padding: {cr_px(6)}px {cr_px(10)}px; border: 1px solid {color};
-                border-radius: 8px; background: rgba(0,0,0,0.25);
+                color: {color}; font-size: {CR_CHROME_FONT_PX}px; font-weight: bold;
+                padding: 0 12px; border: 1px solid {color};
+                border-radius: 6px; background: rgba(0,0,0,0.25);
             }}
+        """
+
+    def _apply_pill(self, label, color: str, emphasis: bool = False):
+        h = cr_px(42) if emphasis else CR_CHROME_H
+        label.setFixedHeight(h)
+        label.setMinimumWidth(cr_px(108) if emphasis else 0)
+        label.setStyleSheet(self._pill_qss(color, emphasis=emphasis))
+
+    @staticmethod
+    def _header_btn_qss(bg: str, press: str = None, enabled_bg: str = None) -> str:
+        press = press or bg
+        extra = ""
+        if enabled_bg:
+            extra = f"""
+            QPushButton:enabled {{ background-color: {enabled_bg}; }}
+            QPushButton:pressed:enabled {{ background-color: {press}; }}
+            """
+        else:
+            extra = f"""
+            QPushButton:pressed {{ background-color: {press}; }}
+            """
+        return f"""
+            QPushButton {{
+                background-color: {bg}; color: white; border: none;
+                border-radius: {RADIUS_BTN}px; font-size: {CR_CHROME_FONT_PX}px;
+                font-weight: bold; padding: 0 12px;
+                min-height: {CR_CHROME_H}px; max-height: {CR_CHROME_H}px;
+            }}
+            {extra}
+            QPushButton:disabled {{ background-color: #333; color: #777; }}
         """
 
     def retranslate_ui(self):
@@ -519,11 +698,15 @@ class ControlRoomPage(QWidget):
         self.title_label.setText(_t("control_room_title"))
         self.probe_section_title.setText(_t("control_room_probe_wall"))
         self.occ_title.setText(_t("control_room_occupancy"))
+        self.health_title.setText(_t("card_health_title"))
+        self.fault_title.setText(_t("card_fault_summary_title"))
+        if hasattr(self, "_health_card"):
+            self._refresh_nav_tooltips()
+        if hasattr(self, "_fault_card"):
+            self._refresh_nav_tooltips()
         self.alarm_list_title.setText(_t("control_room_recent_alarms"))
         self.open_log_btn.setText(_t("control_room_open_log"))
         self.reset_btn.setText(_t("btn_channel_alarm_reset_active"))
-        self.login_btn.setText(_t("btn_login"))
-        self.hint_label.setText(self._hint_text())
         self.kpi_active._title.setText(_t("control_room_kpi_active"))
         self.kpi_today._title.setText(_t("control_room_kpi_today"))
         self.kpi_online._title.setText(_t("control_room_kpi_online"))
@@ -532,31 +715,103 @@ class ControlRoomPage(QWidget):
         self._relabel_tiles()
 
     def set_login_visible(self, visible: bool):
-        self.login_btn.setVisible(bool(visible))
+        """visible=True 显示登录；False 表示已登录，改成退出。"""
+        from core.translation import _t
+        self.login_btn.setVisible(True)
+        if visible:
+            self.login_btn.setText(_t("btn_login"))
+            self.login_btn.setStyleSheet(self._header_btn_qss(OK, press="#45a049"))
+        else:
+            self.login_btn.setText(_t("btn_logout"))
+            self.login_btn.setStyleSheet(self._header_btn_qss(ALARM, press="#c62828"))
+        self.set_nav_enabled(not visible)
 
     def set_master_link(self, text: str, level: str = "ok"):
         self.master_link_label.setText(text or "--")
-        color = {"ok": OK, "warn": WARN, "offline": ALARM}.get(level, MUTED)
-        self.master_link_label.setStyleSheet(self._pill_qss(color))
+        emphasis = str(level) == "offline"
+        color = {"ok": OK, "warn": WARN, "offline": WARN}.get(level, MUTED)
+        self._apply_pill(self.master_link_label, color, emphasis=emphasis)
 
-    def set_channel_alarm(self, active: bool, latch_text: str = ""):
+    def set_channel_alarm(self, active: bool, latch_text: str = "", kind: str = "normal"):
         from core.translation import _t
         if active:
+            self._reset_wanted = True
             self.alarm_banner.setText(latch_text or _t("side_tag_alarm"))
-            self.alarm_banner.setStyleSheet(self._pill_qss(ALARM))
-            self.reset_btn.setEnabled(True)
+            self._apply_pill(self.alarm_banner, ALARM, emphasis=True)
+            self.reset_btn.setEnabled(getattr(self, "_nav_enabled", False))
+        elif kind == "offline":
+            self._reset_wanted = False
+            self.alarm_banner.setText(latch_text or _t("status_rad_offline"))
+            self._apply_pill(self.alarm_banner, WARN, emphasis=True)
+            self.reset_btn.setEnabled(False)
+        elif kind == "warn":
+            self._reset_wanted = False
+            self.alarm_banner.setText(latch_text or _t("side_tag_warn"))
+            self._apply_pill(self.alarm_banner, WARN, emphasis=True)
+            self.reset_btn.setEnabled(False)
         else:
+            self._reset_wanted = False
             self.alarm_banner.setText(_t("side_tag_ok"))
-            self.alarm_banner.setStyleSheet(self._pill_qss(OK))
+            self._apply_pill(self.alarm_banner, OK, emphasis=False)
             self.reset_btn.setEnabled(False)
 
-    def set_occupancy(self, busy: bool, status: str, desc: str = ""):
+    def set_occupancy(self, kind, status: str, desc: str = ""):
+        if isinstance(kind, bool):
+            kind = "passing" if kind else "vacant"
+        kind = str(kind or "vacant")
         self.occ_status.setText(status or "--")
         self.occ_desc.setText(desc or "")
-        color = INFO if busy else OK
+        color = {
+            "alarm": ALARM,
+            "passing": INFO,
+            "offline": WARN,
+            "vacant": OK,
+        }.get(kind, TEXT)
+        emph = kind in ("offline", "alarm")
         self.occ_status.setStyleSheet(
             f"color: {color}; font-size: {cr_px(16)}px; font-weight: bold;"
         )
+        if hasattr(self, "_occ_card"):
+            border = color if emph else BORDER
+            width = 2 if emph else 1
+            self._occ_card.setStyleSheet(f"""
+                QFrame#crCard {{
+                    background-color: {PANEL};
+                    border: {width}px solid {border};
+                    border-radius: {RADIUS_CARD}px;
+                }}
+                QFrame#crCard QLabel {{
+                    background: transparent;
+                    border: none;
+                }}
+            """)
+
+    def set_health_summary(self, status: str, rows: dict, warn: bool = False):
+        from core.translation import _t
+        self.health_status.setText(status or _t("status_health_ok"))
+        color = WARN if warn else OK
+        self.health_status.setStyleSheet(
+            f"color: {color}; font-size: {cr_px(13)}px; font-weight: bold;"
+        )
+        self.health_status.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        rows = rows or {}
+        self.health_probe.setText("%s  %s" % (_t("kv_probe_comm"), rows.get("probeComm") or "--"))
+        self.health_ir.setText("%s  %s" % (_t("kv_ir_status"), rows.get("irStatus") or "--"))
+        self.health_master.setText("%s  %s" % (_t("kv_master_hw"), rows.get("masterHw") or "--"))
+        if hasattr(self, "_health_card"):
+            self._health_card.set_warn(bool(warn))
+
+    def set_fault_summary(self, status: str, text: str, warn: bool = False):
+        from core.translation import _t
+        self.fault_status.setText(status or _t("status_fault_count", n=0))
+        color = WARN if warn else OK
+        self.fault_status.setStyleSheet(
+            f"color: {color}; font-size: {cr_px(13)}px; font-weight: bold;"
+        )
+        self.fault_status.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.fault_text.setText(text or _t("desc_fault_summary_none"))
+        if hasattr(self, "_fault_card"):
+            self._fault_card.set_warn(bool(warn))
 
     def _make_tile(self):
         tile = ProbeTile(self.probe_host)
@@ -565,6 +820,7 @@ class ControlRoomPage(QWidget):
         tile.drag_hover.connect(self._on_drag_hover)
         tile.drag_finished.connect(self._on_drag_finished)
         tile.set_reorder_enabled(self._can_reorder)
+        tile.set_nav_enabled(self._nav_enabled)
         return tile
 
     def _apply_total_cps_typography(self, text: str):
@@ -628,6 +884,8 @@ class ControlRoomPage(QWidget):
 
     def _on_tile_clicked(self, client_id):
         if self._drag_from >= 0:
+            return
+        if not getattr(self, "_nav_enabled", False):
             return
         self.probe_selected.emit(client_id)
 

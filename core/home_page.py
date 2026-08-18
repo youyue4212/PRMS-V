@@ -103,6 +103,7 @@ class HomePage(QWidget):
         self._health_rows = {}
         self._fault_rows = {}
         self._passage_busy = False
+        self._occupancy_kind = "vacant"
         self._flush_pending = False
         self._last_web_payload = None
         self._defer_flush_until = 0.0
@@ -143,7 +144,7 @@ class HomePage(QWidget):
             self.bridge.page_ready.connect(self._on_page_ready)
             self.bridge.reset_requested.connect(self._on_js_reset)
             self.bridge.health_requested.connect(lambda: self._nav(3))
-            self.bridge.fault_requested.connect(lambda: self._nav(4))
+            self.bridge.fault_requested.connect(lambda: self._nav(3))
             self.bridge.probe_requested.connect(self._on_js_probe)
             self.bridge.login_requested.connect(self._on_js_login)
             self.bridge.language_requested.connect(self._on_js_language)
@@ -275,10 +276,7 @@ class HomePage(QWidget):
         parent = self.parent
         if parent is None or not hasattr(parent, "switch_page"):
             return
-        # 公共监视：仅允许只读报警日志(4)；其它页仍要登录
-        if hasattr(parent, "is_logged_in") and not parent.is_logged_in():
-            if int(page_index) != 4:
-                return
+        # 健康卡 / 故障摘要 → 诊断页(3)；报警日志走底栏
         parent.switch_page(page_index)
 
     def _on_js_reset(self):
@@ -466,6 +464,8 @@ class HomePage(QWidget):
             "resetBtnActive": _t("btn_channel_alarm_reset_active"),
             "sideTagOk": _t("side_tag_ok"),
             "sideTagAlarm": _t("side_tag_alarm"),
+            "sideTagOffline": _t("side_tag_offline"),
+            "sideTagWarn": _t("side_tag_warn"),
             "latchNone": _t("latch_none"),
             "latchPending": _t("latch_pending", n=1),
             "latchAutoHold": _t("latch_auto_hold"),
@@ -473,11 +473,12 @@ class HomePage(QWidget):
             "latchModeLatch": _t("latch_mode_latch"),
             "healthTitle": _t("card_health_title"),
             "faultTitle": _t("card_fault_summary_title"),
+            "tipHealth": _t("tip_health_card_nav"),
+            "tipFault": _t("tip_fault_card_nav"),
             "kvProbeComm": _t("kv_probe_comm"),
             "kvIrStatus": _t("kv_ir_status"),
             "kvMasterHw": _t("kv_master_hw"),
             "kvLastFault": _t("kv_last_fault"),
-            "kvIrShield": _t("kv_ir_shield"),
             "clickDetail": _t("btn_click_detail"),
             "probeOk": _t("probe_tile_ok"),
             "probeAlarm": _t("probe_tile_alarm"),
@@ -485,6 +486,7 @@ class HomePage(QWidget):
             "groupOk": _t("status_group_ok"),
             "vacant": _t("status_vacant"),
             "passing": _t("status_passing"),
+            "occupiedAlarm": _t("status_occupied_alarm"),
         }
 
     def _slot_location(self, i):
@@ -521,9 +523,48 @@ class HomePage(QWidget):
     def _alarm_web_kind(self):
         if self._alarm_kind == "channel_alarm":
             return "alarm"
-        if self._alarm_kind in ("over_threshold", "soft_cleared", "fault", "offline", "acked"):
+        if self._alarm_kind == "offline":
+            return "offline"
+        if self._alarm_kind in ("over_threshold", "soft_cleared", "fault", "acked", "warn"):
             return "warn"
         return "normal"
+
+    def radiation_side_rad(self):
+        """辐射状态与右上角标签同一套 kind，禁止离线时仍写「系统正常」。"""
+        from core.translation import _t
+        kind = self._alarm_web_kind()
+        title = self.alarm_status_label.text() or ""
+        if kind == "offline":
+            return _t("status_rad_offline")
+        if kind == "normal":
+            return _t("status_group_ok")
+        return title or _t("status_group_ok")
+
+    def radiation_banner_title(self):
+        from core.translation import _t
+        kind = self._alarm_web_kind()
+        title = self.alarm_status_label.text() or ""
+        if kind == "offline":
+            return _t("status_rad_offline")
+        if kind == "normal":
+            return title or _t("status_normal")
+        return title or _t("status_normal")
+
+    def radiation_side_tag(self):
+        """Alarm-card top-right tag: radiation decision, not device health."""
+        from core.translation import _t
+        kind = self._alarm_web_kind()
+        if kind == "alarm":
+            return _t("side_tag_alarm"), "#FF4D4D"
+        if kind == "offline":
+            return _t("side_tag_offline"), "#ff9800"
+        if kind == "warn":
+            return _t("side_tag_warn"), "#ff9800"
+        return _t("side_tag_ok"), "#4caf50"
+
+    def set_alarm_kind(self, kind: str):
+        self._alarm_kind = str(kind or "normal")
+        self.schedule_web_flush()
 
     def build_hmi_state(self):
         probes = []
@@ -567,8 +608,10 @@ class HomePage(QWidget):
         # (offline stays green tag; amber only on the Master HW row).
         if (
             "降级" in hs
+            or "通信故障" in hs
             or ("故障" in hs and "无" not in hs)
             or "degrad" in hs_l
+            or "link fault" in hs_l
             or ("fault" in hs_l and "no " not in hs_l and "offline" not in hs_l)
         ):
             health_color = "#ff9800"
@@ -596,9 +639,11 @@ class HomePage(QWidget):
             "probes": probes,
             "alarm": {
                 "kind": self._alarm_web_kind(),
-                "title": self.alarm_status_label.text(),
+                "title": self.radiation_banner_title(),
                 "desc": self.alarm_desc_label.text(),
-                "sideRad": self.side_rad_stat.text() or self.alarm_status_label.text(),
+                "sideRad": self.radiation_side_rad(),
+                "sideTag": self.radiation_side_tag()[0],
+                "sideTagColor": self.radiation_side_tag()[1],
                 "latched": bool(self._reset_alarm_active),
                 "latchText": getattr(self, "_alarm_latch_text", None)
                 or self.alarm_latch_status.text()
@@ -607,6 +652,9 @@ class HomePage(QWidget):
                 "resetEnabled": bool(self._reset_enabled),
             },
             "passage": {
+                "kind": getattr(self, "_occupancy_kind", None) or (
+                    "passing" if self._passage_busy else "vacant"
+                ),
                 "busy": bool(self._passage_busy),
                 "text": self.occupancy_status_label.text(),
             },
@@ -849,10 +897,11 @@ class HomePage(QWidget):
         if color in ("#ff4444", "#EF4444"):
             self._alarm_kind = "channel_alarm"
         elif color is None:
-            if self._alarm_kind == "channel_alarm":
-                self._alarm_kind = "normal"
+            # 正常：必须清掉 offline/warn，否则会「系统正常 + 黄叹号」
+            self._alarm_kind = "normal"
         else:
-            self._alarm_kind = "warn"
+            if self._alarm_kind not in ("offline", "over_threshold", "soft_cleared", "fault", "acked"):
+                self._alarm_kind = "warn"
         self.schedule_web_flush()
 
     def apply_aux_card_style(self, card, bar, color=None):
@@ -860,7 +909,19 @@ class HomePage(QWidget):
 
     def apply_status_label_style(self, label, color, _bg=None, _border=None):
         if label is self.occupancy_status_label:
-            self._passage_busy = color in ("#2196f3", "#F59E0B")
+            c = str(color or "").lower()
+            if c in ("#ff4444", "#ef4444"):
+                self._occupancy_kind = "alarm"
+                self._passage_busy = True
+            elif c in ("#2196f3",):
+                self._occupancy_kind = "passing"
+                self._passage_busy = True
+            elif c in ("#ff9800", "#f59e0b"):
+                self._occupancy_kind = "offline"
+                self._passage_busy = False
+            else:
+                self._occupancy_kind = "vacant"
+                self._passage_busy = False
         self.schedule_web_flush()
 
     def set_header_alarm(self, active: bool):

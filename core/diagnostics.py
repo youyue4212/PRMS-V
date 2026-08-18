@@ -12,6 +12,7 @@ class FaultCode:
     # E1xx: Connection & Communication
     E101 = "E101"  # 探测器无数据 / 未连接
     E102 = "E102"  # 通信中断 / 超时
+    E103 = "E103"  # 探头数量不足（在线 < 期望）
 
     # M1xx: Master Controller
     M101 = "M101"  # 主控未连接 / 无数据
@@ -39,6 +40,7 @@ class FaultCode:
     MAP = {
         E101: ("探测器无数据", "配置的探测器未上报数据，请检查网络、IP设置或探测器供电", "ERROR", "探测器连接异常！请检查网线连接，或尝试断电重启设备。若仍异常，请联系维保人员。"),
         E102: ("通信中断", "探测器通信超时，已超过5秒未收到数据包", "ERROR", "辐射探头通讯异常 → 请断电重启设备，仍异常联系维保人员。"),
+        E103: ("探头数量不足", "在线探头数少于设置的期望路数", "ERROR", "探头数量不足，请检查未在线探头的供电与网线。"),
         E201: ("高压未建立", "探测器高压接近0V，可能高压模块未供电或已损坏", "ERROR", "探测器高压异常！设备已自动停止采集，请暂停通道通行，并立即报修。"),
         E202: ("高压偏离设定", "检测到高压与设定值偏差过大（仅在用户主动设置高压且稳谱关闭时检测）", "WARNING", "高压模块过压/欠压保护 → 设备自动停机，禁止通行，立即报修。"),
         E203: ("高压突然跌落", "高压在短时间内大幅度下降，可能存在过流保护或硬件故障", "ERROR", "探测器高压异常！设备已自动停止采集，请暂停通道通行，并立即报修。"),
@@ -411,13 +413,6 @@ class DiagnosticsManager:
         )
         if has_fresh_data:
             self.remove_fault("system", FaultCode.E101)
-
-        # 已配置期望数量且长期不足：系统级 E101（即使已有部分探头在线）
-        if (expected > 0
-                and self.acquisition_start_time
-                and (now - self.acquisition_start_time) > self.NO_DATA_STARTUP_SEC
-                and n_conn < expected):
-            self.add_fault("system", FaultCode.E101)
 
         return {cid: list(faults.keys()) for cid, faults in self.active_faults.items()}
 
