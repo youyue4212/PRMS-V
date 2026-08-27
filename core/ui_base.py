@@ -1316,13 +1316,8 @@ class UIBase():
         ctrl_layout.addWidget(self.expected_probe_spin, 1, 1)
         ctrl_layout.addWidget(self.adopt_probe_count_btn, 1, 2)
 
-        self.ir_installed_checkbox = QCheckBox(_t("set_ir_installed"))
-        self.ir_installed_checkbox.setToolTip(_t("tip_ir_installed"))
-        self.ir_installed_checkbox.setChecked(bool(getattr(self.config, "ir_installed", True)))
-        self.ir_installed_checkbox.stateChanged.connect(self.on_ir_installed_changed)
-        ctrl_layout.addWidget(self.ir_installed_checkbox, 2, 0, 1, 3)
-
         # UI mode: field tablet vs control-room PC (restart required)
+        # 「本通道接了红外」已迁到主控组「传感器模式」旁，避免与 0x19 配置语义打架
         self.ui_mode_label = QLabel(_t("set_ui_mode"))
         self.ui_mode_label.setToolTip(_t("tip_ui_mode"))
         self.ui_mode_combo = QComboBox()
@@ -1333,13 +1328,13 @@ class UIBase():
         self.ui_mode_combo.setCurrentIndex(idx if idx >= 0 else 0)
         self.ui_mode_combo.setToolTip(_t("tip_ui_mode"))
         self.ui_mode_combo.currentIndexChanged.connect(self.on_ui_mode_changed)
-        ctrl_layout.addWidget(self.ui_mode_label, 3, 0)
-        ctrl_layout.addWidget(self.ui_mode_combo, 3, 1, 1, 2)
+        ctrl_layout.addWidget(self.ui_mode_label, 2, 0)
+        ctrl_layout.addWidget(self.ui_mode_combo, 2, 1, 1, 2)
 
         # Home probe card location labels (count follows expected_probe_count)
         self.probe_locations_label = QLabel(_t("set_probe_locations"))
         self.probe_locations_label.setToolTip(_t("tip_probe_locations"))
-        ctrl_layout.addWidget(self.probe_locations_label, 4, 0, 1, 3)
+        ctrl_layout.addWidget(self.probe_locations_label, 3, 0, 1, 3)
         self.probe_location_wrap = QWidget()
         self.probe_location_grid = QGridLayout(self.probe_location_wrap)
         self.probe_location_grid.setContentsMargins(0, 0, 0, 0)
@@ -1348,7 +1343,7 @@ class UIBase():
         self.probe_location_slot_labels = []
         self.probe_location_cells = []
         self._rebuild_probe_location_edits()
-        ctrl_layout.addWidget(self.probe_location_wrap, 5, 0, 1, 3)
+        ctrl_layout.addWidget(self.probe_location_wrap, 4, 0, 1, 3)
 
         # One-click factory parameter reset (command 0x14 → probe TCP/serial)
         self.factory_reset_label = QLabel(_t("set_factory_reset"))
@@ -1358,9 +1353,9 @@ class UIBase():
         self.reset_defaults_all_btn = QPushButton(_t("btn_reset_all"))
         self.reset_defaults_all_btn.setToolTip(_t("tip_reset_defaults"))
         self.reset_defaults_all_btn.clicked.connect(lambda: self.reset_factory_defaults(all_probes=True))
-        ctrl_layout.addWidget(self.factory_reset_label, 6, 0)
-        ctrl_layout.addWidget(self.reset_defaults_current_btn, 6, 1)
-        ctrl_layout.addWidget(self.reset_defaults_all_btn, 6, 2)
+        ctrl_layout.addWidget(self.factory_reset_label, 5, 0)
+        ctrl_layout.addWidget(self.reset_defaults_current_btn, 5, 1)
+        ctrl_layout.addWidget(self.reset_defaults_all_btn, 5, 2)
 
         settings_layout.addWidget(self.ctrl_group)
 
@@ -1519,6 +1514,29 @@ class UIBase():
         self.master_relay_hint_label.setWordWrap(True)
         master_relay_layout.addWidget(self.master_relay_hint_label, 2, 0, 1, 6)
 
+        settings_layout.addWidget(self.master_relay_group)
+
+        # --- 通道门控 / 传感器（开通配置，与继电器危险操作分开）---
+        self.channel_gate_group = QGroupBox(_t("set_channel_gate"))
+        gate_layout = QGridLayout(self.channel_gate_group)
+
+        self.sensor_mode_label = QLabel(_t("set_sensor_mode"))
+        self.sensor_mode_combo = QComboBox()
+        self.sensor_mode_combo.addItem(_t("sensor_mode_ir"), 0)
+        self.sensor_mode_combo.addItem(_t("sensor_mode_radar"), 1)
+        self.sensor_mode_combo.addItem(_t("sensor_mode_unconfigured"), 2)
+        self.sensor_mode_combo.setToolTip(_t("tip_sensor_mode"))
+        self.sensor_mode_combo.currentIndexChanged.connect(self.on_sensor_mode_combo_changed)
+        self.sensor_mode_read_btn = QPushButton(_t("btn_read_sensor_mode"))
+        self.sensor_mode_read_btn.clicked.connect(self.read_master_sensor_mode)
+        self.sensor_mode_status_label = QLabel(_t("tip_sensor_mode"))
+        self.sensor_mode_status_label.setStyleSheet("color: #888888; font-size: 11px;")
+        self.sensor_mode_status_label.setWordWrap(True)
+        gate_layout.addWidget(self.sensor_mode_label, 0, 0)
+        gate_layout.addWidget(self.sensor_mode_combo, 0, 1, 1, 3)
+        gate_layout.addWidget(self.sensor_mode_read_btn, 0, 4)
+        gate_layout.addWidget(self.sensor_mode_status_label, 1, 0, 1, 5)
+
         self.alarm_clear_mode_label = QLabel(_t("set_alarm_clear_mode"))
         self.alarm_clear_mode_combo = QComboBox()
         self.alarm_clear_mode_combo.addItem(_t("latch_mode_auto"), 0)
@@ -1527,11 +1545,19 @@ class UIBase():
         self.alarm_clear_mode_combo.currentIndexChanged.connect(self.on_alarm_clear_mode_combo_changed)
         self.alarm_clear_mode_read_btn = QPushButton(_t("btn_read_clear_mode"))
         self.alarm_clear_mode_read_btn.clicked.connect(self.read_master_alarm_clear_mode)
-        master_relay_layout.addWidget(self.alarm_clear_mode_label, 3, 0)
-        master_relay_layout.addWidget(self.alarm_clear_mode_combo, 3, 1, 1, 3)
-        master_relay_layout.addWidget(self.alarm_clear_mode_read_btn, 3, 4)
+        gate_layout.addWidget(self.alarm_clear_mode_label, 2, 0)
+        gate_layout.addWidget(self.alarm_clear_mode_combo, 2, 1, 1, 3)
+        gate_layout.addWidget(self.alarm_clear_mode_read_btn, 2, 4)
 
-        settings_layout.addWidget(self.master_relay_group)
+        self.channel_gate_hint_label = QLabel(_t("tip_channel_gate"))
+        self.channel_gate_hint_label.setStyleSheet("color: #888888; font-size: 11px;")
+        self.channel_gate_hint_label.setWordWrap(True)
+        gate_layout.addWidget(self.channel_gate_hint_label, 3, 0, 1, 5)
+
+        # 旧「本通道接了红外」勾选已取消：对射明细跟主控传感器模式自动对齐
+        self.ir_installed_checkbox = None
+
+        settings_layout.addWidget(self.channel_gate_group)
 
 
         # --- Telemetry Logging Group ---
@@ -2274,12 +2300,16 @@ class UIBase():
         pending_clear_mode_age = time.time() - float(
             getattr(self, "_pending_alarm_clear_mode_at", 0) or 0
         )
+        pending_sensor_mode_age = time.time() - float(
+            getattr(self, "_pending_sensor_mode_at", 0) or 0
+        )
         from_master = bool(master_cid and src and src == master_cid)
         if not from_master and master_cid and not src:
             if (
                 0 <= pending_relay_age <= 3.0
                 or 0 <= pending_reset_age <= 5.0
                 or 0 <= pending_clear_mode_age <= 5.0
+                or 0 <= pending_sensor_mode_age <= 5.0
             ):
                 from_master = True
 
@@ -2290,6 +2320,9 @@ class UIBase():
         elif from_master and packet.control_code == 0x16:
             if hasattr(self, "on_alarm_clear_mode_feedback"):
                 self.on_alarm_clear_mode_feedback(packet)
+        elif from_master and packet.control_code == 0x19:
+            if hasattr(self, "on_sensor_mode_feedback"):
+                self.on_sensor_mode_feedback(packet)
         elif from_master and packet.control_code in (0x06, 0x11, 0x12) and hasattr(self, "master_relay_status_label"):
             if not packet.status:
                 from core.translation import _t
@@ -3002,9 +3035,10 @@ class UIBase():
         self.apply_expected_probe_count(int(value), source="spinbox")
 
     def on_ir_installed_changed(self, _state=None):
-        if not hasattr(self, "ir_installed_checkbox"):
+        cb = getattr(self, "ir_installed_checkbox", None)
+        if cb is None:
             return
-        checked = bool(self.ir_installed_checkbox.isChecked())
+        checked = bool(cb.isChecked())
         self.config.update_settings(ir_installed=checked)
         self.config.save_settings()
         pkt = getattr(self, "latest_master_summary", None)
@@ -4156,6 +4190,20 @@ class UIBase():
         dm = getattr(self, "diagnostics_manager", None)
         if dm is None or not hasattr(dm, "add_fault"):
             return
+        # 冷启动从未接设备：不算探头数量不足
+        never = False
+        try:
+            never = bool(self._master_never_seen())
+        except Exception:
+            never = False
+        n_clients = 0
+        try:
+            n_clients = int(self._tcp_client_count())
+        except Exception:
+            n_clients = 0
+        if never and n_clients == 0:
+            dm.remove_fault("system", FaultCode.E103)
+            return
         online, target = self.probe_online_and_target()
         if target > 0 and online < target:
             dm.add_fault("system", FaultCode.E103)
@@ -4546,6 +4594,7 @@ class UIBase():
             0x14: "恢复默认参数",
             0x15: "通道报警人工复位",
             0x16: "消警模式设置/读取",
+            0x19: "传感器模式设置/读取",
             0xF0: "错误命令"
         }
         return control_code_descriptions.get(control_code, f"未知命令 (0x{control_code:02X})")

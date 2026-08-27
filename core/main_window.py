@@ -366,6 +366,11 @@ class MainWindow(QMainWindow, UIBase):
         if hasattr(self.bottom_nav, "retranslate_ui"):
             self.bottom_nav.retranslate_ui()
         self._apply_control_room_nav_labels()
+        # 冷启动：无主控时占用区显示「未接入主控」，避免默认「通道空闲/主控离线」
+        try:
+            self._refresh_home_from_probes(getattr(self, "client_data", None) or {})
+        except Exception:
+            pass
         if self.control_room_mode and hasattr(self, "control_room_page"):
             self.control_room_page.set_login_visible(not self.is_logged_in())
             self.control_room_page.set_reorder_enabled(self.is_logged_in())
@@ -394,12 +399,36 @@ class MainWindow(QMainWindow, UIBase):
             self.log(f"TCP ready check: {tcp_ready}", 'DEBUG')
             
             if not tcp_ready:
-                # 尝试重新连接
-                self.log("TCP not ready, attempting to reconnect...", 'INFO')
-                if self.worker.connect_tcp(self.config.tcp_host, self.config.tcp_port, self.config.tcp_mode):
-                    self.log("TCP reconnection successful", 'INFO')
+                # 与设置页一致：始终服务端监听；失败退避，避免 10049 每秒 3 次刷屏
+                import time as _time
+                now = _time.time()
+                host = self.config.tcp_host
+                port = self.config.tcp_port
+                key = (str(host), int(port), "server")
+                backoff = float(getattr(self, "_tcp_reconnect_backoff_sec", 0) or 0)
+                last_at = float(getattr(self, "_tcp_reconnect_last_at", 0) or 0)
+                if backoff > 0 and (now - last_at) < backoff and getattr(self, "_tcp_reconnect_key", None) == key:
+                    self.log(
+                        f"TCP reconnect skipped (backoff {backoff:.0f}s after bind/connect failure)",
+                        'DEBUG',
+                    )
                 else:
-                    self.log("TCP reconnection failed", 'WARNING')
+                    self.log("TCP not ready, attempting to reconnect...", 'INFO')
+                    # UI 固定 server；勿用可能过期的 client 模式去 connect 0.0.0.0
+                    ok = self.worker.connect_tcp(host, port, "server")
+                    self._tcp_reconnect_key = key
+                    self._tcp_reconnect_last_at = now
+                    if ok:
+                        self._tcp_reconnect_backoff_sec = 0
+                        self.log("TCP reconnection successful", 'INFO')
+                    else:
+                        # 指数退避到 30s，改设置后 key 变会立即再试
+                        prev = backoff if backoff > 0 else 1.0
+                        self._tcp_reconnect_backoff_sec = min(30.0, prev * 2.0)
+                        self.log(
+                            f"TCP reconnection failed; next retry in {self._tcp_reconnect_backoff_sec:.0f}s",
+                            'WARNING',
+                        )
         
         is_connected = self.worker.try_connection()
         self.status_bar.update_connection_status(is_connected)
@@ -655,7 +684,12 @@ class MainWindow(QMainWindow, UIBase):
         except Exception:
             pass
         link_only = bool(getattr(self, "master_client_id", None))
-        self.home_page.set_master_link_status(False, lang=lang, link_only=link_only)
+        self.home_page.set_master_link_status(
+            False,
+            lang=lang,
+            link_only=link_only,
+            never_seen=self._master_never_seen(),
+        )
         self.home_page.master_relay_label.setText("--")
         self._update_home_alarm_from_master(None, lang=lang, master_offline=True)
         self._update_home_occupancy(None, lang=lang, master_offline=True)
@@ -836,9 +870,9 @@ class MainWindow(QMainWindow, UIBase):
             try:
                 level = page._link_level()
             except Exception:
-                if "离线" in text or "Offline" in text:
+                if "离线" in text or "Offline" in text or "未接入" in text or "No Master" in text:
                     level = "offline"
-                elif "无L2" in text or "Linked" in text:
+                elif "等待数据" in text or "awaiting" in text.lower() or "无L2" in text or "Linked" in text:
                     level = "warn"
             cr.set_master_link(text, level)
             # channel alarm
@@ -1062,6 +1096,15 @@ class MainWindow(QMainWindow, UIBase):
 
         self._prev_master_fault_codes = current
 
+    def _tcp_client_count(self) -> int:
+        w = getattr(self, "worker", None)
+        if w is None:
+            return 0
+        try:
+            return len(getattr(w, "client_sockets", None) or {})
+        except Exception:
+            return 0
+
     def _update_master_diagnostics(self):
         """Inject master-related faults into the shared diagnostics table."""
         dm = getattr(self, "diagnostics_manager", None)
@@ -1074,9 +1117,11 @@ class MainWindow(QMainWindow, UIBase):
         latest = getattr(self, "latest_master_summary", None)
         never_seen = last_any <= 0
         link_timeout = (not never_seen) and ((now - last_any) > dm.COMM_TIMEOUT_SEC)
+        # 仅监听、零客户端：不算 M101（避免开软件即「主控无数据」）
+        expect_master = self._tcp_client_count() > 0 or bool(getattr(self, "master_client_id", None))
 
         # M101/M102 互斥：从未收到过 → 只 M101；曾经有过再超时 → 只 M102
-        if never_seen and startup_age > dm.NO_DATA_STARTUP_SEC:
+        if never_seen and expect_master and startup_age > dm.NO_DATA_STARTUP_SEC:
             dm.add_fault(_MASTER_FAULT_CLIENT_ID, FaultCode.M101)
         else:
             dm.remove_fault(_MASTER_FAULT_CLIENT_ID, FaultCode.M101)
@@ -1109,12 +1154,36 @@ class MainWindow(QMainWindow, UIBase):
         page = self.home_page
         pkt = getattr(self, "latest_master_summary", None)
         master_online = bool(pkt is not None and self.is_master_online())
+        never_seen = self._master_never_seen()
+        n_clients = self._tcp_client_count()
+        cold_standby = bool(never_seen and n_clients == 0 and not master_online)
         master_faults = self._master_fault_entries()
         probe_online, target = self.probe_online_and_target()
-        ir_installed = bool(getattr(self.config, "ir_installed", True))
         ir_degraded_raw = bool(pkt is not None and getattr(pkt, "ir_degraded", False))
-        if not ir_installed:
-            ir_status, ir_tone = _t("health_ir_not_installed"), "muted"
+        sensor_unconfigured = False
+        if pkt is not None and master_online:
+            # 主控在线：传感器状态跟 L2 bit3/bit4/bit0
+            from core.master_summary import (
+                format_sensor_mode_brief,
+                MASTER_SENSOR_MODE_UNCONFIGURED,
+            )
+            code = int(pkt.sensor_mode_code())
+            self._master_sensor_mode = code
+            ir_status = format_sensor_mode_brief(pkt, lang=lang)
+            sensor_unconfigured = code == MASTER_SENSOR_MODE_UNCONFIGURED
+            if sensor_unconfigured or ir_degraded_raw or not bool(pkt.occ_gate_enabled):
+                ir_tone = "amber"
+            else:
+                ir_tone = "green"
+            ir_degraded = bool(ir_degraded_raw or sensor_unconfigured)
+            self._sync_sensor_mode_ui(code)
+            self._update_sensor_mode_status_label(pkt, lang=lang)
+        elif never_seen:
+            # 从未接入：健康卡与中间门口一致，勿写「离线」
+            ir_status, ir_tone = _t("health_not_linked"), "muted"
+            ir_degraded = False
+        elif not master_online:
+            ir_status, ir_tone = _t("master_offline"), "amber"
             ir_degraded = False
         elif ir_degraded_raw:
             ir_status, ir_tone = _t("health_ir_degraded"), "amber"
@@ -1128,26 +1197,50 @@ class MainWindow(QMainWindow, UIBase):
         active_faults = getattr(self.diagnostics_manager, "get_all_active_faults", lambda: [])()
         unique_msgs = []
         probe_comm_fault = bool(target > 0 and probe_online < target)
+        # 冷启动零探头：不算探头通信故障
+        if never_seen and probe_online == 0:
+            probe_comm_fault = False
         probe_hw_msgs = []
         _probe_comm_codes = (FaultCode.E101, FaultCode.E102, FaultCode.E103)
         for client_id, code, _, _, _, _ in active_faults:
+            if cold_standby and (
+                client_id == _MASTER_FAULT_CLIENT_ID
+                or (client_id == "system" and code in _probe_comm_codes)
+            ):
+                continue
             msg = self.format_fault_home_message(client_id, code)
             if msg and msg not in unique_msgs:
                 unique_msgs.append(msg)
             if client_id == _MASTER_FAULT_CLIENT_ID:
                 continue
             if code in _probe_comm_codes:
-                probe_comm_fault = True
+                if not (never_seen and probe_online == 0):
+                    probe_comm_fault = True
             elif msg and msg not in probe_hw_msgs:
                 probe_hw_msgs.append(msg)
 
         # --- structured health KV rows for Web HMI ---
-        probe_tone = "green" if (not probe_comm_fault and probe_online >= target and target > 0) else "amber"
-        probe_comm = _t("health_probe_online", online=probe_online, expected=target)
+        if never_seen and probe_online == 0:
+            probe_tone = "muted"
+            probe_comm = _t("health_probe_await", online=probe_online, expected=target)
+        else:
+            probe_tone = "green" if (not probe_comm_fault and probe_online >= target and target > 0) else "amber"
+            probe_comm = _t("health_probe_online", online=probe_online, expected=target)
 
-        offline_mf = FaultCode.M101 in master_faults or FaultCode.M102 in master_faults
-        if master_faults:
+        # 从未接入主控：健康总状态用「待接入」，不要「主控离线 / 探头通信故障」
+        if never_seen and not master_online:
+            page.health_indicator.load(get_icon_svg('occupancy_inactive'))
+            page.health_status_label.setText(_t("status_health_await"))
+            self._set_home_status_style(
+                page.health_status_label, "#9e9e9e",
+                "rgba(158, 158, 158, 0.12)", "rgba(158, 158, 158, 0.35)"
+            )
+            page.health_desc_label.setText(_t("desc_health_await"))
+            master_hw, master_tone = _t("health_not_linked"), "muted"
+            self._set_home_aux_card_border(page.health_card, page.health_indicator_bar, None)
+        elif master_faults:
             page.health_indicator.load(get_icon_svg('alarm_inactive'))
+            offline_mf = FaultCode.M101 in master_faults or FaultCode.M102 in master_faults
             page.health_status_label.setText(
                 _t("status_health_offline") if offline_mf else _t("status_health_fault")
             )
@@ -1201,13 +1294,17 @@ class MainWindow(QMainWindow, UIBase):
             self._set_home_aux_card_border(page.health_card, page.health_indicator_bar, "#ff9800")
         elif ir_degraded:
             page.health_indicator.load(get_icon_svg('occupancy_active'))
-            page.health_status_label.setText(_t("status_health_degraded"))
+            if sensor_unconfigured:
+                page.health_status_label.setText(_t("status_health_sensor_cfg"))
+                page.health_desc_label.setText(_t("desc_health_sensor_unconfigured"))
+            else:
+                page.health_status_label.setText(_t("status_health_degraded"))
+                page.health_desc_label.setText(
+                    _t("desc_health_master_degraded", online=probe_online, expected=target)
+                )
             self._set_home_status_style(
                 page.health_status_label, "#ffb74d",
                 "rgba(255, 183, 77, 0.12)", "rgba(255, 183, 77, 0.35)"
-            )
-            page.health_desc_label.setText(
-                _t("desc_health_master_degraded", online=probe_online, expected=target)
             )
             master_hw, master_tone = _t("health_master_ok"), "green"
             self._set_home_aux_card_border(page.health_card, page.health_indicator_bar, "#ffb74d")
@@ -1274,7 +1371,12 @@ class MainWindow(QMainWindow, UIBase):
         lang = TranslationManager().current_lang
         page = self.home_page
         link_only = bool(getattr(self, "master_client_id", None)) and not self.is_master_online()
-        page.set_master_link_status(False, lang=lang, link_only=link_only)
+        page.set_master_link_status(
+            False,
+            lang=lang,
+            link_only=link_only,
+            never_seen=self._master_never_seen(),
+        )
         page.master_relay_label.setText("--")
         self._apply_home_probe_cps(client_data)
         self._update_home_alarm_from_master(None, lang=lang, master_offline=True)
@@ -1332,6 +1434,7 @@ class MainWindow(QMainWindow, UIBase):
             getattr(display_pkt, "master_id", None) if display_pkt else None,
             lang=lang,
             link_only=link_only or (bool(master_cid) and display_pkt is None),
+            never_seen=(not online) and self._master_never_seen(),
         )
 
         # 计数率始终跟探头
@@ -2040,6 +2143,141 @@ class MainWindow(QMainWindow, UIBase):
             "INFO",
         )
 
+    def _sync_sensor_mode_ui(self, mode_code: int):
+        """Keep settings combo aligned with L2 推断 / 0x19 应答。"""
+        combo = getattr(self, "sensor_mode_combo", None)
+        if combo is None:
+            return
+        try:
+            want = int(mode_code)
+        except (TypeError, ValueError):
+            want = 2
+        if want not in (0, 1, 2):
+            want = 2
+        if combo.currentData() is not None and int(combo.currentData()) == want:
+            return
+        combo.blockSignals(True)
+        idx = combo.findData(want)
+        if idx >= 0:
+            combo.setCurrentIndex(idx)
+        combo.blockSignals(False)
+
+    def _update_sensor_mode_status_label(self, packet=None, lang="zh"):
+        from core.translation import _t
+        from core.master_summary import format_sensor_mode_brief
+
+        label = getattr(self, "sensor_mode_status_label", None)
+        if label is None:
+            return
+        if packet is None:
+            label.setText(_t("tip_sensor_mode"))
+            label.setStyleSheet("color: #888888; font-size: 11px;")
+            return
+        text = format_sensor_mode_brief(packet, lang=lang)
+        uncfg = int(packet.sensor_mode_code()) == 2
+        warn = uncfg or bool(packet.ir_degraded) or (not packet.occ_gate_enabled)
+        label.setText(text)
+        label.setStyleSheet(
+            "color: %s; font-size: 11px;" % ("#ffb74d" if warn else "#4caf50")
+        )
+
+    def on_sensor_mode_combo_changed(self, _index=None):
+        """Settings: switch master sensor mode via 0x19."""
+        combo = getattr(self, "sensor_mode_combo", None)
+        if combo is None:
+            return
+        mode = int(combo.currentData())
+        if not self.check_permission_before_action(
+            "Set sensor mode", Permission.MODIFY_DETECTOR_SETTINGS
+        ):
+            self._sync_sensor_mode_ui(int(getattr(self, "_master_sensor_mode", 2) or 2))
+            return
+        self.set_master_sensor_mode(mode)
+
+    def set_master_sensor_mode(self, mode: int):
+        """PC → 主控 0x19 设置传感器模式（0=对射，1=雷达，2=未配置）。"""
+        from core.translation import _t
+
+        try:
+            mode = int(mode)
+        except (TypeError, ValueError):
+            mode = 2
+        if mode not in (0, 1, 2):
+            mode = 2
+        if not getattr(self, "is_tcp_mode", False):
+            show_warn(self, _t("msg_sensor_mode_title"), _t("msg_sensor_mode_need_master"))
+            return False
+        master_cid = getattr(self, "master_client_id", None)
+        if not master_cid or not hasattr(self, "worker") or self.worker is None:
+            show_warn(self, _t("msg_sensor_mode_title"), _t("msg_sensor_mode_need_master"))
+            return False
+        if not hasattr(self.worker, "send_command_to_client"):
+            return False
+        names = {0: "IR", 1: "RADAR", 2: "UNCONFIGURED"}
+        ok = self.worker.send_command_to_client(
+            master_cid,
+            "channel_sensor_mode",
+            mode,
+            description="Set sensor mode %s (0x19)" % names.get(mode, str(mode)),
+        )
+        if ok:
+            self._pending_sensor_mode_at = time.time()
+            self.log("Sensor mode 0x19 set → %s" % names.get(mode, str(mode)), "INFO")
+        return bool(ok)
+
+    def read_master_sensor_mode(self):
+        """PC → 主控 0x19 FF 读传感器模式。"""
+        master_cid = getattr(self, "master_client_id", None)
+        if not master_cid or not hasattr(self, "worker") or self.worker is None:
+            return False
+        if not hasattr(self.worker, "send_command_to_client"):
+            return False
+        ok = bool(
+            self.worker.send_command_to_client(
+                master_cid,
+                "channel_sensor_mode",
+                0xFF,
+                description="Read sensor mode (0x19)",
+            )
+        )
+        if ok:
+            self._pending_sensor_mode_at = time.time()
+        return ok
+
+    def on_sensor_mode_feedback(self, packet):
+        """主控 CmdFeedback control_code=0x19。"""
+        from core.translation import _t
+
+        self._pending_sensor_mode_at = 0.0
+        if int(getattr(packet, "status", 0) or 0) != 1:
+            self.log("Sensor mode 0x19 rejected", "WARNING")
+            show_warn(self, _t("msg_sensor_mode_title"), _t("msg_sensor_mode_fail"))
+            return
+        mode = int(getattr(packet, "value", 0) or 0) & 0xFF
+        if mode not in (0, 1, 2):
+            mode = 2
+        self._master_sensor_mode = mode
+        self._sync_sensor_mode_ui(mode)
+        names = {0: "IR", 1: "RADAR", 2: "UNCONFIGURED"}
+        label = getattr(self, "sensor_mode_status_label", None)
+        if label is not None:
+            mode_key = {
+                0: "sensor_mode_ir",
+                1: "sensor_mode_radar",
+                2: "sensor_mode_unconfigured",
+            }.get(mode, "sensor_mode_unconfigured")
+            label.setText(_t("sensor_mode_ack", mode=_t(mode_key)))
+            label.setStyleSheet(
+                "color: %s; font-size: 11px;" % ("#ffb74d" if mode == 2 else "#4caf50")
+            )
+        self.log(
+            "Sensor mode ack → %s (value=%d)" % (names.get(mode, str(mode)), mode),
+            "INFO",
+        )
+        # L2 下一帧会刷新 bit3/bit4；先用应答刷新健康行
+        if hasattr(self, "_update_home_health_and_faults"):
+            self._update_home_health_and_faults()
+
     def request_channel_alarm_reset(self):
         """用户点「通道报警复位」→ 登录审计 → 管理员校验 → 二次确认 → 主控 0x15。"""
         from core.translation import _t
@@ -2238,13 +2476,38 @@ class MainWindow(QMainWindow, UIBase):
         self._awaiting_l2_acked_at = 0.0
         self._pending_channel_reset_at = 0.0
 
+    def _master_never_seen(self) -> bool:
+        """本次运行从未收到过主控 L2，且当前也没有主控 TCP 客户端。"""
+        if float(getattr(self, "_last_any_master_at", 0) or 0) > 0:
+            return False
+        if getattr(self, "latest_master_summary", None) is not None:
+            return False
+        if getattr(self, "master_client_id", None):
+            return False
+        return True
+
     def _ir_installed(self) -> bool:
+        """是否展示对射挡光明细 / 把 0x04 当「经过」：跟主控传感器模式自动对齐。
+
+        对射(0)=是；雷达(1)/未配置(2)=否。主控离线时用最近一次模式或配置兜底。
+        """
+        pkt = getattr(self, "latest_master_summary", None)
+        try:
+            online = bool(pkt is not None and self.is_master_online())
+        except Exception:
+            online = False
+        if online:
+            return int(pkt.sensor_mode_code()) == 0
+        mode = getattr(self, "_master_sensor_mode", None)
+        if mode is not None:
+            try:
+                return int(mode) == 0
+            except (TypeError, ValueError):
+                pass
         return bool(getattr(self.config, "ir_installed", True))
 
     def _ir_degraded_ui(self, packet) -> bool:
-        """Only show IR-degraded when the site actually wired IR."""
-        if not self._ir_installed():
-            return False
+        """门控降级跟 L2 bit0；不依赖本机勾选。"""
         return bool(packet is not None and getattr(packet, "ir_degraded", False))
 
     def _io_brief(self, packet, lang="zh") -> str:
@@ -2252,12 +2515,24 @@ class MainWindow(QMainWindow, UIBase):
         return format_io_brief(packet, lang=lang, ir_installed=self._ir_installed())
 
     def _occupancy_kind_from_packet(self, packet, master_offline=False) -> str:
-        """vacant | passing | alarm | offline — 未接红外时不把 0x04 当成人员经过。"""
+        """vacant | passing | alarm | offline | ungated
+
+        ungated：传感器未配置或门控未生效时，不要显示绿色「通道空闲」
+        （没接传感器时出厂常见 bit4=0，decision=0x00 会被误读成空闲）。
+        """
         if master_offline or packet is None:
             return "offline"
         if bool(getattr(packet, "is_channel_alarm", lambda: False)()):
             return "alarm"
-        if int(getattr(packet, "decision_result", 0) or 0) == 0x04 and self._ir_installed():
+        try:
+            code = int(packet.sensor_mode_code())
+        except Exception:
+            code = 2
+        gate_ok = bool(getattr(packet, "occ_gate_enabled", False))
+        degraded = bool(getattr(packet, "ir_degraded", False))
+        if code == 2 or (not gate_ok) or degraded:
+            return "ungated"
+        if int(getattr(packet, "decision_result", 0) or 0) == 0x04 and code == 0:
             return "passing"
         return "vacant"
 
@@ -2269,21 +2544,34 @@ class MainWindow(QMainWindow, UIBase):
         page._passage_busy = page._occupancy_kind in ("passing", "alarm")
 
     def _update_home_occupancy_probe(self, busy, lang="zh"):
-        """Master offline: do not invent occupancy from probes."""
+        """无有效主控 L2：区分「从未接入」与「曾经在线后掉线」。"""
         from core.translation import _t
         page = self.home_page
         page.occupancy_title_icon.load(get_icon_svg('occupancy_inactive'))
         page.occupancy_indicator.load(get_icon_svg('occupancy_inactive'))
-        page.occupancy_status_label.setText(_t("master_offline"))
+        never = self._master_never_seen()
+        link_only = bool(getattr(self, "master_client_id", None)) and not self.is_master_online()
+        if never:
+            # 只开软件、什么设备都没接：不要写成「通道占用/主控离线」故障感
+            page.occupancy_status_label.setText(_t("status_occ_no_master"))
+            page.occupancy_desc_label.setText(_t("desc_occ_no_master"))
+            kind = "noconn"
+        elif link_only:
+            page.occupancy_status_label.setText(_t("status_occ_wait_l2"))
+            page.occupancy_desc_label.setText(_t("desc_occ_wait_l2"))
+            kind = "offline"
+        else:
+            page.occupancy_status_label.setText(_t("status_occ_master_offline"))
+            page.occupancy_desc_label.setText(_t("desc_master_offline"))
+            kind = "offline"
         self._set_home_status_style(
             page.occupancy_status_label, "#ff9800",
             "rgba(255, 152, 0, 0.12)", "rgba(255, 152, 0, 0.35)"
         )
-        page.occupancy_desc_label.setText(_t("desc_master_offline"))
         page.occupancy_indicator_bar.setStyleSheet(
             "QFrame { background-color: #ff9800; border-radius: 1px; }"
         )
-        self._set_home_occupancy_kind("offline")
+        self._set_home_occupancy_kind(kind)
 
     def _update_home_occupancy(self, packet, lang="zh", master_offline=False):
         from core.translation import _t
@@ -2317,6 +2605,27 @@ class MainWindow(QMainWindow, UIBase):
             page.occupancy_desc_label.setText(brief)
             page.occupancy_indicator_bar.setStyleSheet(
                 "QFrame { background-color: #2196f3; border-radius: 1px; }"
+            )
+        elif kind == "ungated":
+            # 没接/未配置传感器：黄提示，禁止绿色「通道空闲」
+            page.occupancy_title_icon.load(get_icon_svg('occupancy_inactive'))
+            page.occupancy_indicator.load(get_icon_svg('occupancy_inactive'))
+            try:
+                code = int(packet.sensor_mode_code())
+            except Exception:
+                code = 2
+            if code == 2 or not bool(getattr(packet, "occ_gate_enabled", False)):
+                page.occupancy_status_label.setText(_t("status_occ_ungated"))
+                page.occupancy_desc_label.setText(_t("desc_occ_ungated"))
+            else:
+                page.occupancy_status_label.setText(_t("status_occ_gate_inactive"))
+                page.occupancy_desc_label.setText(brief or _t("desc_occ_gate_inactive"))
+            self._set_home_status_style(
+                page.occupancy_status_label, "#ffb74d",
+                "rgba(255, 183, 77, 0.12)", "rgba(255, 183, 77, 0.35)"
+            )
+            page.occupancy_indicator_bar.setStyleSheet(
+                "QFrame { background-color: #ffb74d; border-radius: 1px; }"
             )
         else:
             page.occupancy_title_icon.load(get_icon_svg('occupancy_inactive'))
@@ -2366,7 +2675,25 @@ class MainWindow(QMainWindow, UIBase):
         is_alarm_active = master_hard_alarm if master_online else False
 
         # Get all active faults from diagnostics manager
-        active_faults = self.diagnostics_manager.get_all_active_faults()
+        active_faults = list(self.diagnostics_manager.get_all_active_faults())
+        # 冷启动未接设备：不把 E101/E103/M101 当「系统异常」刷概览
+        try:
+            cold = (
+                self._master_never_seen()
+                and self._tcp_client_count() == 0
+                and not master_online
+            )
+        except Exception:
+            cold = False
+        if cold:
+            _probe_comm = {FaultCode.E101, FaultCode.E102, FaultCode.E103}
+            active_faults = [
+                row for row in active_faults
+                if not (
+                    row[0] == _MASTER_FAULT_CLIENT_ID
+                    or (row[0] == "system" and row[1] in _probe_comm)
+                )
+            ]
         current_fault_keys = set((client_id, code) for client_id, code, _, _, _, _ in active_faults)
         
         # Log newly added faults
@@ -2501,7 +2828,12 @@ class MainWindow(QMainWindow, UIBase):
             if self.is_master_online():
                 packet = getattr(self, "latest_master_summary", None)
         if master_offline or packet is None:
-            self.occupancy_status_label.setText(_t("master_offline"))
+            if self._master_never_seen():
+                self.occupancy_status_label.setText(_t("status_occ_no_master"))
+            elif bool(getattr(self, "master_client_id", None)) and not self.is_master_online():
+                self.occupancy_status_label.setText(_t("status_occ_wait_l2"))
+            else:
+                self.occupancy_status_label.setText(_t("status_occ_master_offline"))
             self.occupancy_status_label.setStyleSheet(
                 "background-color: #ffe0b2; color: #000000;"
             )
@@ -2516,6 +2848,18 @@ class MainWindow(QMainWindow, UIBase):
             self.occupancy_status_label.setText(_t("status_passing"))
             self.occupancy_status_label.setStyleSheet(
                 "background-color: #bbdefb; color: #000000;"
+            )
+        elif kind == "ungated":
+            try:
+                code = int(packet.sensor_mode_code())
+            except Exception:
+                code = 2
+            if code == 2 or not bool(getattr(packet, "occ_gate_enabled", False)):
+                self.occupancy_status_label.setText(_t("status_occ_ungated"))
+            else:
+                self.occupancy_status_label.setText(_t("status_occ_gate_inactive"))
+            self.occupancy_status_label.setStyleSheet(
+                "background-color: #ffe0b2; color: #000000;"
             )
         else:
             self.occupancy_status_label.setText(_t("status_vacant"))
@@ -2538,9 +2882,17 @@ class MainWindow(QMainWindow, UIBase):
             self.stop_occupancy_flashing()
             self.overview_page.occupancy_title_icon.load(get_icon_svg('occupancy_inactive'))
             self.overview_page.occupancy_indicator.load(get_icon_svg('occupancy_inactive'))
-            self.overview_page.occupancy_status_label.setText(_t("master_offline"))
+            link_only = bool(getattr(self, "master_client_id", None)) and not self.is_master_online()
+            if self._master_never_seen():
+                self.overview_page.occupancy_status_label.setText(_t("status_occ_no_master"))
+                self.overview_page.occupancy_desc_label.setText(_t("desc_occ_no_master"))
+            elif link_only:
+                self.overview_page.occupancy_status_label.setText(_t("status_occ_wait_l2"))
+                self.overview_page.occupancy_desc_label.setText(_t("desc_occ_wait_l2"))
+            else:
+                self.overview_page.occupancy_status_label.setText(_t("status_occ_master_offline"))
+                self.overview_page.occupancy_desc_label.setText(_t("desc_master_offline"))
             self._set_overview_status_text(self.overview_page.occupancy_status_label, "#ff9800")
-            self.overview_page.occupancy_desc_label.setText(_t("desc_master_offline"))
             self.overview_page.occupancy_desc_label.setStyleSheet("""
                 QLabel { color: #888888; font-size: 11px; background: transparent; border: none; }
             """)
@@ -2591,6 +2943,34 @@ class MainWindow(QMainWindow, UIBase):
             """)
             self._set_overview_accent_bar(self.overview_page.occupancy_indicator_bar, "#2196F3")
             self._set_overview_card_shell(self.overview_page.occupancy_card, "#2196F3")
+        elif kind == "ungated":
+            self.stop_occupancy_flashing()
+            self.overview_page.occupancy_title_icon.load(get_icon_svg('occupancy_inactive'))
+            self.overview_page.occupancy_indicator.load(get_icon_svg('occupancy_inactive'))
+            try:
+                code = int(packet.sensor_mode_code())
+            except Exception:
+                code = 2
+            if code == 2 or not bool(getattr(packet, "occ_gate_enabled", False)):
+                self.overview_page.occupancy_status_label.setText(_t("status_occ_ungated"))
+                desc = _t("desc_occ_ungated")
+            else:
+                self.overview_page.occupancy_status_label.setText(_t("status_occ_gate_inactive"))
+                desc = brief or _t("desc_occ_gate_inactive")
+            self._set_overview_status_text(self.overview_page.occupancy_status_label, "#ffb74d")
+            self.overview_page.occupancy_desc_label.setText(desc)
+            self.overview_page.occupancy_desc_label.setStyleSheet("""
+                QLabel {
+                    color: #ffb74d;
+                    font-size: 11px;
+                    font-weight: bold;
+                    margin-top: 0px;
+                    background: transparent;
+                    border: none;
+                }
+            """)
+            self._set_overview_accent_bar(self.overview_page.occupancy_indicator_bar, "#ffb74d")
+            self._set_overview_card_shell(self.overview_page.occupancy_card, "#ffb74d")
         else:
             self.stop_occupancy_flashing()
             self.overview_page.occupancy_title_icon.load(get_icon_svg('occupancy_inactive'))
@@ -2914,6 +3294,10 @@ class MainWindow(QMainWindow, UIBase):
             self.alarm_clear_mode_combo.setEnabled(can_modify_settings)
         if getattr(self, 'alarm_clear_mode_read_btn', None) is not None:
             self.alarm_clear_mode_read_btn.setEnabled(can_modify_settings)
+        if getattr(self, 'sensor_mode_combo', None) is not None:
+            self.sensor_mode_combo.setEnabled(can_modify_settings)
+        if getattr(self, 'sensor_mode_read_btn', None) is not None:
+            self.sensor_mode_read_btn.setEnabled(can_modify_settings)
 
         if hasattr(self, 'alarm_read_btn'):
             self.alarm_read_btn.setEnabled(can_modify_settings)
@@ -2922,7 +3306,7 @@ class MainWindow(QMainWindow, UIBase):
             self.expected_probe_spin.setEnabled(can_modify_settings)
         if hasattr(self, 'adopt_probe_count_btn'):
             self.adopt_probe_count_btn.setEnabled(can_modify_settings)
-        if hasattr(self, 'ir_installed_checkbox'):
+        if getattr(self, 'ir_installed_checkbox', None) is not None:
             self.ir_installed_checkbox.setEnabled(can_modify_settings)
         if hasattr(self, 'probe_location_edits'):
             for edit in self.probe_location_edits:
@@ -3186,6 +3570,8 @@ class MainWindow(QMainWindow, UIBase):
             self.tcp_host_input.blockSignals(False)
             return
         
+        self._tcp_reconnect_backoff_sec = 0
+        self._tcp_reconnect_key = None
         # 调用父类方法
         super().on_tcp_host_changed(host)
     
@@ -3198,6 +3584,8 @@ class MainWindow(QMainWindow, UIBase):
             self.tcp_port_spin.blockSignals(False)
             return
         
+        self._tcp_reconnect_backoff_sec = 0
+        self._tcp_reconnect_key = None
         # 调用父类方法
         super().on_tcp_port_changed(port)
     
@@ -3812,7 +4200,7 @@ class MainWindow(QMainWindow, UIBase):
             if hasattr(self, 'adopt_probe_count_btn'):
                 self.adopt_probe_count_btn.setText(_t("btn_adopt_probe_count"))
                 self.adopt_probe_count_btn.setToolTip(_t("tip_adopt_probe_count"))
-            if hasattr(self, 'ir_installed_checkbox'):
+            if getattr(self, 'ir_installed_checkbox', None) is not None:
                 self.ir_installed_checkbox.setText(_t("set_ir_installed"))
                 self.ir_installed_checkbox.setToolTip(_t("tip_ir_installed"))
             if hasattr(self, "ui_mode_label"):
@@ -3909,6 +4297,20 @@ class MainWindow(QMainWindow, UIBase):
             if getattr(self, 'master_force_gate_btn', None) is not None:
                 self.master_force_gate_btn.setText(_t("btn_force_open_gate"))
                 self.master_force_gate_btn.setToolTip(_t("tip_force_open_gate"))
+            states = getattr(self, 'master_relay_states', None)
+            if states is not None and len(states) >= 3:
+                r0, r1, r2 = states[0], states[1], states[2]
+                mask = (int(r0) & 1) | ((int(r1) & 1) << 1) | ((int(r2) & 1) << 2)
+                self.master_relay_status_label.setText(
+                    _t("master_relay_status_format", r0=int(r0), r1=int(r1), r2=int(r2), mask=mask)
+                )
+            else:
+                self.master_relay_status_label.setText(_t("set_master_relay_status"))
+
+        if hasattr(self, 'channel_gate_group'):
+            self.channel_gate_group.setTitle(_t("set_channel_gate"))
+            if getattr(self, 'channel_gate_hint_label', None) is not None:
+                self.channel_gate_hint_label.setText(_t("tip_channel_gate"))
             if getattr(self, 'alarm_clear_mode_label', None) is not None:
                 self.alarm_clear_mode_label.setText(_t("set_alarm_clear_mode"))
             if getattr(self, 'alarm_clear_mode_combo', None) is not None:
@@ -3925,15 +4327,32 @@ class MainWindow(QMainWindow, UIBase):
                 combo.blockSignals(False)
             if getattr(self, 'alarm_clear_mode_read_btn', None) is not None:
                 self.alarm_clear_mode_read_btn.setText(_t("btn_read_clear_mode"))
-            states = getattr(self, 'master_relay_states', None)
-            if states is not None and len(states) >= 3:
-                r0, r1, r2 = states[0], states[1], states[2]
-                mask = (int(r0) & 1) | ((int(r1) & 1) << 1) | ((int(r2) & 1) << 2)
-                self.master_relay_status_label.setText(
-                    _t("master_relay_status_format", r0=int(r0), r1=int(r1), r2=int(r2), mask=mask)
-                )
-            else:
-                self.master_relay_status_label.setText(_t("set_master_relay_status"))
+            if getattr(self, 'sensor_mode_label', None) is not None:
+                self.sensor_mode_label.setText(_t("set_sensor_mode"))
+            if getattr(self, 'sensor_mode_combo', None) is not None:
+                combo = self.sensor_mode_combo
+                cur = combo.currentData()
+                combo.blockSignals(True)
+                combo.clear()
+                combo.addItem(_t("sensor_mode_ir"), 0)
+                combo.addItem(_t("sensor_mode_radar"), 1)
+                combo.addItem(_t("sensor_mode_unconfigured"), 2)
+                idx = combo.findData(cur if cur is not None else 2)
+                if idx >= 0:
+                    combo.setCurrentIndex(idx)
+                combo.setToolTip(_t("tip_sensor_mode"))
+                combo.blockSignals(False)
+            if getattr(self, 'sensor_mode_read_btn', None) is not None:
+                self.sensor_mode_read_btn.setText(_t("btn_read_sensor_mode"))
+            if getattr(self, 'sensor_mode_status_label', None) is not None:
+                pkt = getattr(self, "latest_master_summary", None)
+                if pkt is not None and self.is_master_online():
+                    self._update_sensor_mode_status_label(pkt, lang=lang)
+                else:
+                    self.sensor_mode_status_label.setText(_t("tip_sensor_mode"))
+                    self.sensor_mode_status_label.setStyleSheet(
+                        "color: #888888; font-size: 11px;"
+                    )
             
         if hasattr(self, 'log_group'):
             self.log_group.setTitle(_t("set_raw_logging"))

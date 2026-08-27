@@ -705,15 +705,26 @@ class ClientsPage(QWidget):
             faults = sorted((dm.active_faults.get("master", {}) or {}).keys())
         if not (master_cid or pkt is not None or faults or getattr(self.parent, "_last_master_ip", "")):
             return None
-        from core.master_summary import format_io_brief
+        from core.master_summary import format_io_brief, format_sensor_mode_brief
         from core.translation import TranslationManager
         try:
             lang = TranslationManager().get_language()
         except Exception:
             lang = "zh"
-        ir_installed = bool(getattr(getattr(self.parent, "config", None), "ir_installed", True))
+        ir_installed = True
+        _ir = getattr(self.parent, "_ir_installed", None)
+        if callable(_ir):
+            try:
+                ir_installed = bool(_ir())
+            except Exception:
+                ir_installed = True
+        else:
+            ir_installed = bool(getattr(getattr(self.parent, "config", None), "ir_installed", True))
         io_text = (
             format_io_brief(pkt, lang, ir_installed=ir_installed) if pkt is not None else "--"
+        )
+        sensor_brief = (
+            format_sensor_mode_brief(pkt, lang=lang) if pkt is not None else "--"
         )
         l2_time = "--"
         if pkt is not None:
@@ -734,7 +745,11 @@ class ClientsPage(QWidget):
             "decision": getattr(pkt, "decision_result", None) if pkt is not None else None,
             "decision_text": pkt.decision_text(lang) if pkt is not None else None,
             "ir_installed": ir_installed,
-            "ir_degraded": bool(ir_installed and getattr(pkt, "ir_degraded", False)) if pkt is not None else False,
+            "ir_degraded": bool(getattr(pkt, "ir_degraded", False)) if pkt is not None else False,
+            "sensor_brief": sensor_brief,
+            "sensor_unconfigured": bool(
+                pkt is not None and int(pkt.sensor_mode_code()) == 2
+            ),
             "hit_mask": int(getattr(pkt, "hit_probe_mask", 0) or 0) if pkt is not None else 0,
             "online_mask": int(getattr(pkt, "online_mask", 0) or 0) if pkt is not None else 0,
             "io_text": io_text,
@@ -932,8 +947,8 @@ class ClientsPage(QWidget):
 
         if data.get("link_only"):
             mode_text = _t("master_mode_invalid_l2")
-        elif not data.get("ir_installed", True):
-            mode_text = _t("master_mode_ir_not_installed")
+        elif data.get("sensor_brief") and data.get("sensor_brief") != "--":
+            mode_text = str(data.get("sensor_brief"))
         elif data.get("ir_degraded"):
             mode_text = _t("master_mode_degraded")
         else:

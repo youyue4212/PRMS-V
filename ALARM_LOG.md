@@ -80,7 +80,21 @@ Excel 仍保存在：`~/Raysen/AlarmLogs/`（同一文件可含两类 `AlarmType
 
 ---
 
-## 5. 与故障码文档
+## 5. 传感器模式（L2 sys_mode + 命令 0x19）
+
+| bit / 命令 | 含义 | 上位机 |
+|------------|------|--------|
+| bit0 | 降级 / 占位未生效 | 健康卡黄提示 |
+| bit2 | 锁存消警 | 消警模式（0x16） |
+| bit3 | 1=雷达 | 显示「雷达」 |
+| bit4 | 1=占用门控已启用 | 显示「空闲否决有效」；**0=未配置**黄提示「请配置对射或雷达」 |
+| **0x19** | 设/读模式（0对射/1雷达/2未配置） | 设置页「传感器模式」，只发主控 |
+
+硬报规则不变：仍只跟 decision 0x02/0x03。模式未配置是系统提示，不是辐射报警。
+
+---
+
+## 6. 与故障码文档
 
 - 诊断页仍显示完整 E/M 码：见 [FAULT_CODES.md](FAULT_CODES.md)。
 - **系统状态** = 实时诊断（含探头 E101 等）。
@@ -89,7 +103,7 @@ Excel 仍保存在：`~/Raysen/AlarmLogs/`（同一文件可含两类 `AlarmType
 
 ---
 
-## 6. 代码索引
+## 7. 代码索引
 
 - 分类辅助：`core/alarm_logger.py` → `is_radiation_alarm_type` / `is_system_event_type` / `get_recent_events(category=…)` / `get_statistics()`
 - 通道硬报：`main_window._sync_channel_hard_alarm_log`

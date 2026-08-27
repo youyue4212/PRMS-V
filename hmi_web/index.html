@@ -631,7 +631,7 @@
         </div>
         <div class="header-right">
             <div class="total-cps"><span id="totalCpsLabel">Total</span><span id="totalCps">0</span><span id="totalCpsUnit">CPS</span></div>
-            <div class="status-online" id="masterLink">主控离线</div>
+            <div class="status-online" id="masterLink">未接入主控</div>
             <div class="hdr-tools">
                 <span class="battery-tag" id="batteryTag">--%</span>
                 <button type="button" class="lang-btn" id="langBtn" onclick="toggleLang()">EN</button>
@@ -655,7 +655,7 @@
                     <div class="gate-frame">
                         <div class="person-avatar" id="personIcon">🚪</div>
                     </div>
-                    <div class="passage-state-badge" id="passageBadge">🏃 通道空闲</div>
+                    <div class="passage-state-badge" id="passageBadge">🚪 未接入主控</div>
                 </div>
             </div>
 
@@ -684,12 +684,12 @@
             <div class="side-card clickable-card" id="card_health" onclick="openPage('health')">
                 <div class="side-card-title">
                     <span id="healthCardTitle">设备健康</span>
-                    <span id="healthStatusTag" style="color:var(--hmi-ok);">正常</span>
+                    <span id="healthStatusTag" style="color:var(--hmi-muted);">待接入设备</span>
                 </div>
                 <div class="kv-list">
-                    <div class="kv-row"><span class="kv-key" id="kvProbeComm">探头通信</span><span class="kv-val green" id="healthProbeComm">2/2 在线</span></div>
-                    <div class="kv-row"><span class="kv-key" id="kvIrStatus">红外状态</span><span class="kv-val green" id="healthIrStatus">正常</span></div>
-                    <div class="kv-row"><span class="kv-key" id="kvMasterHw">主控硬件</span><span class="kv-val green" id="healthMasterHw">正常</span></div>
+                    <div class="kv-row"><span class="kv-key" id="kvProbeComm">探头通信</span><span class="kv-val muted" id="healthProbeComm">0/2 待接入</span></div>
+                    <div class="kv-row"><span class="kv-key" id="kvIrStatus">传感器</span><span class="kv-val muted" id="healthIrStatus">未接入</span></div>
+                    <div class="kv-row"><span class="kv-key" id="kvMasterHw">主控硬件</span><span class="kv-val muted" id="healthMasterHw">未接入</span></div>
                 </div>
             </div>
 
@@ -744,7 +744,7 @@
         var UI = {
             probeOk: 'OK', probeAlarm: 'ALARM', probeOffline: 'OFF',
             resetBtn: '', resetBtnActive: '', sideTagOk: '', sideTagAlarm: '',
-            latchNone: '', latchPending: '', vacant: '', passing: '', clickDetail: 'Details >'
+            latchNone: '', latchPending: '', vacant: '', passing: '', noMaster: '', clickDetail: 'Details >'
         };
 
         function applyUiLabels(ui) {
@@ -979,11 +979,11 @@
                 icon.innerText = '🚶';
                 badge.className = 'passage-state-badge active';
                 badge.innerText = text || ('🏃 ' + (UI.passing || ''));
-            } else if (kind === 'offline') {
+            } else if (kind === 'offline' || kind === 'ungated' || kind === 'noconn') {
                 icon.classList.remove('passing');
                 icon.innerText = '🚪';
                 badge.className = 'passage-state-badge offline';
-                badge.innerText = text || ('🏃 ' + (UI.vacant || ''));
+                badge.innerText = text || ('🚪 ' + (UI.noMaster || UI.vacant || ''));
             } else {
                 icon.classList.remove('passing');
                 icon.innerText = '🚪';

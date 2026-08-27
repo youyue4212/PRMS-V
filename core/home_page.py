@@ -103,7 +103,7 @@ class HomePage(QWidget):
         self._health_rows = {}
         self._fault_rows = {}
         self._passage_busy = False
-        self._occupancy_kind = "vacant"
+        self._occupancy_kind = "noconn"
         self._flush_pending = False
         self._last_web_payload = None
         self._defer_flush_until = 0.0
@@ -180,7 +180,7 @@ class HomePage(QWidget):
         self.total_cps_caption = QLabel("", self._stubs)
         self.total_cps_label = QLabel("0", self._stubs)
         self.master_relay_label = QLabel("--", self._stubs)
-        self.master_link_label = QLabel("主控离线", self._stubs)
+        self.master_link_label = QLabel("未接入主控", self._stubs)
         self.probe_section_title = QLabel("", self._stubs)
 
         self.alarm_card = QFrame(self._stubs)
@@ -196,7 +196,7 @@ class HomePage(QWidget):
         self.occupancy_title_icon = _DummySvg(self._stubs)
         self.occupancy_indicator = _DummySvg(self._stubs)
         self.occupancy_title_label = QLabel("", self._stubs)
-        self.occupancy_status_label = QLabel("通道空闲", self._stubs)
+        self.occupancy_status_label = QLabel("未接入主控", self._stubs)
         self.occupancy_desc_label = QLabel("", self._stubs)
         self.occupancy_desc_scroll = QWidget(self._stubs)
         self.occupancy_indicator_bar = QFrame(self._stubs)
@@ -205,7 +205,7 @@ class HomePage(QWidget):
         self.health_title_icon = _DummySvg(self._stubs)
         self.health_indicator = _DummySvg(self._stubs)
         self.health_title_label = QLabel("设备健康", self._stubs)
-        self.health_status_label = QLabel("设备正常", self._stubs)
+        self.health_status_label = QLabel("待接入设备", self._stubs)
         self.health_desc_label = QLabel("", self._stubs)
         self.health_desc_scroll = QWidget(self._stubs)
         self.health_indicator_bar = QFrame(self._stubs)
@@ -487,6 +487,7 @@ class HomePage(QWidget):
             "vacant": _t("status_vacant"),
             "passing": _t("status_passing"),
             "occupiedAlarm": _t("status_occupied_alarm"),
+            "noMaster": _t("status_occ_no_master"),
         }
 
     def _slot_location(self, i):
@@ -514,9 +515,11 @@ class HomePage(QWidget):
 
     def _link_level(self):
         t = self.master_link_label.text()
+        if "未接入" in t or "No Master" in t:
+            return "offline"
         if "离线" in t or "Offline" in t:
             return "offline"
-        if "无L2" in t or "Linked" in t or "降级" in t:
+        if "等待数据" in t or "awaiting" in t.lower() or "无L2" in t or "Linked" in t or "降级" in t:
             return "warn"
         return "ok"
 
@@ -604,7 +607,7 @@ class HomePage(QWidget):
         health_warn = False
         hs = self.health_status_label.text()
         hs_l = hs.lower()
-        # Card/tag yellow only for degraded/fault — not mere master offline
+        # Card/tag yellow only for degraded/fault — not mere master offline / awaiting
         # (offline stays green tag; amber only on the Master HW row).
         if (
             "降级" in hs
@@ -612,10 +615,13 @@ class HomePage(QWidget):
             or ("故障" in hs and "无" not in hs)
             or "degrad" in hs_l
             or "link fault" in hs_l
-            or ("fault" in hs_l and "no " not in hs_l and "offline" not in hs_l)
+            or ("fault" in hs_l and "no " not in hs_l and "offline" not in hs_l and "await" not in hs_l)
         ):
             health_color = "#ff9800"
             health_warn = True
+        elif "待接入" in hs or "await" in hs_l:
+            health_color = "#9e9e9e"
+            health_warn = False
         elif "离线" in hs or "offline" in hs_l:
             health_color = "#4caf50"
             health_warn = False
@@ -871,11 +877,13 @@ class HomePage(QWidget):
         self._had_tile_data = True
         self.schedule_web_flush()
 
-    def set_master_link_status(self, online, master_id=None, lang="zh", link_only=False):
+    def set_master_link_status(self, online, master_id=None, lang="zh", link_only=False, never_seen=False):
         if online:
             text = "Master Online" if lang == "en" else "主控在线"
+        elif never_seen:
+            text = "No Master Link" if lang == "en" else "未接入主控"
         elif link_only:
-            text = "Master Linked (no L2)" if lang == "en" else "主控已连接(无L2)"
+            text = "Master Linked (awaiting data)" if lang == "en" else "主控已连接(等待数据)"
         else:
             text = "Master Offline" if lang == "en" else "主控离线"
         self.master_link_label.setText(text)
@@ -916,8 +924,9 @@ class HomePage(QWidget):
             elif c in ("#2196f3",):
                 self._occupancy_kind = "passing"
                 self._passage_busy = True
-            elif c in ("#ff9800", "#f59e0b"):
-                self._occupancy_kind = "offline"
+            elif c in ("#ff9800", "#f59e0b", "#ffb74d"):
+                # offline / ungated（门控未配置）统一偏黄
+                self._occupancy_kind = "ungated" if c == "#ffb74d" else "offline"
                 self._passage_busy = False
             else:
                 self._occupancy_kind = "vacant"

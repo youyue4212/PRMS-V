@@ -28,9 +28,16 @@ MASTER_IO_RELAY2 = 1 << 6  # 道闸/辅路
 MASTER_IO_RELAY_OUTPUT = MASTER_IO_RELAY0  # 兼容旧名 = 继电器 0
 
 # sys_mode bits
-MASTER_MODE_IR_DEGRADED = 1 << 0
+MASTER_MODE_IR_DEGRADED = 1 << 0      # 1=降级/无可靠门控（占位未生效）
 MASTER_MODE_ONLINE_LOW_WARN = 1 << 1
-MASTER_MODE_ALARM_LATCH = 1 << 2  # 1=锁存消警（须 0x15）；0=自动（约 3s 条件消失可自灭）
+MASTER_MODE_ALARM_LATCH = 1 << 2     # 1=锁存消警（须 0x15）；0=自动（约 3s 条件消失可自灭）
+MASTER_MODE_RADAR = 1 << 3           # 1=雷达模式
+MASTER_MODE_OCC_GATE_EN = 1 << 4     # 1=占用门控已启用（空闲否决有效）
+
+# 0x19 传感器模式：0=对射 1=雷达 2=未配置
+MASTER_SENSOR_MODE_IR = 0
+MASTER_SENSOR_MODE_RADAR = 1
+MASTER_SENSOR_MODE_UNCONFIGURED = 2
 
 MASTER_DECISION_NORMAL = 0x00
 MASTER_DECISION_OVER_THRESHOLD = 0x01
@@ -156,6 +163,24 @@ class MasterSummaryPacket:
     def alarm_latch_mode(self) -> bool:
         """True = 锁存消警（须人工 0x15）；False = 自动消警。"""
         return bool(self.sys_mode & MASTER_MODE_ALARM_LATCH)
+
+    @property
+    def radar_mode(self) -> bool:
+        """sys_mode.bit3：1=雷达模式。"""
+        return bool(self.sys_mode & MASTER_MODE_RADAR)
+
+    @property
+    def occ_gate_enabled(self) -> bool:
+        """sys_mode.bit4：1=占用门控已启用（空闲否决有效）。"""
+        return bool(self.sys_mode & MASTER_MODE_OCC_GATE_EN)
+
+    def sensor_mode_code(self) -> int:
+        """推断 0x19 配置：bit3=1→雷达；bit3=0且bit4=1→对射；bit4=0→未配置。"""
+        if self.radar_mode:
+            return MASTER_SENSOR_MODE_RADAR
+        if self.occ_gate_enabled:
+            return MASTER_SENSOR_MODE_IR
+        return MASTER_SENSOR_MODE_UNCONFIGURED
 
     def is_channel_alarm(self) -> bool:
         """
@@ -309,33 +334,54 @@ def hit_slots(mask: int, count: int) -> List[int]:
     return [i for i in range(min(count, MASTER_MAX_PROBES)) if mask & (1 << i)]
 
 
+def format_sensor_mode_brief(pkt: MasterSummaryPacket, lang: str = "zh") -> str:
+    """传感器模式 + 门控生效摘要（跟 sys_mode bit3/bit4/bit0）。"""
+    code = pkt.sensor_mode_code()
+    if lang == "en":
+        if code == MASTER_SENSOR_MODE_UNCONFIGURED:
+            return "Sensor: configure IR or radar"
+        if code == MASTER_SENSOR_MODE_RADAR:
+            mode = "Radar"
+        else:
+            mode = "Beam IR"
+        if pkt.ir_degraded or not pkt.occ_gate_enabled:
+            return "%s · gate inactive" % mode
+        return "%s · gate active" % mode
+    if code == MASTER_SENSOR_MODE_UNCONFIGURED:
+        return "\u8bf7\u914d\u7f6e\u5bf9\u5c04\u6216\u96f7\u8fbe"
+    if code == MASTER_SENSOR_MODE_RADAR:
+        mode = "\u96f7\u8fbe"
+    else:
+        mode = "\u5bf9\u5c04"
+    if pkt.ir_degraded or not pkt.occ_gate_enabled:
+        return "%s \u00b7 \u5360\u4f4d\u672a\u751f\u6548" % mode
+    return "%s \u00b7 \u7a7a\u95f2\u5426\u51b3\u6709\u6548" % mode
+
+
 def format_io_brief(pkt: MasterSummaryPacket, lang: str = "zh", ir_installed: bool = True) -> str:
     """IO 摘要。现场未接红外时不展示入口/出口挡光和「红外降级」。"""
     show_ir = bool(ir_installed)
+    mode = format_sensor_mode_brief(pkt, lang=lang)
     if lang == "en":
-        parts = []
+        parts = [mode]
         if show_ir and pkt.ir_entry:
             parts.append("IR-IN")
         if show_ir and pkt.ir_exit:
             parts.append("IR-OUT")
         if pkt.radar_gate:
-            parts.append("RADAR")
+            parts.append("RADAR-raw")
         if pkt.relay0 or pkt.relay1 or pkt.relay2:
             parts.append("R%d%d%d" % (int(pkt.relay0), int(pkt.relay1), int(pkt.relay2)))
-        if show_ir and pkt.ir_degraded:
-            parts.append("IR-DEG")
         return ", ".join(parts) if parts else "Idle"
-    parts = []
+    parts = [mode]
     if show_ir and pkt.ir_entry:
         parts.append("\u5165\u53e3\u7ea2\u5916")
     if show_ir and pkt.ir_exit:
         parts.append("\u51fa\u53e3\u7ea2\u5916")
     if pkt.radar_gate:
-        parts.append("\u96f7\u8fbe")
+        parts.append("\u96f7\u8fbe\u539f\u59cb")
     if pkt.relay0 or pkt.relay1 or pkt.relay2:
         parts.append(
             "\u7ee7\u7535\u5668 %d/%d/%d" % (int(pkt.relay0), int(pkt.relay1), int(pkt.relay2))
         )
-    if show_ir and pkt.ir_degraded:
-        parts.append("\u7ea2\u5916\u964d\u7ea7")
     return "\u3001".join(parts) if parts else "\u901a\u9053\u7a7a\u95f2"

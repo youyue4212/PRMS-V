@@ -761,9 +761,11 @@ class ControlRoomPage(QWidget):
             "alarm": ALARM,
             "passing": INFO,
             "offline": WARN,
+            "ungated": WARN,
+            "noconn": MUTED,
             "vacant": OK,
         }.get(kind, TEXT)
-        emph = kind in ("offline", "alarm")
+        emph = kind in ("offline", "alarm", "ungated")
         self.occ_status.setStyleSheet(
             f"color: {color}; font-size: {cr_px(16)}px; font-weight: bold;"
         )

@@ -337,15 +337,10 @@ class DiagnosticsManager:
         # If acquisition has been running for more than 15 seconds, and we have no data from expected clients
         time_since_start = now - self.acquisition_start_time
         
-        # If no clients are connected at all in TCP mode, or serial is not receiving
-        if not connected_clients:
-            # If we are in serial mode or TCP is enabled
-            # Let's flag a general E101 on "system"
-            if time_since_start > self.NO_DATA_STARTUP_SEC:
-                self.add_fault("system", FaultCode.E101)
-        else:
-            self.remove_fault("system", FaultCode.E101)
-            
+        # 无客户端：仅监听待机，不报系统 E101（开软件即「无数据」）
+        self.remove_fault("system", FaultCode.E101)
+
+        if connected_clients:
             # Check each connected client
             for client_id in connected_clients:
                 if client_id in ignore:

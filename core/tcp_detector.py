@@ -227,15 +227,43 @@ class TcpPacketWorker(QObject):
                     self.server_socket.settimeout(5.0)  # Accept timeout
                     
                     # Bind to address and port
-                    self.has_log.emit(f"Binding to {host}:{port}", 'DEBUG')
-                    self.server_socket.bind((host, port))
+                    bind_host = host or "0.0.0.0"
+                    self.has_log.emit(f"Binding to {bind_host}:{port}", 'DEBUG')
+                    try:
+                        self.server_socket.bind((bind_host, port))
+                    except OSError as bind_err:
+                        # WinError 10049 等：配置的 IP 不在本机（例如平板 IP 在电脑上）
+                        # 回退到 0.0.0.0，避免自检每秒刷屏且永远连不上
+                        err_s = str(bind_err)
+                        if bind_host not in ("0.0.0.0", "", "::") and (
+                            getattr(bind_err, "winerror", None) == 10049
+                            or getattr(bind_err, "errno", None) in (99, 49, 22)
+                            or "10049" in err_s
+                            or "not available" in err_s.lower()
+                            or "地址无效" in err_s
+                        ):
+                            self.has_log.emit(
+                                f"Bind {bind_host}:{port} failed ({bind_err}); falling back to 0.0.0.0:{port}",
+                                'WARNING',
+                            )
+                            try:
+                                self.server_socket.close()
+                            except Exception:
+                                pass
+                            self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                            self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                            self.server_socket.settimeout(5.0)
+                            self.server_socket.bind(("0.0.0.0", port))
+                            bind_host = "0.0.0.0"
+                        else:
+                            raise
                     self.server_socket.listen(5)  # Listen for up to 5 connections
                     
                     # Set socket to non-blocking for accepting connections
                     self.server_socket.setblocking(False)
                     
-                    self.connection_status_changed.emit(True, f"Listening on {host}:{port} (attempt {attempt + 1}/{max_retries})")
-                    self.has_log.emit(f"Listening on {host}:{port} (attempt {attempt + 1}/{max_retries})", 'INFO')
+                    self.connection_status_changed.emit(True, f"Listening on {bind_host}:{port} (attempt {attempt + 1}/{max_retries})")
+                    self.has_log.emit(f"Listening on {bind_host}:{port} (attempt {attempt + 1}/{max_retries})", 'INFO')
                     self.is_server_mode = True
                     self.has_log.emit(f"Server socket created: {self.server_socket}, is_server_mode={self.is_server_mode}", 'DEBUG')
                     return True
@@ -453,7 +481,7 @@ class TcpPacketWorker(QObject):
                           'set_product_id', 'set_sensitivity_coefficient', 'control_single_relay',
                           'control_multiple_relays', 'read_relay_status',
                           'channel_alarm_reset', 'channel_alarm_clear_mode',
-                          'reset_factory_defaults')
+                          'channel_sensor_mode', 'reset_factory_defaults')
             command_value: Value for the command (float for HV, int for threshold, etc.)
             description: Description for logging
         Returns:
@@ -498,6 +526,29 @@ class TcpPacketWorker(QObject):
                 description = description or "Set alarm clear mode LATCH (0x16)"
             else:
                 description = description or "Read alarm clear mode (0x16)"
+
+        elif command_type == 'channel_sensor_mode':
+            # 传感器模式 0x19：00=对射，01=雷达，02=未配置，FF=读；确认字节 A5
+            # 对射 55 AA 03 19 00 A5 40；雷达 … 01 A5 41；未配置 … 02 A5 42；读 … FF A5 BF
+            if not is_master:
+                self.error_occurred.emit("channel_sensor_mode must target master TCP client")
+                return False
+            try:
+                mode = int(command_value)
+            except (TypeError, ValueError):
+                mode = 0xFF
+            if mode not in (0, 1, 2, 0xFF):
+                mode = 0xFF
+            command_data = [0x55, 0xAA, 0x03, 0x19, mode & 0xFF, 0xA5]
+            checksum = self.calculate_xor_checksum(command_data)
+            command_data.append(checksum)
+            names = {0: "IR beam", 1: "radar", 2: "unconfigured", 0xFF: "read"}
+            if mode == 0xFF:
+                description = description or "Read sensor mode (0x19)"
+            else:
+                description = description or (
+                    "Set sensor mode %s (0x19)" % names.get(mode, str(mode))
+                )
 
         elif command_type == 'reset_factory_defaults':
             # 55 AA 03 14 A5 5A 17 — restore HV/trigger/sen_coef defaults
