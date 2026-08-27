@@ -335,10 +335,10 @@ class ControlRoomPage(QWidget):
             t.set_reorder_enabled(self._can_reorder)
 
     def set_nav_enabled(self, enabled: bool):
-        """未登录只看总览/日志；登录后探头卡、健康卡、故障卡才可跳转。"""
+        """未登录只看总览/日志；登录后探头卡、系统状态卡才可跳转。"""
         self._nav_enabled = bool(enabled)
         cursor = Qt.PointingHandCursor if self._nav_enabled else Qt.ArrowCursor
-        for card in (getattr(self, "_health_card", None), getattr(self, "_fault_card", None)):
+        for card in (getattr(self, "_system_card", None),):
             if card is None:
                 continue
             card.set_nav_enabled(self._nav_enabled)
@@ -353,13 +353,9 @@ class ControlRoomPage(QWidget):
 
     def _refresh_nav_tooltips(self):
         from core.translation import _t
-        if hasattr(self, "_health_card"):
-            self._health_card.setToolTip(
-                _t("tip_health_card_nav") if self._nav_enabled else ""
-            )
-        if hasattr(self, "_fault_card"):
-            self._fault_card.setToolTip(
-                _t("tip_fault_card_nav") if self._nav_enabled else ""
+        if hasattr(self, "_system_card"):
+            self._system_card.setToolTip(
+                _t("tip_system_card_nav") if self._nav_enabled else ""
             )
 
     def _build_ui(self):
@@ -386,15 +382,6 @@ class ControlRoomPage(QWidget):
         header.addWidget(self.master_link_label, 0, Qt.AlignVCenter)
 
         header.addStretch(1)
-
-        self._total_cps_base_px = cr_cps_px(30)
-        self.total_cps_label = QLabel("0")
-        self.total_cps_label.setAlignment(Qt.AlignCenter)
-        self._apply_total_cps_typography("0")
-        header.addWidget(self.total_cps_label, 0, Qt.AlignVCenter)
-        self.total_cps_unit = QLabel("CPS")
-        self.total_cps_unit.setStyleSheet(f"color: {MUTED}; font-size: {cr_px(16)}px; font-weight: 600;")
-        header.addWidget(self.total_cps_unit, 0, Qt.AlignVCenter)
 
         self.alarm_banner = QLabel()
         self.alarm_banner.setAlignment(Qt.AlignCenter)
@@ -477,14 +464,11 @@ class ControlRoomPage(QWidget):
         side = QVBoxLayout()
         side.setSpacing(10)
 
+        # 仅保留「活动辐射」一眼指标；在线数在探头墙标题，今日数在日志页
         kpi_row = QHBoxLayout()
         kpi_row.setSpacing(8)
         self.kpi_active = self._make_kpi()
-        self.kpi_today = self._make_kpi()
-        self.kpi_online = self._make_kpi()
         kpi_row.addWidget(self.kpi_active)
-        kpi_row.addWidget(self.kpi_today)
-        kpi_row.addWidget(self.kpi_online)
         side.addLayout(kpi_row)
 
         occ_card = _card_frame()
@@ -507,63 +491,46 @@ class ControlRoomPage(QWidget):
         occ_lay.addWidget(self.occ_desc)
         side.addWidget(occ_card)
 
-        health_card = ClickCard()
-        health_card.clicked.connect(self.open_diagnostics.emit)
-        health_lay = QVBoxLayout(health_card)
-        health_lay.setContentsMargins(12, 10, 12, 10)
-        health_lay.setSpacing(4)
-        health_head = QHBoxLayout()
-        self.health_title = QLabel()
-        self.health_title.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        self.health_title.setStyleSheet(
+        # 健康+故障合并：异常时加粗，点进诊断
+        system_card = ClickCard()
+        system_card.clicked.connect(self.open_diagnostics.emit)
+        sys_lay = QVBoxLayout(system_card)
+        sys_lay.setContentsMargins(12, 10, 12, 10)
+        sys_lay.setSpacing(4)
+        sys_head = QHBoxLayout()
+        self.system_title = QLabel()
+        self.system_title.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        self.system_title.setStyleSheet(
             f"color: {TEXT_DIM}; font-size: {CR_CHROME_FONT_PX}px; font-weight: bold;"
         )
-        self.health_status = QLabel("--")
-        self.health_status.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        self.health_status.setWordWrap(False)
-        self.health_status.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
-        self.health_status.setStyleSheet(
+        self.system_status = QLabel("--")
+        self.system_status.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.system_status.setWordWrap(False)
+        self.system_status.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
+        self.system_status.setStyleSheet(
             f"color: {OK}; font-size: {cr_px(13)}px; font-weight: bold;"
         )
-        health_head.addWidget(self.health_title, 1, Qt.AlignVCenter)
-        health_head.addWidget(self.health_status, 0, Qt.AlignVCenter)
-        health_lay.addLayout(health_head)
-        self.health_probe = QLabel("--")
-        self.health_ir = QLabel("--")
-        self.health_master = QLabel("--")
-        for lab in (self.health_probe, self.health_ir, self.health_master):
-            lab.setStyleSheet(f"color: {TEXT}; font-size: {cr_px(12)}px;")
-            health_lay.addWidget(lab)
-        self._health_card = health_card
-        side.addWidget(health_card)
-
-        fault_card = ClickCard()
-        fault_card.clicked.connect(self.open_diagnostics.emit)
-        fault_lay = QVBoxLayout(fault_card)
-        fault_lay.setContentsMargins(12, 10, 12, 10)
-        fault_lay.setSpacing(4)
-        fault_head = QHBoxLayout()
-        self.fault_title = QLabel()
-        self.fault_title.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        self.fault_title.setStyleSheet(
-            f"color: {TEXT_DIM}; font-size: {CR_CHROME_FONT_PX}px; font-weight: bold;"
-        )
-        self.fault_status = QLabel("--")
-        self.fault_status.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        self.fault_status.setWordWrap(False)
-        self.fault_status.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
-        self.fault_status.setStyleSheet(
-            f"color: {OK}; font-size: {cr_px(13)}px; font-weight: bold;"
-        )
-        fault_head.addWidget(self.fault_title, 1, Qt.AlignVCenter)
-        fault_head.addWidget(self.fault_status, 0, Qt.AlignVCenter)
-        fault_lay.addLayout(fault_head)
-        self.fault_text = QLabel("")
-        self.fault_text.setWordWrap(True)
-        self.fault_text.setStyleSheet(f"color: {MUTED}; font-size: {cr_px(12)}px;")
-        fault_lay.addWidget(self.fault_text)
-        self._fault_card = fault_card
-        side.addWidget(fault_card)
+        sys_head.addWidget(self.system_title, 1, Qt.AlignVCenter)
+        sys_head.addWidget(self.system_status, 0, Qt.AlignVCenter)
+        sys_lay.addLayout(sys_head)
+        self.system_detail = QLabel("")
+        self.system_detail.setWordWrap(True)
+        self.system_detail.setStyleSheet(f"color: {MUTED}; font-size: {cr_px(12)}px;")
+        sys_lay.addWidget(self.system_detail)
+        self._system_card = system_card
+        self._sys_health_status = ""
+        self._sys_health_rows = {}
+        self._sys_health_warn = False
+        self._sys_fault_status = ""
+        self._sys_fault_text = ""
+        self._sys_fault_warn = False
+        # 兼容旧属性名（避免外部引用崩溃）
+        self._health_card = system_card
+        self._fault_card = system_card
+        self.health_status = self.system_status
+        self.fault_status = self.system_status
+        self.fault_text = self.system_detail
+        side.addWidget(system_card)
 
         alarm_card = _card_frame()
         alarm_lay = QVBoxLayout(alarm_card)
@@ -588,10 +555,7 @@ class ControlRoomPage(QWidget):
         alarm_head.addWidget(self.open_log_btn, 0, Qt.AlignVCenter)
         alarm_lay.addLayout(alarm_head)
 
-        self.alarm_list = QListWidget()
-        self.alarm_list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.alarm_list.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        self.alarm_list.setStyleSheet(f"""
+        list_qss = f"""
             QListWidget {{
                 background: #1f1f1f; border: 1px solid {BORDER}; border-radius: 6px;
                 color: {TEXT_DIM}; font-size: {cr_px(12)}px;
@@ -606,8 +570,24 @@ class ControlRoomPage(QWidget):
                 height: 0; width: 0; background: none; border: none;
             }}
             QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: none; }}
-        """)
-        alarm_lay.addWidget(self.alarm_list, 1)
+        """
+        self.alarm_list = QListWidget()
+        self.alarm_list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.alarm_list.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.alarm_list.setStyleSheet(list_qss)
+        alarm_lay.addWidget(self.alarm_list, 2)
+
+        self.system_list_title = QLabel()
+        self.system_list_title.setStyleSheet(
+            f"color: {TEXT_DIM}; font-size: {CR_CHROME_FONT_PX}px; font-weight: bold;"
+        )
+        alarm_lay.addWidget(self.system_list_title)
+        self.system_list = QListWidget()
+        self.system_list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.system_list.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.system_list.setMaximumHeight(cr_px(180))
+        self.system_list.setStyleSheet(list_qss)
+        alarm_lay.addWidget(self.system_list, 1)
         side.addWidget(alarm_card, 1)
 
         body.addLayout(side, 3)
@@ -698,19 +678,16 @@ class ControlRoomPage(QWidget):
         self.title_label.setText(_t("control_room_title"))
         self.probe_section_title.setText(_t("control_room_probe_wall"))
         self.occ_title.setText(_t("control_room_occupancy"))
-        self.health_title.setText(_t("card_health_title"))
-        self.fault_title.setText(_t("card_fault_summary_title"))
-        if hasattr(self, "_health_card"):
-            self._refresh_nav_tooltips()
-        if hasattr(self, "_fault_card"):
-            self._refresh_nav_tooltips()
+        if hasattr(self, "system_title"):
+            self.system_title.setText(_t("control_room_system_status"))
+        self._refresh_nav_tooltips()
         self.alarm_list_title.setText(_t("control_room_recent_alarms"))
+        if hasattr(self, "system_list_title"):
+            self.system_list_title.setText(_t("control_room_system_events"))
         self.open_log_btn.setText(_t("control_room_open_log"))
         self.reset_btn.setText(_t("btn_channel_alarm_reset_active"))
         self.kpi_active._title.setText(_t("control_room_kpi_active"))
-        self.kpi_today._title.setText(_t("control_room_kpi_today"))
-        self.kpi_online._title.setText(_t("control_room_kpi_online"))
-        self.total_cps_unit.setText("CPS")
+        self._refresh_system_card()
         self.refresh_alarm_sidebar()
         parent = getattr(self, "parent", None)
         home = getattr(parent, "home_page", None) if parent is not None else None
@@ -758,9 +735,10 @@ class ControlRoomPage(QWidget):
             self._apply_pill(self.alarm_banner, ALARM, emphasis=True)
             self.reset_btn.setEnabled(getattr(self, "_nav_enabled", False))
         elif kind == "offline":
+            # 主控离线由顶栏链路胶囊表达，banner 只标「硬报暂停」避免与链路重复抢视线
             self._reset_wanted = False
-            self.alarm_banner.setText(latch_text or _t("status_rad_offline"))
-            self._apply_pill(self.alarm_banner, WARN, emphasis=True)
+            self.alarm_banner.setText(_t("control_room_rad_paused"))
+            self._apply_pill(self.alarm_banner, MUTED, emphasis=False)
             self.reset_btn.setEnabled(False)
         elif kind == "warn":
             self._reset_wanted = False
@@ -805,31 +783,50 @@ class ControlRoomPage(QWidget):
             """)
 
     def set_health_summary(self, status: str, rows: dict, warn: bool = False):
-        from core.translation import _t
-        self.health_status.setText(status or _t("status_health_ok"))
-        color = WARN if warn else OK
-        self.health_status.setStyleSheet(
-            f"color: {color}; font-size: {cr_px(13)}px; font-weight: bold;"
-        )
-        self.health_status.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        rows = rows or {}
-        self.health_probe.setText("%s  %s" % (_t("kv_probe_comm"), rows.get("probeComm") or "--"))
-        self.health_ir.setText("%s  %s" % (_t("kv_ir_status"), rows.get("irStatus") or "--"))
-        self.health_master.setText("%s  %s" % (_t("kv_master_hw"), rows.get("masterHw") or "--"))
-        if hasattr(self, "_health_card"):
-            self._health_card.set_warn(bool(warn))
+        self._sys_health_status = status or ""
+        self._sys_health_rows = rows or {}
+        self._sys_health_warn = bool(warn)
+        self._refresh_system_card()
 
     def set_fault_summary(self, status: str, text: str, warn: bool = False):
+        self._sys_fault_status = status or ""
+        self._sys_fault_text = text or ""
+        self._sys_fault_warn = bool(warn)
+        self._refresh_system_card()
+
+    def _refresh_system_card(self):
+        """合并健康/故障为一张系统状态卡。"""
         from core.translation import _t
-        self.fault_status.setText(status or _t("status_fault_count", n=0))
+        if not hasattr(self, "system_status"):
+            return
+        warn = bool(getattr(self, "_sys_fault_warn", False) or getattr(self, "_sys_health_warn", False))
+        if getattr(self, "_sys_fault_warn", False) and getattr(self, "_sys_fault_status", ""):
+            status = self._sys_fault_status
+        elif getattr(self, "_sys_health_status", ""):
+            status = self._sys_health_status
+        else:
+            status = _t("status_health_ok")
         color = WARN if warn else OK
-        self.fault_status.setStyleSheet(
+        self.system_status.setText(status)
+        self.system_status.setStyleSheet(
             f"color: {color}; font-size: {cr_px(13)}px; font-weight: bold;"
         )
-        self.fault_status.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        self.fault_text.setText(text or _t("desc_fault_summary_none"))
-        if hasattr(self, "_fault_card"):
-            self._fault_card.set_warn(bool(warn))
+        if getattr(self, "_sys_fault_warn", False) and getattr(self, "_sys_fault_text", "").strip():
+            detail = self._sys_fault_text.strip()
+        else:
+            rows = getattr(self, "_sys_health_rows", None) or {}
+            parts = []
+            if rows.get("probeComm"):
+                parts.append("%s %s" % (_t("kv_probe_comm"), rows.get("probeComm")))
+            if rows.get("irStatus"):
+                parts.append("%s %s" % (_t("kv_ir_status"), rows.get("irStatus")))
+            detail = " · ".join(parts) if parts else _t("desc_fault_summary_none")
+        self.system_detail.setText(detail)
+        self.system_detail.setStyleSheet(
+            f"color: {WARN if warn else MUTED}; font-size: {cr_px(12)}px;"
+        )
+        if hasattr(self, "_system_card"):
+            self._system_card.set_warn(warn)
 
     def _make_tile(self):
         tile = ProbeTile(self.probe_host)
@@ -841,23 +838,12 @@ class ControlRoomPage(QWidget):
         tile.set_nav_enabled(self._nav_enabled)
         return tile
 
-    def _apply_total_cps_typography(self, text: str):
-        scale = cps_digit_scale(text)
-        px = max(12, int(round(self._total_cps_base_px * scale)))
-        self.total_cps_label.setStyleSheet(
-            f"color: {OK}; font-size: {px}px; font-weight: bold; padding: 2px 10px;"
-        )
-
     def update_probes(self, entries, total_cps=0):
         self._probe_entries = list(entries or [])
-        total_text = str(int(total_cps or 0))
-        self.total_cps_label.setText(total_text)
-        self._apply_total_cps_typography(total_text)
         n = len(self._probe_entries)
         online = sum(1 for e in self._probe_entries if e.get("online"))
         from core.translation import _t
         self.online_summary.setText(_t("control_room_online_fmt", online=online, total=n))
-        self.kpi_online._value.setText("%d/%d" % (online, n))
 
         while len(self._tiles) < max(n, 1):
             self._tiles.append(self._make_tile())
@@ -957,62 +943,118 @@ class ControlRoomPage(QWidget):
 
     def refresh_alarm_sidebar(self):
         from core.translation import _t
-        prev_text = ""
-        cur = self.alarm_list.currentItem()
-        if cur is not None:
-            prev_text = cur.text()
-        bar = self.alarm_list.verticalScrollBar()
-        scroll_val = bar.value()
-        if bar.isSliderDown():
-            return
+        from core.alarm_log_page import (
+            format_alarm_event_client, format_alarm_event_status, format_alarm_fault_code,
+        )
+
+        def _fill_list(widget, lines, events, active_color=Qt.red):
+            prev_text = ""
+            cur = widget.currentItem()
+            if cur is not None:
+                prev_text = cur.text()
+            bar = widget.verticalScrollBar()
+            scroll_val = bar.value()
+            if bar.isSliderDown():
+                return
+            old_lines = [
+                widget.item(i).text()
+                for i in range(widget.count())
+                if widget.item(i) is not None
+            ]
+            if lines == old_lines:
+                return
+            widget.clear()
+            restore_row = -1
+            for i, line in enumerate(lines):
+                item = QListWidgetItem(line)
+                if events and i < len(events) and events[i].alarm_status:
+                    item.setForeground(active_color)
+                widget.addItem(item)
+                if prev_text and line == prev_text:
+                    restore_row = i
+            if restore_row >= 0:
+                widget.setCurrentRow(restore_row)
+            bar.setValue(scroll_val)
+
         try:
             from core.alarm_logger import get_alarm_logger
             logger = get_alarm_logger()
             stats = logger.get_statistics() or {}
             active_n = int(stats.get("active_alarms", 0) or 0)
-            today_n = int(stats.get("today_events", 0) or 0)
             self.kpi_active._value.setText(str(active_n))
-            self.kpi_today._value.setText(str(today_n))
             color = ALARM if active_n else TEXT
             self.kpi_active._value.setStyleSheet(
                 f"color: {color}; font-size: {cr_px(22)}px; font-weight: bold;"
             )
 
-            events = list(logger.get_recent_events(40) or [])
-            events.reverse()
-            from core.alarm_log_page import format_alarm_event_client
-            lines = []
-            if not events:
-                lines.append(_t("control_room_no_alarms"))
+            rad_events = list(logger.get_recent_events(40, category="radiation") or [])
+            rad_events.reverse()
+            rad_lines = []
+            if not rad_events:
+                rad_lines.append(_t("control_room_no_alarms"))
             else:
-                for ev in events[:30]:
+                for ev in rad_events[:20]:
                     try:
                         ts = datetime.fromtimestamp(float(ev.timestamp)).strftime("%H:%M:%S")
                     except Exception:
                         ts = "--:--:--"
-                    st = _t("log_status_active") if ev.alarm_status else _t("log_status_cleared")
+                    st = format_alarm_event_status(ev)
                     client = format_alarm_event_client(ev)
-                    lines.append("%s  %s  %s  %.0f cps" % (
-                        ts, client or "-", st, float(ev.count_rate or 0),
+                    peak = float(getattr(ev, "peak_count_rate", None) or ev.count_rate or 0)
+                    rad_lines.append("%s  %s  %s  %.0f cps" % (
+                        ts, client or "-", st, peak,
                     ))
-            old_lines = [
-                self.alarm_list.item(i).text()
-                for i in range(self.alarm_list.count())
-                if self.alarm_list.item(i) is not None
-            ]
-            if lines == old_lines:
-                return
-            self.alarm_list.clear()
-            restore_row = -1
-            for i, line in enumerate(lines):
-                item = QListWidgetItem(line)
-                if events and i < len(events) and events[i].alarm_status:
-                    item.setForeground(Qt.red)
-                self.alarm_list.addItem(item)
-                if prev_text and line == prev_text:
-                    restore_row = i
-            if restore_row >= 0:
-                self.alarm_list.setCurrentRow(restore_row)
-            bar.setValue(scroll_val)
+            _fill_list(self.alarm_list, rad_lines, rad_events, Qt.red)
+
+            if hasattr(self, "system_list"):
+                sys_events = list(logger.get_recent_events(40, category="system") or [])
+                sys_events.reverse()
+                sys_lines = []
+                # 活动主控 M 码：诊断里有、或清屏后仍活动但无历史行 → 补「当前」行
+                live_codes = []
+                for cid, on in (logger.get_active_alarms() or {}).items():
+                    if on and str(cid).startswith("master_fault_"):
+                        live_codes.append(str(cid).replace("master_fault_", "", 1))
+                parent = getattr(self, "parent", None)
+                if parent is not None and hasattr(parent, "_master_fault_entries"):
+                    try:
+                        for code in parent._master_fault_entries() or []:
+                            if code not in live_codes:
+                                live_codes.append(code)
+                    except Exception:
+                        pass
+                hist_any = set()
+                for ev in sys_events:
+                    hist_any.add(format_alarm_fault_code(ev))
+
+                if not sys_events and not live_codes:
+                    sys_lines.append(_t("control_room_no_system_events"))
+                    _fill_list(self.system_list, sys_lines, [], Qt.yellow)
+                else:
+                    extra_live = [c for c in live_codes if c not in hist_any]
+                    for code in extra_live:
+                        sys_lines.append(
+                            "%s  %s  %s" % (
+                                _t("control_room_system_live"),
+                                code,
+                                _t("log_status_link_down"),
+                            )
+                        )
+                    for ev in sys_events[:12]:
+                        try:
+                            ts = datetime.fromtimestamp(float(ev.timestamp)).strftime("%H:%M:%S")
+                        except Exception:
+                            ts = "--:--:--"
+                        code = format_alarm_fault_code(ev)
+                        st = format_alarm_event_status(ev)
+                        dur = ""
+                        if float(getattr(ev, "duration", 0) or 0) > 0:
+                            dur = "  %.0fs" % float(ev.duration)
+                        sys_lines.append("%s  %s  %s%s" % (ts, code, st, dur))
+                    # fake event objects only for coloring live rows
+                    class _Live:
+                        alarm_status = True
+                    paint = [_Live() for _ in extra_live] + list(sys_events[:12])
+                    _fill_list(self.system_list, sys_lines, paint, Qt.yellow)
         except Exception:
             pass

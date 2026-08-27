@@ -33,6 +33,22 @@ MAX_MEMORY_EVENTS = 5000
 WRITE_RETRIES = 3
 WRITE_RETRY_SLEEP_S = 0.35
 
+# 工业分层：辐射/通道安全报警 vs 系统·通信事件（不可混进辐射统计）
+RADIATION_ALARM_TYPES = frozenset({"ChannelMatch", "Radiation", "radiation", "Alarm"})
+SYSTEM_EVENT_TYPES = frozenset({"MasterFault"})
+
+
+def is_radiation_alarm_type(alarm_type: str) -> bool:
+    return str(alarm_type or "") in RADIATION_ALARM_TYPES
+
+
+def is_system_event_type(alarm_type: str) -> bool:
+    return str(alarm_type or "") in SYSTEM_EVENT_TYPES
+
+
+def is_system_event_client(client_id: str) -> bool:
+    return str(client_id or "").startswith("master_fault_")
+
 
 @dataclass
 class AlarmEvent:
@@ -41,7 +57,7 @@ class AlarmEvent:
     client_id: str
     alarm_type: str
     alarm_status: bool
-    count_rate: float  # ACTIVE=触发瞬时；INACTIVE=报警期间峰值
+    count_rate: float  # ACTIVE=触发瞬时；INACTIVE=报警期间峰值；系统事件应为 0
     temperature: float
     hv: float
     product_id: int
@@ -142,20 +158,28 @@ class AlarmLogger:
                        sensitivity: int,
                        alarm_type: str = "Radiation",
                        message: str = ""):
-        """设备报警位边沿变化时记录；ACTIVE 期间持续更新峰值 CPS。"""
+        """设备报警位边沿变化时记录；ACTIVE 期间持续更新峰值 CPS。
+
+        MasterFault（系统/通信）不跟踪峰值 CPS，避免把断线前末帧当成「报警峰值」。
+        """
         current_time = time.time()
         previous_status = self.active_alarms.get(client_id, False)
+        system_evt = is_system_event_type(alarm_type) or is_system_event_client(client_id)
+        if system_evt:
+            count_rate = 0.0
 
         # 仍在报警中：只更新峰值 / 文案，不写新行
         if previous_status and alarm_status:
-            prev_peak = self.alarm_peak_count_rates.get(client_id, count_rate)
-            self.alarm_peak_count_rates[client_id] = max(prev_peak, count_rate)
+            if not system_evt:
+                prev_peak = self.alarm_peak_count_rates.get(client_id, count_rate)
+                self.alarm_peak_count_rates[client_id] = max(prev_peak, count_rate)
             if message:
                 for ev in reversed(self.alarm_events):
                     if ev.client_id == client_id and ev.alarm_status:
                         ev.message = message
-                        ev.peak_count_rate = self.alarm_peak_count_rates[client_id]
-                        ev.count_rate = ev.peak_count_rate
+                        if not system_evt:
+                            ev.peak_count_rate = self.alarm_peak_count_rates[client_id]
+                            ev.count_rate = ev.peak_count_rate
                         break
             return None
 
@@ -180,6 +204,9 @@ class AlarmLogger:
             duration = current_time - start_time
             trigger_count_rate = self.alarm_start_count_rates.pop(client_id, count_rate)
             peak_count_rate = self.alarm_peak_count_rates.pop(client_id, trigger_count_rate)
+            if system_evt:
+                peak_count_rate = 0.0
+                trigger_count_rate = 0.0
             event_count_rate = peak_count_rate
 
         event = AlarmEvent(
@@ -575,11 +602,31 @@ class AlarmLogger:
         except Exception as e:
             print(f"Failed to save alarm events: {e}")
 
-    def get_recent_events(self, count: int = 100) -> List[AlarmEvent]:
-        return self.alarm_events[-count:] if self.alarm_events else []
+    def get_recent_events(self, count: int = 100, category: Optional[str] = None) -> List[AlarmEvent]:
+        """category: None=全部 | 'radiation' | 'system'"""
+        events = self.alarm_events
+        if category == "radiation":
+            events = [e for e in events if is_radiation_alarm_type(e.alarm_type)]
+        elif category == "system":
+            events = [e for e in events if is_system_event_type(e.alarm_type)]
+        if not events:
+            return []
+        return events[-count:]
 
     def get_active_alarms(self) -> Dict[str, bool]:
         return self.active_alarms.copy()
+
+    def get_active_radiation_count(self) -> int:
+        return sum(
+            1 for cid, v in self.active_alarms.items()
+            if v and not is_system_event_client(cid)
+        )
+
+    def get_active_system_count(self) -> int:
+        return sum(
+            1 for cid, v in self.active_alarms.items()
+            if v and is_system_event_client(cid)
+        )
 
     def reset_client_state(self, client_id: str):
         """清理指定客户端的报警状态（断线/复位时调用），不生成事件。"""
@@ -606,23 +653,37 @@ class AlarmLogger:
         now = datetime.now()
         day_start = datetime(now.year, now.month, now.day).timestamp()
 
+        empty = {
+            'total_events': 0,
+            'today_events': 0,
+            'active_alarms': 0,
+            'today_system_events': 0,
+            'active_system': 0,
+            'alarm_types': {},
+            'clients': {},
+            'last_event': None,
+            'last_system_event': None,
+        }
         if not self.alarm_events:
-            return {
-                'total_events': 0,
-                'today_events': 0,
-                'active_alarms': 0,
-                'alarm_types': {},
-                'clients': {},
-                'last_event': None,
-            }
+            return empty
 
         alarm_types = {}
-        # 今日报警次数：只计触发边沿，解除不算（一次周期 = 1）
+        # 今日辐射报警：只计 ChannelMatch/Radiation 触发边沿（不含主控通信故障）
         today_events = 0
+        today_system = 0
+        last_rad = None
+        last_sys = None
         for event in self.alarm_events:
             alarm_types[event.alarm_type] = alarm_types.get(event.alarm_type, 0) + 1
-            if float(event.timestamp or 0) >= day_start and bool(event.alarm_status):
-                today_events += 1
+            ts_ok = float(event.timestamp or 0) >= day_start
+            if is_radiation_alarm_type(event.alarm_type):
+                last_rad = event
+                if ts_ok and bool(event.alarm_status):
+                    today_events += 1
+            elif is_system_event_type(event.alarm_type):
+                last_sys = event
+                if ts_ok and bool(event.alarm_status):
+                    today_system += 1
 
         clients = {}
         for event in self.alarm_events:
@@ -635,10 +696,13 @@ class AlarmLogger:
         return {
             'total_events': len(self.alarm_events),
             'today_events': today_events,
-            'active_alarms': sum(self.active_alarms.values()),
+            'active_alarms': self.get_active_radiation_count(),
+            'today_system_events': today_system,
+            'active_system': self.get_active_system_count(),
             'alarm_types': alarm_types,
             'clients': clients,
-            'last_event': self.alarm_events[-1] if self.alarm_events else None,
+            'last_event': last_rad,
+            'last_system_event': last_sys,
         }
 
 

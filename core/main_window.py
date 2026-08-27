@@ -1007,7 +1007,7 @@ class MainWindow(QMainWindow, UIBase):
             return
 
         latest = getattr(self, "latest_master_summary", None)
-        cps = float(getattr(latest, "total_cps", 0) or 0) if latest is not None else 0.0
+        # 系统/通信事件不写峰值 CPS（断线前末帧会误导成「测到辐射」）
         mid = int(getattr(latest, "master_id", 0) or 0) if latest is not None else 0
 
         try:
@@ -1027,7 +1027,7 @@ class MainWindow(QMainWindow, UIBase):
                     alarm_logger.log_alarm_event(
                         client_id="master_fault_" + code,
                         alarm_status=True,
-                        count_rate=cps,
+                        count_rate=0.0,
                         temperature=0.0,
                         hv=0.0,
                         product_id=mid,
@@ -1049,7 +1049,7 @@ class MainWindow(QMainWindow, UIBase):
                     alarm_logger.log_alarm_event(
                         client_id="master_fault_" + code,
                         alarm_status=False,
-                        count_rate=cps,
+                        count_rate=0.0,
                         temperature=0.0,
                         hv=0.0,
                         product_id=mid,
@@ -1069,17 +1069,19 @@ class MainWindow(QMainWindow, UIBase):
             return
         now = time.time()
         startup_age = now - float(dm.acquisition_start_time or now)
-        master_cid = getattr(self, "master_client_id", None)
         last_any = float(getattr(self, "_last_any_master_at", 0) or 0)
         last_sane = float(getattr(self, "_last_sane_master_at", 0) or 0)
         latest = getattr(self, "latest_master_summary", None)
+        never_seen = last_any <= 0
+        link_timeout = (not never_seen) and ((now - last_any) > dm.COMM_TIMEOUT_SEC)
 
-        if (not master_cid or last_any <= 0) and startup_age > dm.NO_DATA_STARTUP_SEC:
+        # M101/M102 互斥：从未收到过 → 只 M101；曾经有过再超时 → 只 M102
+        if never_seen and startup_age > dm.NO_DATA_STARTUP_SEC:
             dm.add_fault(_MASTER_FAULT_CLIENT_ID, FaultCode.M101)
         else:
             dm.remove_fault(_MASTER_FAULT_CLIENT_ID, FaultCode.M101)
 
-        if last_any > 0 and (now - last_any) > dm.COMM_TIMEOUT_SEC:
+        if link_timeout:
             dm.add_fault(_MASTER_FAULT_CLIENT_ID, FaultCode.M102)
         else:
             dm.remove_fault(_MASTER_FAULT_CLIENT_ID, FaultCode.M102)
@@ -2342,7 +2344,8 @@ class MainWindow(QMainWindow, UIBase):
         active_count = 0
         try:
             from core.alarm_logger import get_alarm_logger
-            active_count = sum(1 for v in get_alarm_logger().get_active_alarms().values() if v)
+            # 底栏红点只跟辐射/通道硬报，不含 M101/M102 系统事件
+            active_count = get_alarm_logger().get_active_radiation_count()
         except Exception:
             active_count = 0
         show = bool(radiation_alarm) or active_count > 0

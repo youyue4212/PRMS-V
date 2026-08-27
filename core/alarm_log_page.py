@@ -12,10 +12,12 @@ from PyQt5.QtCore import Qt, QTimer, pyqtSignal
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame,
     QTableWidget, QTableWidgetItem, QHeaderView, QGroupBox,
-    QScrollArea, QSizePolicy
+    QScrollArea, QSizePolicy, QTabWidget
 )
 
-from core.alarm_logger import get_alarm_logger, AlarmEvent
+from core.alarm_logger import (
+    get_alarm_logger, AlarmEvent, is_system_event_type,
+)
 
 
 def format_alarm_event_client(event: AlarmEvent) -> str:
@@ -50,12 +52,20 @@ def format_alarm_event_type(event: AlarmEvent) -> str:
     from core.translation import _t
     t = str(getattr(event, "alarm_type", "") or "")
     if t == "MasterFault":
-        return _t("log_master_fault_type")
+        return _t("log_type_system_comm")
     if t == "ChannelMatch":
         return _t("log_type_channel_match")
     if t in ("Radiation", "radiation", "Alarm"):
         return _t("log_type_radiation")
     return t or "--"
+
+
+def format_alarm_event_status(event: AlarmEvent) -> str:
+    from core.translation import _t
+    active = bool(getattr(event, "alarm_status", False))
+    if is_system_event_type(getattr(event, "alarm_type", "")):
+        return _t("log_status_link_down") if active else _t("log_status_link_restored")
+    return _t("log_status_active") if active else _t("log_status_cleared")
 
 
 def format_alarm_event_message(event: AlarmEvent) -> str:
@@ -73,6 +83,17 @@ def format_alarm_event_message(event: AlarmEvent) -> str:
         if code and code not in msg:
             msg = ("%s %s" % (code, msg)).strip()
     return msg
+
+
+def format_alarm_fault_code(event: AlarmEvent) -> str:
+    client_id = str(getattr(event, "client_id", "") or "")
+    if client_id.startswith("master_fault_"):
+        return client_id.replace("master_fault_", "", 1)
+    msg = str(getattr(event, "message", "") or "")
+    for tok in msg.split():
+        if tok.startswith("M") and len(tok) == 4 and tok[1:].isdigit():
+            return tok
+    return "--"
 
 
 class AlarmLogPage(QWidget):
@@ -93,8 +114,7 @@ class AlarmLogPage(QWidget):
         return format_alarm_event_type(event)
 
     def _format_event_status(self, event: AlarmEvent) -> str:
-        from core.translation import _t
-        return _t("log_status_active") if bool(getattr(event, "alarm_status", False)) else _t("log_status_cleared")
+        return format_alarm_event_status(event)
 
     def _format_event_message(self, event: AlarmEvent) -> str:
         return format_alarm_event_message(event)
@@ -230,55 +250,75 @@ class AlarmLogPage(QWidget):
         self.page_size = 15
         self.total_events = 0
         self.total_pages = 0
+        self._log_category = "radiation"  # radiation | system
 
-        # Alarm records table
-        self.table_group = QGroupBox(_t("log_title"))
-        self.table_group.setStyleSheet("""
-            QGroupBox {
-                color: white;
-                font-size: 14px;
-                font-weight: bold;
+        # Tabs: 辐射报警 vs 系统/通信（工业分层，不混字段）
+        self.log_tabs = QTabWidget()
+        self.log_tabs.setStyleSheet("""
+            QTabWidget::pane {
                 border: 1px solid #333333;
                 border-radius: 8px;
-                margin-top: 10px;
-                padding-top: 10px;
+                background: #1a1a1a;
+                top: -1px;
             }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 10px;
-                padding: 0 5px 0 5px;
+            QTabBar::tab {
+                background: #2a2a2a;
+                color: #bbbbbb;
+                padding: 10px 18px;
+                margin-right: 4px;
+                border-top-left-radius: 8px;
+                border-top-right-radius: 8px;
+                font-size: 13px;
+                font-weight: bold;
             }
-        """)
-
-        table_layout = QVBoxLayout(self.table_group)
-
-        scroll_area = QScrollArea()
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        scroll_area.setStyleSheet("""
-            QScrollArea {
-                border: none;
-                background-color: transparent;
-            }
-            QScrollArea > QWidget > QWidget {
-                background-color: transparent;
+            QTabBar::tab:selected {
+                background: #3a3a3a;
+                color: #ffffff;
+                border-bottom: 2px solid #26c6da;
             }
         """)
+        self.log_tabs.currentChanged.connect(self._on_log_tab_changed)
 
-        table_container = QWidget()
-        table_container_layout = QVBoxLayout(table_container)
-        table_container_layout.setContentsMargins(0, 0, 0, 0)
+        self.table_widget = self._make_log_table(system=False)
+        self.system_table_widget = self._make_log_table(system=True)
 
-        # 7 columns for 7-inch: drop trigger/temp/hv from on-screen table
-        self.table_widget = QTableWidget()
-        self.table_widget.setColumnCount(7)
-        self.table_widget.setHorizontalHeaderLabels([
-            _t("header_time"), _t("header_client"), _t("header_type"), _t("header_status"),
-            _t("header_rates"), _t("header_duration"), _t("header_message")
-        ])
+        rad_page = QWidget()
+        rad_lay = QVBoxLayout(rad_page)
+        rad_lay.setContentsMargins(8, 8, 8, 8)
+        rad_scroll = self._wrap_table_scroll(self.table_widget)
+        rad_lay.addWidget(rad_scroll)
+        self.log_tabs.addTab(rad_page, _t("log_tab_radiation"))
 
-        self.table_widget.setStyleSheet("""
+        sys_page = QWidget()
+        sys_lay = QVBoxLayout(sys_page)
+        sys_lay.setContentsMargins(8, 8, 8, 8)
+        sys_scroll = self._wrap_table_scroll(self.system_table_widget)
+        sys_lay.addWidget(sys_scroll)
+        self.log_tabs.addTab(sys_page, _t("log_tab_system"))
+
+        layout.addWidget(self.log_tabs, 1)
+
+        self.setLayout(layout)
+
+        # Initial refresh
+        self.refresh_display()
+
+    def _make_log_table(self, system: bool = False) -> QTableWidget:
+        from core.translation import _t
+        table = QTableWidget()
+        if system:
+            table.setColumnCount(5)
+            table.setHorizontalHeaderLabels([
+                _t("header_time"), _t("header_fault_code"), _t("header_link_status"),
+                _t("header_outage_duration"), _t("header_message"),
+            ])
+        else:
+            table.setColumnCount(7)
+            table.setHorizontalHeaderLabels([
+                _t("header_time"), _t("header_client"), _t("header_type"), _t("header_status"),
+                _t("header_rates"), _t("header_duration"), _t("header_message"),
+            ])
+        table.setStyleSheet("""
             QTableWidget {
                 background-color: #1a1a1a;
                 color: #f0f0f0;
@@ -306,32 +346,49 @@ class AlarmLogPage(QWidget):
                 font-size: 13px;
             }
         """)
-
-        header = self.table_widget.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(3, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(4, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(5, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(6, QHeaderView.Stretch)
+        header = table.horizontalHeader()
+        cols = table.columnCount()
+        for i in range(cols - 1):
+            header.setSectionResizeMode(i, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(cols - 1, QHeaderView.Stretch)
         header.setMinimumSectionSize(56)
+        table.setAlternatingRowColors(True)
+        table.verticalHeader().setVisible(False)
+        table.verticalHeader().setDefaultSectionSize(40)
+        table.setMinimumHeight(200)
+        return table
 
-        self.table_widget.setAlternatingRowColors(True)
-        self.table_widget.verticalHeader().setVisible(False)
-        self.table_widget.verticalHeader().setDefaultSectionSize(40)
-        self.table_widget.setMinimumHeight(200)
-
-        table_container_layout.addWidget(self.table_widget)
+    def _wrap_table_scroll(self, table: QTableWidget) -> QScrollArea:
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll_area.setStyleSheet("""
+            QScrollArea {
+                border: none;
+                background-color: transparent;
+            }
+            QScrollArea > QWidget > QWidget {
+                background-color: transparent;
+            }
+        """)
+        table_container = QWidget()
+        table_container_layout = QVBoxLayout(table_container)
+        table_container_layout.setContentsMargins(0, 0, 0, 0)
+        table_container_layout.addWidget(table)
         scroll_area.setWidget(table_container)
+        return scroll_area
 
-        table_layout.addWidget(scroll_area)
-        layout.addWidget(self.table_group, 1)
+    def _on_log_tab_changed(self, index: int):
+        self._log_category = "system" if int(index) == 1 else "radiation"
+        self.current_page = 1
+        self._page_table_sig = None
+        self.update_table_with_pagination()
 
-        self.setLayout(layout)
-
-        # Initial refresh
-        self.refresh_display()
+    def _active_table(self) -> QTableWidget:
+        if self._log_category == "system":
+            return self.system_table_widget
+        return self.table_widget
 
     def create_stat_card(self, title: str, value: str, color: str, card_id: str = "") -> QFrame:
         """概览同款状态卡：深色渐变、标题灰、数值胶囊、底部色条。"""
@@ -504,11 +561,16 @@ class AlarmLogPage(QWidget):
         )
 
         self.update_table_with_pagination()
-    
+        if hasattr(self, "log_tabs"):
+            sys_n = int(stats.get("active_system", 0) or 0)
+            sys_title = _t("log_tab_system")
+            if sys_n > 0:
+                sys_title = "%s (%d)" % (sys_title, sys_n)
+            self.log_tabs.setTabText(1, sys_title)
+
     def update_table(self):
-        """Update table data with performance optimizations"""
-        # Get recent alarm events (max 100)
-        events = self.alarm_logger.get_recent_events(100)
+        """Legacy full-table refresh (radiation only). Prefer pagination path."""
+        events = self.alarm_logger.get_recent_events(100, category="radiation")
         
         # Performance optimization: Only update if data has changed
         current_event_count = len(events)
@@ -745,104 +807,140 @@ class AlarmLogPage(QWidget):
             self.update_table_with_pagination()
     
     def update_table_with_pagination(self):
-        """Update table with pagination support"""
-        # Get all alarm events
-        all_events = self.alarm_logger.get_recent_events(1000)  # Get up to 1000 events for pagination
-        
+        """Update active tab table with pagination (radiation or system)."""
+        from core.translation import _t
+        category = getattr(self, "_log_category", "radiation")
+        all_events = self.alarm_logger.get_recent_events(1000, category=category)
+        table = self._active_table()
+
         # Update pagination info
         self.total_events = len(all_events)
         self.total_pages = max(1, (self.total_events + self.page_size - 1) // self.page_size)
-        
+
         # Ensure current page is valid
         if self.current_page > self.total_pages:
             self.current_page = self.total_pages
         if self.current_page < 1:
             self.current_page = 1
-        
+
         # Update pagination controls
         self.update_pagination_controls()
-        
+
         # Calculate start and end indices for current page
         start_idx = (self.current_page - 1) * self.page_size
         end_idx = min(start_idx + self.page_size, self.total_events)
-        
+
         # Get events for current page (newest first)
         page_events = list(reversed(all_events))[start_idx:end_idx]
 
-        bar = self.table_widget.verticalScrollBar()
+        bar = table.verticalScrollBar()
         scroll_val = bar.value()
         if bar.isSliderDown():
             return
-        page_changed = getattr(self, "_shown_page", None) != self.current_page
+        page_key = (category, self.current_page)
+        page_changed = getattr(self, "_shown_page", None) != page_key
         if page_changed:
             scroll_val = 0
-        self._shown_page = self.current_page
+        self._shown_page = page_key
 
-        sig = tuple(
-            (
-                getattr(ev, "timestamp", 0),
-                bool(ev.alarm_status),
-                str(getattr(ev, "message", "") or ""),
-                float(getattr(ev, "peak_count_rate", ev.count_rate) or 0),
-            )
-            for ev in page_events
+        sig = (
+            category,
+            "empty-hint" if (category == "system" and not page_events) else "rows",
+            tuple(
+                (
+                    getattr(ev, "timestamp", 0),
+                    bool(ev.alarm_status),
+                    str(getattr(ev, "message", "") or ""),
+                    float(getattr(ev, "peak_count_rate", ev.count_rate) or 0),
+                    float(getattr(ev, "duration", 0) or 0),
+                )
+                for ev in page_events
+            ),
         )
-        if sig == getattr(self, "_page_table_sig", None) and self.table_widget.rowCount() == len(page_events):
+        expected_rows = 1 if (category == "system" and not page_events) else len(page_events)
+        if sig == getattr(self, "_page_table_sig", None) and table.rowCount() == expected_rows:
             return
         self._page_table_sig = sig
 
-        # Performance optimization: Disable visual updates during table population
-        self.table_widget.setUpdatesEnabled(False)
-        
+        table.setUpdatesEnabled(False)
         try:
-            # Set row count
-            self.table_widget.setRowCount(len(page_events))
-            
-            # Fill data for current page (7 columns)
-            for row, event in enumerate(page_events):
-                display_client = self._format_event_client(event)
-                display_type = self._format_event_type(event)
-                display_status = self._format_event_status(event)
-                display_message = self._format_event_message(event)
-
-                time_str = datetime.fromtimestamp(event.timestamp).strftime('%m-%d %H:%M:%S')
-                time_item = QTableWidgetItem(time_str)
-                time_item.setTextAlignment(Qt.AlignCenter)
-                self.table_widget.setItem(row, 0, time_item)
-
-                client_item = QTableWidgetItem(display_client)
-                client_item.setTextAlignment(Qt.AlignCenter)
-                self.table_widget.setItem(row, 1, client_item)
-
-                type_item = QTableWidgetItem(display_type)
-                type_item.setTextAlignment(Qt.AlignCenter)
-                self.table_widget.setItem(row, 2, type_item)
-
-                status_item = QTableWidgetItem(display_status)
-                status_item.setTextAlignment(Qt.AlignCenter)
-                if event.alarm_status:
-                    status_item.setForeground(Qt.red)
+            table.setRowCount(len(page_events))
+            if category == "system":
+                if not page_events:
+                    table.setRowCount(1)
+                    hint = QTableWidgetItem(_t("log_system_empty_hint"))
+                    hint.setForeground(Qt.gray)
+                    table.setItem(0, 0, hint)
+                    table.setSpan(0, 0, 1, table.columnCount())
                 else:
-                    status_item.setForeground(Qt.green)
-                self.table_widget.setItem(row, 3, status_item)
+                    table.clearSpans()
+                    for row, event in enumerate(page_events):
+                        time_str = datetime.fromtimestamp(event.timestamp).strftime('%m-%d %H:%M:%S')
+                        time_item = QTableWidgetItem(time_str)
+                        time_item.setTextAlignment(Qt.AlignCenter)
+                        table.setItem(row, 0, time_item)
 
-                peak_rate = getattr(event, 'peak_count_rate', event.count_rate)
-                peak_rate_item = QTableWidgetItem(f"{peak_rate:.1f}")
-                peak_rate_item.setTextAlignment(Qt.AlignCenter)
-                self.table_widget.setItem(row, 4, peak_rate_item)
+                        code_item = QTableWidgetItem(format_alarm_fault_code(event))
+                        code_item.setTextAlignment(Qt.AlignCenter)
+                        table.setItem(row, 1, code_item)
 
-                duration_text = f"{event.duration:.1f}" if event.duration > 0 else ""
-                duration_item = QTableWidgetItem(duration_text)
-                duration_item.setTextAlignment(Qt.AlignCenter)
-                self.table_widget.setItem(row, 5, duration_item)
+                        status_item = QTableWidgetItem(self._format_event_status(event))
+                        status_item.setTextAlignment(Qt.AlignCenter)
+                        if event.alarm_status:
+                            status_item.setForeground(Qt.yellow)
+                        else:
+                            status_item.setForeground(Qt.green)
+                        table.setItem(row, 2, status_item)
 
-                message_item = QTableWidgetItem(display_message)
-                self.table_widget.setItem(row, 6, message_item)
-                
+                        duration_text = f"{event.duration:.1f}" if event.duration > 0 else ""
+                        duration_item = QTableWidgetItem(duration_text)
+                        duration_item.setTextAlignment(Qt.AlignCenter)
+                        table.setItem(row, 3, duration_item)
+
+                        table.setItem(row, 4, QTableWidgetItem(self._format_event_message(event)))
+            else:
+                table.clearSpans()
+                for row, event in enumerate(page_events):
+                    display_client = self._format_event_client(event)
+                    display_type = self._format_event_type(event)
+                    display_status = self._format_event_status(event)
+                    display_message = self._format_event_message(event)
+
+                    time_str = datetime.fromtimestamp(event.timestamp).strftime('%m-%d %H:%M:%S')
+                    time_item = QTableWidgetItem(time_str)
+                    time_item.setTextAlignment(Qt.AlignCenter)
+                    table.setItem(row, 0, time_item)
+
+                    client_item = QTableWidgetItem(display_client)
+                    client_item.setTextAlignment(Qt.AlignCenter)
+                    table.setItem(row, 1, client_item)
+
+                    type_item = QTableWidgetItem(display_type)
+                    type_item.setTextAlignment(Qt.AlignCenter)
+                    table.setItem(row, 2, type_item)
+
+                    status_item = QTableWidgetItem(display_status)
+                    status_item.setTextAlignment(Qt.AlignCenter)
+                    if event.alarm_status:
+                        status_item.setForeground(Qt.red)
+                    else:
+                        status_item.setForeground(Qt.green)
+                    table.setItem(row, 3, status_item)
+
+                    peak_rate = getattr(event, 'peak_count_rate', event.count_rate)
+                    peak_rate_item = QTableWidgetItem(f"{peak_rate:.1f}")
+                    peak_rate_item.setTextAlignment(Qt.AlignCenter)
+                    table.setItem(row, 4, peak_rate_item)
+
+                    duration_text = f"{event.duration:.1f}" if event.duration > 0 else ""
+                    duration_item = QTableWidgetItem(duration_text)
+                    duration_item.setTextAlignment(Qt.AlignCenter)
+                    table.setItem(row, 5, duration_item)
+
+                    table.setItem(row, 6, QTableWidgetItem(display_message))
         finally:
-            # Re-enable visual updates
-            self.table_widget.setUpdatesEnabled(True)
-            self.table_widget.verticalScrollBar().setValue(scroll_val)
+            table.setUpdatesEnabled(True)
+            table.verticalScrollBar().setValue(scroll_val)
     
     def update_pagination_controls(self):
         """Update pagination control states"""
@@ -874,16 +972,22 @@ class AlarmLogPage(QWidget):
         # Update pagination labels
         self.prev_page_btn.setText(_t("btn_prev"))
         self.next_page_btn.setText(_t("btn_next"))
-        
-        # Update table group title
-        self.table_group.setTitle(_t("log_title"))
-        
-        # Update table headers
-        self.table_widget.setHorizontalHeaderLabels([
-            _t("header_time"), _t("header_client"), _t("header_type"), _t("header_status"),
-            _t("header_rates"), _t("header_duration"), _t("header_message")
-        ])
-        
+
+        if hasattr(self, "log_tabs"):
+            self.log_tabs.setTabText(0, _t("log_tab_radiation"))
+            self.log_tabs.setTabText(1, _t("log_tab_system"))
+
+        if hasattr(self, "table_widget"):
+            self.table_widget.setHorizontalHeaderLabels([
+                _t("header_time"), _t("header_client"), _t("header_type"), _t("header_status"),
+                _t("header_rates"), _t("header_duration"), _t("header_message")
+            ])
+        if hasattr(self, "system_table_widget"):
+            self.system_table_widget.setHorizontalHeaderLabels([
+                _t("header_time"), _t("header_fault_code"), _t("header_link_status"),
+                _t("header_outage_duration"), _t("header_message"),
+            ])
+
         # Refresh display to update pagination info text
         self.refresh_display()
     
