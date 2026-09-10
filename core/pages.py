@@ -610,7 +610,10 @@ class ClientsPage(QWidget):
         from core.user_manager import UserRole
         is_admin = False
         if hasattr(self.parent, 'current_user') and self.parent.current_user:
-            is_admin = self.parent.current_user.get('role') == UserRole.ADMIN
+            is_admin = self.parent.current_user.get('role') in (
+                UserRole.ADMIN,
+                UserRole.MAINTAINER,
+            )
             
         if not is_admin:
             self.stacked_widget.setCurrentIndex(0)

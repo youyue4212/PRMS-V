@@ -20,8 +20,9 @@ def _app_data_dir() -> str:
 
 class UserRole(Enum):
     """用户角色枚举"""
-    ADMIN = "admin"      # 管理员：可以查看数据、设置参数、操作控制
-    VIEWER = "viewer"    # 普通用户：只能查看数据
+    ADMIN = "admin"              # 管理员：日常运行/保存/清理
+    MAINTAINER = "maintainer"    # 维护用户：调参/开通/通信/身份维护
+    VIEWER = "viewer"            # 普通用户：只能查看数据
 
 
 @dataclass
@@ -57,6 +58,7 @@ class Permission:
     MODIFY_CONTROL_SETTINGS = "modify_control_settings"
     MODIFY_DEVICE_CONTROL = "modify_device_control"
     MODIFY_LOG_SETTINGS = "modify_log_settings"
+    MANAGE_PRODUCT_ID = "manage_product_id"
     
     # 用户管理权限
     MANAGE_USERS = "manage_users"
@@ -65,9 +67,14 @@ class Permission:
     ROLE_PERMISSIONS = {
         UserRole.ADMIN: [
             VIEW_OVERVIEW, VIEW_SPECTRUM, VIEW_CLIENTS, VIEW_ALARM_LOG, VIEW_SETTINGS,
+            START_STOP_ACQUISITION, CLEAR_DATA, SAVE_DATA
+        ],
+        UserRole.MAINTAINER: [
+            VIEW_OVERVIEW, VIEW_SPECTRUM, VIEW_CLIENTS, VIEW_ALARM_LOG, VIEW_SETTINGS,
             START_STOP_ACQUISITION, CLEAR_DATA, SAVE_DATA,
             MODIFY_COMM_SETTINGS, MODIFY_DETECTOR_SETTINGS, MODIFY_CONTROL_SETTINGS,
             MODIFY_DEVICE_CONTROL, MODIFY_LOG_SETTINGS,
+            MANAGE_PRODUCT_ID,
             MANAGE_USERS
         ],
         UserRole.VIEWER: [
@@ -80,6 +87,11 @@ class Permission:
     def get_permissions_for_role(cls, role: UserRole) -> List[str]:
         """获取指定角色的权限列表"""
         return cls.ROLE_PERMISSIONS.get(role, [])
+
+    @classmethod
+    def is_privileged_role(cls, role: Optional[UserRole]) -> bool:
+        """Admin-like roles that should share timeout/audit behavior."""
+        return role in (UserRole.ADMIN, UserRole.MAINTAINER)
 
 
 class UserManager(QObject):
@@ -121,6 +133,21 @@ class UserManager(QObject):
                             created_at=user_data.get('created_at', ''),
                             last_login=user_data.get('last_login', '')
                         )
+                # 兼容旧版本：历史默认 admin 账号曾拥有全权限，升级后自动提升为维护用户，
+                # 避免现场无法再创建维护账号或执行首次 Product ID 维护。
+                if not any(user.role == UserRole.MAINTAINER for user in self.users.values()):
+                    promoted = False
+                    if "admin" in self.users and self.users["admin"].role == UserRole.ADMIN:
+                        self.users["admin"].role = UserRole.MAINTAINER
+                        promoted = True
+                    else:
+                        for user in self.users.values():
+                            if user.role == UserRole.ADMIN:
+                                user.role = UserRole.MAINTAINER
+                                promoted = True
+                                break
+                    if promoted:
+                        self.save_users()
         except Exception as e:
             print(f"加载用户数据失败: {e}")
             self.users = {}
@@ -144,8 +171,8 @@ class UserManager(QObject):
         default_admin = User(
             username="admin",
             password_hash=self._hash_password("admin123"),  # 默认密码
-            role=UserRole.ADMIN,
-            full_name="系统管理员",
+            role=UserRole.MAINTAINER,
+            full_name="系统维护",
             email="admin@example.com",
             created_at="2025-01-01",
             last_login=""
@@ -235,6 +262,9 @@ class UserManager(QObject):
         if self.current_user:
             return self.current_user.role
         return None
+
+    def is_maintainer(self) -> bool:
+        return bool(self.current_user and self.current_user.role == UserRole.MAINTAINER)
     
     def has_permission(self, permission: str) -> bool:
         """检查当前用户是否有指定权限"""

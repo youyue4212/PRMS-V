@@ -14,6 +14,14 @@ from core.user_manager import get_user_manager, UserRole
 from core.translation import _t
 
 
+def _role_text(role_value):
+    if role_value in (UserRole.ADMIN, "admin"):
+        return _t("role_admin")
+    if role_value in (UserRole.MAINTAINER, "maintainer"):
+        return _t("role_maintainer")
+    return _t("role_viewer")
+
+
 class UserManagementDialog(QDialog):
     """用户管理对话框"""
     
@@ -233,6 +241,7 @@ class UserManagementDialog(QDialog):
         self.new_role_combo = QComboBox()
         self.new_role_combo.addItem(_t("role_viewer"), UserRole.VIEWER)
         self.new_role_combo.addItem(_t("role_admin"), UserRole.ADMIN)
+        self.new_role_combo.addItem(_t("role_maintainer"), UserRole.MAINTAINER)
         form_layout.addRow(_t("label_role"), self.new_role_combo)
         
         # 姓名
@@ -271,7 +280,7 @@ class UserManagementDialog(QDialog):
         current_user = self.user_manager.get_current_user()
         self.user_info_label = QLabel()
         if current_user:
-            role_display = _t("role_admin") if current_user.role == UserRole.ADMIN else _t("role_viewer")
+            role_display = _role_text(current_user.role)
             self.user_info_label.setText(_t("label_current_user", user=current_user.username, role=role_display))
         layout.addWidget(self.user_info_label)
         
@@ -289,7 +298,7 @@ class UserManagementDialog(QDialog):
             users = self.user_manager.get_all_users()
             for user in users:
                 if user['username'] != current_user.username:
-                    role_display = _t("role_admin") if user['role'] == 'admin' else _t("role_viewer")
+                    role_display = _role_text(user['role'])
                     display_text = f"{user['username']} ({role_display})"
                     self.password_user_combo.addItem(display_text, user['username'])
         
@@ -362,7 +371,7 @@ class UserManagementDialog(QDialog):
             self.user_table.setItem(row, 0, username_item)
             
             # 角色
-            role_display = _t("role_admin") if user['role'] == 'admin' else _t("role_viewer")
+            role_display = _role_text(user['role'])
             role_item = QTableWidgetItem(role_display)
             self.user_table.setItem(row, 1, role_item)
             
@@ -566,6 +575,7 @@ class EditUserDialog(QDialog):
         self.role_combo = QComboBox()
         self.role_combo.addItem(_t("role_viewer"), UserRole.VIEWER)
         self.role_combo.addItem(_t("role_admin"), UserRole.ADMIN)
+        self.role_combo.addItem(_t("role_maintainer"), UserRole.MAINTAINER)
         form_layout.addRow(_t("label_role"), self.role_combo)
         
         # 姓名
@@ -606,6 +616,8 @@ class EditUserDialog(QDialog):
             # 设置角色
             if user['role'] == 'admin':
                 self.role_combo.setCurrentIndex(1)
+            elif user['role'] == 'maintainer':
+                self.role_combo.setCurrentIndex(2)
             else:
                 self.role_combo.setCurrentIndex(0)
             

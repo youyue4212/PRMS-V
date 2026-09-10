@@ -720,7 +720,10 @@ class AlarmLogPage(QWidget):
             from core.user_manager import UserRole
             host = self._host_window()
             user = getattr(host, "current_user", None) if host is not None else None
-            return bool(isinstance(user, dict) and user.get("role") == UserRole.ADMIN)
+            return bool(
+                isinstance(user, dict)
+                and user.get("role") in (UserRole.ADMIN, UserRole.MAINTAINER)
+            )
         except Exception:
             return False
 

@@ -450,6 +450,8 @@ class HomePage(QWidget):
         if user and isinstance(user, dict):
             role = user.get("role")
             role_val = getattr(role, "value", None) or str(role)
+            if "maintainer" in str(role_val).lower():
+                return _t("mode_maintainer")
             if "admin" in str(role_val).lower():
                 return _t("mode_admin")
             return _t("mode_viewer")

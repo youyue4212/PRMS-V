@@ -51,7 +51,7 @@ class TimeoutManager(QObject):
 
     def is_admin_mode_active(self):
         current_user = self.user_manager.get_current_user()
-        return current_user and current_user.role == UserRole.ADMIN
+        return current_user and current_user.role in (UserRole.ADMIN, UserRole.MAINTAINER)
 
     def is_timed_out(self):
         if not hasattr(self, 'last_operate_time') or self.last_operate_time == 0:

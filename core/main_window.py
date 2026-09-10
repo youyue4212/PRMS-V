@@ -113,7 +113,7 @@ class MainWindow(QMainWindow, UIBase):
         from core.translation import _t
         if current_user and 'username' in current_user:
             username = current_user['username']
-            role_name = "Admin" if current_user['role'] == UserRole.ADMIN else "User"
+            role_name = self._window_role_name(current_user['role'])
             self.setWindowTitle(f"Gamma-ray Spectrometer - {username} ({role_name})")
         else:
             self.setWindowTitle(
@@ -382,7 +382,7 @@ class MainWindow(QMainWindow, UIBase):
             self.control_room_page.set_alarm_polling(False)
         
         # 如果是管理员模式，启动超时计时器
-        if self.current_user and self.current_user['role'] == UserRole.ADMIN:
+        if self._is_privileged_user():
             self.timeout_manager.start_timer()
             self.log("Admin mode started, will auto logout after 3 minutes of inactivity", 'INFO')
 
@@ -537,6 +537,38 @@ class MainWindow(QMainWindow, UIBase):
             self.switch_page(5)
             return
         self.switch_page(3)
+
+    def _current_role(self):
+        if isinstance(getattr(self, "current_user", None), dict):
+            return self.current_user.get("role")
+        return None
+
+    def _is_maintainer_user(self) -> bool:
+        return self._current_role() == UserRole.MAINTAINER
+
+    def _is_privileged_user(self) -> bool:
+        return self._current_role() in (UserRole.ADMIN, UserRole.MAINTAINER)
+
+    def _window_role_name(self, role) -> str:
+        from core.translation import _t
+
+        if role == UserRole.ADMIN:
+            return _t("role_admin")
+        if role == UserRole.MAINTAINER:
+            return _t("role_maintainer")
+        return _t("role_viewer")
+
+    def _product_id_is_unique(self, product_id: int, current_client_id: str = None) -> bool:
+        for cid, data in (getattr(self, "client_data", None) or {}).items():
+            if not cid or cid == current_client_id:
+                continue
+            try:
+                live_pid = int((data or {}).get("product_id", 0) or 0)
+            except (TypeError, ValueError):
+                live_pid = 0
+            if live_pid > 0 and live_pid == int(product_id):
+                return False
+        return True
 
     def _apply_page_index(self, index):
         """切页后的统一收尾：状态栏、首页/曲线刷新、绘图节拍。登录/退出也走这里。"""
@@ -2421,7 +2453,7 @@ class MainWindow(QMainWindow, UIBase):
         role = None
         if isinstance(getattr(self, "current_user", None), dict):
             role = self.current_user.get("role")
-        if role != UserRole.ADMIN:
+        if role not in (UserRole.ADMIN, UserRole.MAINTAINER):
             show_warn(self, _t("msg_channel_reset_title"), _t("msg_channel_reset_need_admin"))
             return
 
@@ -3233,28 +3265,13 @@ class MainWindow(QMainWindow, UIBase):
         
         # 更新用户管理按钮可见性
         # 注意：这里需要检查本地角色，而不是用户管理器中的角色
-        if role == UserRole.VIEWER:
-            # 如果是普通用户，检查VIEWER角色是否有用户管理权限
-            from core.user_manager import Permission as Perm
-            viewer_permissions = Perm.get_permissions_for_role(UserRole.VIEWER)
-            can_manage_users = Permission.MANAGE_USERS in viewer_permissions
-        else:
-            # 管理员或其他角色，使用用户管理器的权限检查
-            can_manage_users = self.user_manager.has_permission(Permission.MANAGE_USERS)
+        can_manage_users = self.user_manager.has_permission(Permission.MANAGE_USERS)
         self.user_management_btn.setVisible(can_manage_users)
         
         # 更新操作按钮状态（清除数据和保存数据）
         # 注意：这里需要检查本地角色，而不是用户管理器中的角色
-        if role == UserRole.VIEWER:
-            # 如果是普通用户，检查VIEWER角色是否有这些权限
-            from core.user_manager import Permission as Perm
-            viewer_permissions = Perm.get_permissions_for_role(UserRole.VIEWER)
-            can_clear_data = Permission.CLEAR_DATA in viewer_permissions
-            can_save_data = Permission.SAVE_DATA in viewer_permissions
-        else:
-            # 管理员或其他角色，使用用户管理器的权限检查
-            can_clear_data = self.user_manager.has_permission(Permission.CLEAR_DATA)
-            can_save_data = self.user_manager.has_permission(Permission.SAVE_DATA)
+        can_clear_data = self.user_manager.has_permission(Permission.CLEAR_DATA)
+        can_save_data = self.user_manager.has_permission(Permission.SAVE_DATA)
         
         # 禁用或启用清除数据按钮
         self.acquisition_btn.setEnabled(can_clear_data)
@@ -3324,7 +3341,7 @@ class MainWindow(QMainWindow, UIBase):
             self.status_bar.update_user_info(self.current_user['username'], role)
         
         # 如果是管理员，启动超时计时器
-        if role == UserRole.ADMIN:
+        if self._is_privileged_user():
             self.timeout_manager.start_timer()
             self.log("管理员模式已启动，3分钟无操作将自动退出", 'INFO')
         else:
@@ -3340,122 +3357,155 @@ class MainWindow(QMainWindow, UIBase):
     def update_settings_controls_for_role(self, role):
         """根据用户角色更新设置页面控件状态"""
         allow_viewer_settings = str(os.environ.get("ALLOW_VIEWER_SETTINGS", "0")).strip() == "1"
-        # 检查用户是否有修改设置的权限
-        can_modify_settings = self.user_manager.has_permission(Permission.MODIFY_COMM_SETTINGS) or \
-                             self.user_manager.has_permission(Permission.MODIFY_DETECTOR_SETTINGS) or \
-                             self.user_manager.has_permission(Permission.MODIFY_CONTROL_SETTINGS) or \
-                             self.user_manager.has_permission(Permission.MODIFY_DEVICE_CONTROL) or \
-                             self.user_manager.has_permission(Permission.MODIFY_LOG_SETTINGS)
+        can_maintain = (
+            self.user_manager.has_permission(Permission.MODIFY_COMM_SETTINGS)
+            or self.user_manager.has_permission(Permission.MODIFY_DETECTOR_SETTINGS)
+            or self.user_manager.has_permission(Permission.MODIFY_CONTROL_SETTINGS)
+            or self.user_manager.has_permission(Permission.MODIFY_DEVICE_CONTROL)
+            or self.user_manager.has_permission(Permission.MODIFY_LOG_SETTINGS)
+        )
+        can_manage_pid = self.user_manager.has_permission(Permission.MANAGE_PRODUCT_ID)
+        can_runtime = self.user_manager.has_permission(Permission.SAVE_DATA)
         if allow_viewer_settings:
-            can_modify_settings = True
+            can_maintain = True
+            can_manage_pid = True
+            can_runtime = True
         
         # 禁用或启用设置控件
         if hasattr(self, 'tcp_enable_checkbox'):
-            self.tcp_enable_checkbox.setEnabled(can_modify_settings)
+            self.tcp_enable_checkbox.setEnabled(can_maintain)
         
         if hasattr(self, 'tcp_host_input'):
-            self.tcp_host_input.setEnabled(can_modify_settings)
+            self.tcp_host_input.setEnabled(can_maintain)
         
         if hasattr(self, 'tcp_port_spin'):
-            self.tcp_port_spin.setEnabled(can_modify_settings)
+            self.tcp_port_spin.setEnabled(can_maintain)
         
         if hasattr(self, 'serial_port_combo'):
-            self.serial_port_combo.setEnabled(can_modify_settings)
+            self.serial_port_combo.setEnabled(can_maintain)
         
         if hasattr(self, 'baudrate_combo'):
-            self.baudrate_combo.setEnabled(can_modify_settings)
+            self.baudrate_combo.setEnabled(can_maintain)
+        if hasattr(self, 'refresh_serial_btn'):
+            self.refresh_serial_btn.setEnabled(can_maintain)
+        if hasattr(self, 'reconnect_serial_btn'):
+            self.reconnect_serial_btn.setEnabled(can_maintain)
         
         if hasattr(self, 'hv_spin'):
-            self.hv_spin.setEnabled(can_modify_settings)
+            self.hv_spin.setEnabled(can_maintain)
+        if hasattr(self, 'hv_set_btn'):
+            self.hv_set_btn.setEnabled(can_maintain)
         
         if hasattr(self, 'threshold_spin'):
-            self.threshold_spin.setEnabled(can_modify_settings)
+            self.threshold_spin.setEnabled(can_maintain)
+        if hasattr(self, 'threshold_set_btn'):
+            self.threshold_set_btn.setEnabled(can_maintain)
         
         if hasattr(self, 'gain_stabilizer_btn'):
-            self.gain_stabilizer_btn.setEnabled(can_modify_settings)
+            self.gain_stabilizer_btn.setEnabled(can_maintain)
+        if hasattr(self, 'ui_mode_combo'):
+            self.ui_mode_combo.setEnabled(can_maintain)
         
         if hasattr(self, 'sensitivity_spin'):
-            self.sensitivity_spin.setEnabled(can_modify_settings)
+            self.sensitivity_spin.setEnabled(can_maintain)
         
         if hasattr(self, 'sensitivity_set_btn'):
-            self.sensitivity_set_btn.setEnabled(can_modify_settings)
+            self.sensitivity_set_btn.setEnabled(can_maintain)
         
         if hasattr(self, 'sensitivity_read_btn'):
-            self.sensitivity_read_btn.setEnabled(can_modify_settings)
+            self.sensitivity_read_btn.setEnabled(can_maintain)
         
         if hasattr(self, 'relay0_checkbox'):
-            self.relay0_checkbox.setEnabled(can_modify_settings)
+            self.relay0_checkbox.setEnabled(can_maintain)
         
         if hasattr(self, 'relay1_checkbox'):
-            self.relay1_checkbox.setEnabled(can_modify_settings)
+            self.relay1_checkbox.setEnabled(can_maintain)
         
         if hasattr(self, 'relay2_checkbox'):
-            self.relay2_checkbox.setEnabled(can_modify_settings)
+            self.relay2_checkbox.setEnabled(can_maintain)
         
         if hasattr(self, 'relay_read_btn'):
-            self.relay_read_btn.setEnabled(can_modify_settings)
+            self.relay_read_btn.setEnabled(can_maintain)
 
         if hasattr(self, 'master_relay0_checkbox'):
-            self.master_relay0_checkbox.setEnabled(can_modify_settings)
+            self.master_relay0_checkbox.setEnabled(can_maintain)
         if hasattr(self, 'master_relay1_checkbox'):
-            self.master_relay1_checkbox.setEnabled(can_modify_settings)
+            self.master_relay1_checkbox.setEnabled(can_maintain)
         if hasattr(self, 'master_relay2_checkbox'):
-            self.master_relay2_checkbox.setEnabled(can_modify_settings)
+            self.master_relay2_checkbox.setEnabled(can_maintain)
         if getattr(self, 'master_relay_r1_btn', None) is not None:
-            self.master_relay_r1_btn.setEnabled(can_modify_settings)
+            self.master_relay_r1_btn.setEnabled(can_maintain)
         if getattr(self, 'master_relay_r2_btn', None) is not None:
-            self.master_relay_r2_btn.setEnabled(can_modify_settings)
+            self.master_relay_r2_btn.setEnabled(can_maintain)
         if getattr(self, 'master_relay_apply_btn', None) is not None:
-            self.master_relay_apply_btn.setEnabled(can_modify_settings)
+            self.master_relay_apply_btn.setEnabled(can_maintain)
         if hasattr(self, 'master_relay_read_btn') and self.master_relay_read_btn is not None:
-            self.master_relay_read_btn.setEnabled(can_modify_settings)
+            self.master_relay_read_btn.setEnabled(can_maintain)
         if getattr(self, 'master_force_gate_btn', None) is not None:
-            self.master_force_gate_btn.setEnabled(can_modify_settings)
+            self.master_force_gate_btn.setEnabled(can_maintain)
         if getattr(self, 'alarm_clear_mode_combo', None) is not None:
-            self.alarm_clear_mode_combo.setEnabled(can_modify_settings)
+            self.alarm_clear_mode_combo.setEnabled(can_maintain)
         if getattr(self, 'alarm_clear_mode_read_btn', None) is not None:
-            self.alarm_clear_mode_read_btn.setEnabled(can_modify_settings)
+            self.alarm_clear_mode_read_btn.setEnabled(can_maintain)
         if getattr(self, 'sensor_mode_combo', None) is not None:
-            self.sensor_mode_combo.setEnabled(can_modify_settings)
+            self.sensor_mode_combo.setEnabled(can_maintain)
         if getattr(self, 'sensor_mode_read_btn', None) is not None:
-            self.sensor_mode_read_btn.setEnabled(can_modify_settings)
+            self.sensor_mode_read_btn.setEnabled(can_maintain)
         if getattr(self, 'sensor_mode_write_btn', None) is not None:
-            self.sensor_mode_write_btn.setEnabled(can_modify_settings)
+            self.sensor_mode_write_btn.setEnabled(can_maintain)
 
         if hasattr(self, 'alarm_read_btn'):
-            self.alarm_read_btn.setEnabled(can_modify_settings)
+            self.alarm_read_btn.setEnabled(can_maintain)
 
         if hasattr(self, 'expected_probe_spin'):
-            self.expected_probe_spin.setEnabled(can_modify_settings)
+            self.expected_probe_spin.setEnabled(can_maintain)
         if hasattr(self, 'adopt_probe_count_btn'):
-            self.adopt_probe_count_btn.setEnabled(can_modify_settings)
+            self.adopt_probe_count_btn.setEnabled(can_maintain)
         if getattr(self, 'ir_installed_checkbox', None) is not None:
-            self.ir_installed_checkbox.setEnabled(can_modify_settings)
+            self.ir_installed_checkbox.setEnabled(can_maintain)
         if hasattr(self, 'probe_location_edits'):
             for edit in self.probe_location_edits:
-                edit.setEnabled(can_modify_settings)
+                edit.setEnabled(can_maintain)
+        if hasattr(self, 'keyboard_enable_checkbox'):
+            self.keyboard_enable_checkbox.setEnabled(can_maintain)
         
         if hasattr(self, 'telemetry_checkbox'):
-            self.telemetry_checkbox.setEnabled(can_modify_settings)
+            self.telemetry_checkbox.setEnabled(can_maintain)
         
         if hasattr(self, 'log_path_input'):
-            self.log_path_input.setEnabled(can_modify_settings and self.telemetry_checkbox.isChecked())
+            self.log_path_input.setEnabled(can_maintain and self.telemetry_checkbox.isChecked())
         
         if hasattr(self, 'select_path_btn'):
-            self.select_path_btn.setEnabled(can_modify_settings and self.telemetry_checkbox.isChecked())
+            self.select_path_btn.setEnabled(can_maintain and self.telemetry_checkbox.isChecked())
         
         # 自动保存控件权限控制
         if hasattr(self, 'auto_save_checkbox'):
-            self.auto_save_checkbox.setEnabled(can_modify_settings)
+            self.auto_save_checkbox.setEnabled(can_runtime)
         
         if hasattr(self, 'auto_save_interval_spin'):
-            self.auto_save_interval_spin.setEnabled(can_modify_settings)
+            self.auto_save_interval_spin.setEnabled(can_runtime)
         
         if hasattr(self, 'auto_save_path_input'):
-            self.auto_save_path_input.setEnabled(can_modify_settings and self.auto_save_enabled)
+            self.auto_save_path_input.setEnabled(can_runtime and self.auto_save_enabled)
         
         if hasattr(self, 'auto_save_path_btn'):
-            self.auto_save_path_btn.setEnabled(can_modify_settings and self.auto_save_enabled)
+            self.auto_save_path_btn.setEnabled(can_runtime and self.auto_save_enabled)
+
+        for name in (
+            'identity_maintenance_label',
+            'product_id_spin',
+            'product_id_read_btn',
+            'product_id_write_btn',
+            'product_id_unlock_btn',
+            'product_id_lock_label',
+        ):
+            widget = getattr(self, name, None)
+            if widget is not None:
+                widget.setVisible(can_manage_pid)
+        if hasattr(self, "product_id_read_btn"):
+            self.product_id_read_btn.setEnabled(can_manage_pid)
+        if can_manage_pid and hasattr(self, "_refresh_product_id_lock_ui"):
+            self._refresh_product_id_lock_ui()
 
         if hasattr(self, "settings_users_btn"):
             self.settings_users_btn.setEnabled(
@@ -3471,7 +3521,7 @@ class MainWindow(QMainWindow, UIBase):
             )
         
         # 更新按钮文本提示
-        if not can_modify_settings:
+        if not can_maintain and not can_runtime:
             self.log("Current user is regular user, settings functions are disabled", 'INFO')
     
     def show_user_management(self):
@@ -3530,6 +3580,96 @@ class MainWindow(QMainWindow, UIBase):
                 )
                 return False
             return True
+
+    def unlock_product_id_edit(self):
+        from core.translation import _t
+
+        if not self.check_permission_before_action("Product ID maintenance", Permission.MANAGE_PRODUCT_ID):
+            return False
+        if not getattr(self, "primary_client_id", None):
+            show_warn(self, _t("msg_product_id_title"), _t("msg_product_id_need_target"))
+            return False
+        if not ask_confirm(
+            self,
+            _t("msg_product_id_title"),
+            _t("msg_product_id_unlock_text"),
+            danger=True,
+        ):
+            return False
+        return super().unlock_product_id_edit()
+
+    def read_product_id(self):
+        from core.translation import _t
+
+        if not self.check_permission_before_action("Read product ID", Permission.MANAGE_PRODUCT_ID):
+            return False
+        if not self.ensure_connection_ready():
+            return False
+        if getattr(self.config, "tcp_enabled", False):
+            cid = getattr(self, "primary_client_id", None)
+            if not cid:
+                show_warn(self, _t("msg_product_id_title"), _t("msg_product_id_need_target"))
+                return False
+            if not getattr(self, "worker", None) or not hasattr(self.worker, "send_command_to_client"):
+                return False
+            ok = self.worker.send_command_to_client(
+                cid,
+                "read_product_id",
+                0x01,
+                description="Read product ID (0x0D)",
+            )
+            if ok:
+                self.log("Read product ID command sent", "INFO")
+            return bool(ok)
+        return super().read_product_id()
+
+    def set_product_id(self):
+        from core.translation import _t
+
+        if not self.check_permission_before_action("Product ID maintenance", Permission.MANAGE_PRODUCT_ID):
+            return False
+        cid = getattr(self, "primary_client_id", None) if getattr(self.config, "tcp_enabled", False) else "serial_client"
+        if not cid:
+            show_warn(self, _t("msg_product_id_title"), _t("msg_product_id_need_target"))
+            return False
+        key = self._current_probe_key(cid)
+        live_pid = self._current_probe_live_product_id(cid)
+        state = self.config.get_product_id_state(key, live_product_id=live_pid) if key else {"locked": True, "unlocked": False}
+        if state.get("locked") and not state.get("unlocked"):
+            show_warn(self, _t("msg_product_id_title"), _t("msg_product_id_locked"))
+            return False
+        pid = int(self.product_id_spin.value())
+        if pid > 0 and hasattr(self, "_product_id_is_unique") and not self._product_id_is_unique(pid, cid):
+            show_warn(self, _t("msg_product_id_title"), _t("msg_product_id_duplicate", pid=pid))
+            return False
+        if not ask_confirm(
+            self,
+            _t("msg_product_id_title"),
+            _t("msg_product_id_write_text", pid=pid),
+            danger=True,
+        ):
+            self._refresh_product_id_lock_ui(cid)
+            return False
+        ok = super().set_product_id()
+        if ok:
+            QTimer.singleShot(180, self.read_product_id)
+            show_info(self, _t("msg_product_id_title"), _t("msg_product_id_readback_wait"))
+        else:
+            show_warn(self, _t("msg_product_id_title"), _t("msg_product_id_set_fail"))
+        return bool(ok)
+
+    def on_product_id_feedback(self, packet):
+        from core.translation import _t
+
+        if int(getattr(packet, "status", 0) or 0) != 1:
+            self._pending_product_id_write = None
+            self._refresh_product_id_lock_ui(getattr(packet, "source_client_id", None))
+            show_warn(self, _t("msg_product_id_title"), _t("msg_product_id_set_fail"))
+            return
+        self.log(
+            "Product ID ack accepted (value=%d)" % (int(getattr(packet, "value", 0) or 0)),
+            "INFO",
+        )
     
     def set_high_voltage(self):
         """Set high voltage - with permission check"""
@@ -3993,13 +4133,13 @@ class MainWindow(QMainWindow, UIBase):
 
     def update_operate_time(self):
         """更新操作时间（重置超时计时器）"""
-        if self.current_user and self.current_user['role'] == UserRole.ADMIN:
+        if self._is_privileged_user():
             self.timeout_manager.update_operate_time()
     
     def on_admin_timeout(self):
         """Admin idle timeout -> return to public home monitor."""
         from core.translation import _t
-        if self.current_user and self.current_user['role'] == UserRole.ADMIN:
+        if self._is_privileged_user():
             try:
                 from core.software_keyboard import get_keyboard_manager
                 get_keyboard_manager().hide_keyboard()
@@ -4088,7 +4228,7 @@ class MainWindow(QMainWindow, UIBase):
         self.current_user = current_user
         self.update_ui_for_user_role()
 
-        role_name = "Admin" if current_user['role'] == UserRole.ADMIN else "User"
+        role_name = self._window_role_name(current_user['role'])
         username = current_user.get('username', '')
         self.setWindowTitle(f"Gamma-ray Spectrometer - {username} ({role_name})")
 
@@ -4103,7 +4243,7 @@ class MainWindow(QMainWindow, UIBase):
     
     def on_timeout_timer_updated(self, remaining_seconds: int):
         """超时计时器更新回调"""
-        if self.current_user and self.current_user['role'] == UserRole.ADMIN:
+        if self._is_privileged_user():
             self.status_bar.update_timeout_display(remaining_seconds)
             
             # 最后30秒显示警告
@@ -4122,7 +4262,8 @@ class MainWindow(QMainWindow, UIBase):
         silent=True 时（隐藏入口：长按角/快捷键触发），非管理员静默忽略，不弹提示，
         以免暴露该隐藏功能的存在。
         """
-        if not (self.current_user and self.current_user['role'] == UserRole.ADMIN):
+        from core.translation import _t
+        if not self._is_privileged_user():
             if not silent:
                 show_info(
                     self,
@@ -4258,7 +4399,7 @@ class MainWindow(QMainWindow, UIBase):
         from core.translation import _t
         if self.current_user and 'username' in self.current_user:
             username = self.current_user['username']
-            role_name = "Admin" if self.current_user['role'] == UserRole.ADMIN else "User"
+            role_name = self._window_role_name(self.current_user['role'])
             self.setWindowTitle(f"Gamma-ray Spectrometer - {username} ({role_name})")
         else:
             self.setWindowTitle(
@@ -4306,12 +4447,10 @@ class MainWindow(QMainWindow, UIBase):
             self.det_group.setTitle(_t("set_det_settings"))
             self.bias_voltage_label.setText(_t("set_bias_voltage"))
             self.threshold_label.setText(_t("set_threshold"))
-            # Find set buttons in det_group and retranslate
-            for btn in self.det_group.findChildren(QPushButton):
-                if btn.text() in ["Set HV", "设置高压"]:
-                    btn.setText(_t("btn_set_hv"))
-                elif btn.text() in ["Set Threshold", "设置阈值"]:
-                    btn.setText(_t("btn_set_threshold"))
+            if hasattr(self, "hv_set_btn"):
+                self.hv_set_btn.setText(_t("btn_set_hv"))
+            if hasattr(self, "threshold_set_btn"):
+                self.threshold_set_btn.setText(_t("btn_set_threshold"))
                     
         if hasattr(self, 'ctrl_group'):
             self.ctrl_group.setTitle(_t("set_control"))
@@ -4375,6 +4514,22 @@ class MainWindow(QMainWindow, UIBase):
         if hasattr(self, 'device_group'):
             self.device_group.setTitle(_t("set_device_status"))
             self.product_id_title_label.setText(_t("label_product_id"))
+            if hasattr(self, "identity_maintenance_label"):
+                self.identity_maintenance_label.setText(_t("set_identity_maintenance"))
+                self.identity_maintenance_label.setToolTip(_t("tip_identity_maintenance"))
+            if hasattr(self, "product_id_spin"):
+                self.product_id_spin.setToolTip(_t("tip_product_id_maintenance"))
+            if hasattr(self, "product_id_read_btn"):
+                self.product_id_read_btn.setText(_t("btn_read_product_id"))
+                self.product_id_read_btn.setToolTip(_t("tip_product_id_maintenance"))
+            if hasattr(self, "product_id_write_btn"):
+                self.product_id_write_btn.setText(_t("btn_write_product_id"))
+                self.product_id_write_btn.setToolTip(_t("tip_product_id_maintenance"))
+            if hasattr(self, "product_id_unlock_btn"):
+                self.product_id_unlock_btn.setText(_t("btn_unlock_product_id"))
+                self.product_id_unlock_btn.setToolTip(_t("tip_product_id_maintenance"))
+            if hasattr(self, "_refresh_product_id_lock_ui"):
+                self._refresh_product_id_lock_ui()
             self.sensitivity_title_label.setText(_t("label_sensitivity"))
             self.sensitivity_set_btn.setText(_t("btn_set"))
             self.sensitivity_read_btn.setText(_t("btn_read"))

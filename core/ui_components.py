@@ -267,6 +267,9 @@ class StatusBar(QWidget):
         elif role == UserRole.ADMIN:
             role_text = _t("role_admin")
             color = "#ff9800"  # Orange
+        elif role == UserRole.MAINTAINER:
+            role_text = _t("role_maintainer")
+            color = "#8e24aa"
         else:
             role_text = _t("role_viewer")
             color = "#4caf50"  # Green
@@ -291,7 +294,7 @@ class StatusBar(QWidget):
         self.user_label.setVisible(True)
         
         # If admin, show timeout label
-        if role == UserRole.ADMIN:
+        if role in (UserRole.ADMIN, UserRole.MAINTAINER):
             self.timeout_label.setText("03:00")
             self.timeout_label.setVisible(True)
         else:

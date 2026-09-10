@@ -72,13 +72,13 @@ class FocusEventFilter(QObject):
 
     def _resolve_keyboard_target(self, obj):
         """若聚焦在 SpinBox 内部 lineEdit，绑定到父 SpinBox。"""
-                        target_obj = obj
-                        if isinstance(obj, QLineEdit):
-                            parent = obj.parent()
-                            while parent is not None:
-                                if isinstance(parent, (QSpinBox, QDoubleSpinBox)):
+        target_obj = obj
+        if isinstance(obj, QLineEdit):
+            parent = obj.parent()
+            while parent is not None:
+                if isinstance(parent, (QSpinBox, QDoubleSpinBox)):
                     return parent
-                                parent = parent.parent()
+                parent = parent.parent()
         return target_obj
 
     def _show_internal_software_keyboard(self, obj):
@@ -93,16 +93,16 @@ class FocusEventFilter(QObject):
             if current_time - getattr(km, "last_closed_time", 0) < 0.5:
                 return False
             target_obj = self._resolve_keyboard_target(obj)
-                        if km.is_visible() and getattr(km, "current_input", None) is target_obj:
+            if km.is_visible() and getattr(km, "current_input", None) is target_obj:
                 return False
             self.last_trigger_time = current_time
             self.current_focused_obj = target_obj
             log_inst.debug("Showing internal software keyboard")
             # 传入所属窗口：登录模态时键盘会挂到登录框前，避免被挡在后面
-                        km.show_keyboard_for_input(target_obj, obj.window())
+            km.show_keyboard_for_input(target_obj, obj.window())
             return True
-                    except Exception as e:
-                        log_inst.error(f"Failed to show internal software keyboard: {e}")
+        except Exception as e:
+            log_inst.error(f"Failed to show internal software keyboard: {e}")
             return False
 
     def eventFilter(self, obj, event):
@@ -594,6 +594,7 @@ class UIBase():
         self._master_sensor_mode = 2
         self._sensor_mode_dirty = False
         self._pending_sensor_mode_at = 0.0
+        self._pending_product_id_write = None
         
         self.spectrum_data = np.zeros(self.config.adc_channels)  # Current displayed spectrum data
         self.temperature_data = []
@@ -1275,25 +1276,25 @@ class UIBase():
         self.hv_spin.setValue(self.config.hv)
         self.hv_spin.editingFinished.connect(self.persist_hv_setting)
         
-        hv_set_btn = QPushButton(_t("btn_set_hv"))
-        hv_set_btn.clicked.connect(self.set_high_voltage)
+        self.hv_set_btn = QPushButton(_t("btn_set_hv"))
+        self.hv_set_btn.clicked.connect(self.set_high_voltage)
         
         self.threshold_spin = QSpinBox()
         self.threshold_spin.setRange(0, 2200)
         self.threshold_spin.setValue(self.config.threshold)
         self.threshold_spin.editingFinished.connect(self.persist_threshold_setting)
         
-        trig_set_btn = QPushButton(_t("btn_set_threshold"))
-        trig_set_btn.clicked.connect(self.set_threshold)
+        self.threshold_set_btn = QPushButton(_t("btn_set_threshold"))
+        self.threshold_set_btn.clicked.connect(self.set_threshold)
         
         self.bias_voltage_label = QLabel(_t("set_bias_voltage"))
         det_layout.addWidget(self.bias_voltage_label, 0, 0)
         det_layout.addWidget(self.hv_spin, 0, 1)
-        det_layout.addWidget(hv_set_btn, 0, 2)
+        det_layout.addWidget(self.hv_set_btn, 0, 2)
         self.threshold_label = QLabel(_t("set_threshold"))
         det_layout.addWidget(self.threshold_label, 1, 0)
         det_layout.addWidget(self.threshold_spin, 1, 1)
-        det_layout.addWidget(trig_set_btn, 1, 2)
+        det_layout.addWidget(self.threshold_set_btn, 1, 2)
         
         settings_layout.addWidget(self.det_group)
         
@@ -1384,6 +1385,31 @@ class UIBase():
         self.product_id_title_label = QLabel(_t("label_product_id"))
         device_layout.addWidget(self.product_id_title_label, 0, 0)
         device_layout.addWidget(self.product_id_label, 0, 1, 1, 4)
+
+        self.identity_maintenance_label = QLabel(_t("set_identity_maintenance"))
+        self.identity_maintenance_label.setToolTip(_t("tip_identity_maintenance"))
+        self.product_id_spin = QSpinBox()
+        self.product_id_spin.setRange(0, 65535)
+        self.product_id_spin.setToolTip(_t("tip_product_id_maintenance"))
+        self.product_id_read_btn = QPushButton(_t("btn_read_product_id"))
+        self.product_id_read_btn.setToolTip(_t("tip_product_id_maintenance"))
+        self.product_id_read_btn.clicked.connect(self.read_product_id)
+        self.product_id_write_btn = QPushButton(_t("btn_write_product_id"))
+        self.product_id_write_btn.setToolTip(_t("tip_product_id_maintenance"))
+        self.product_id_write_btn.clicked.connect(self.set_product_id)
+        self.product_id_unlock_btn = QPushButton(_t("btn_unlock_product_id"))
+        self.product_id_unlock_btn.setToolTip(_t("tip_product_id_maintenance"))
+        self.product_id_unlock_btn.clicked.connect(self.unlock_product_id_edit)
+        self.product_id_lock_label = QLabel(_t("status_product_id_locked"))
+        self.product_id_lock_label.setStyleSheet("color: #888888; font-size: 11px;")
+        self.product_id_lock_label.setWordWrap(True)
+
+        device_layout.addWidget(self.identity_maintenance_label, 1, 0)
+        device_layout.addWidget(self.product_id_spin, 1, 1)
+        device_layout.addWidget(self.product_id_read_btn, 1, 2)
+        device_layout.addWidget(self.product_id_write_btn, 1, 3)
+        device_layout.addWidget(self.product_id_unlock_btn, 1, 4)
+        device_layout.addWidget(self.product_id_lock_label, 2, 0, 1, 5)
         
         # Sensitivity Coefficient (报警灵敏度系数)
         self.sensitivity_label = QLabel("--")
@@ -1397,11 +1423,11 @@ class UIBase():
         self.sensitivity_read_btn.clicked.connect(self.read_sensitivity_coefficient)
         
         self.sensitivity_title_label = QLabel(_t("label_sensitivity"))
-        device_layout.addWidget(self.sensitivity_title_label, 1, 0)
-        device_layout.addWidget(self.sensitivity_label, 1, 1)
-        device_layout.addWidget(self.sensitivity_spin, 1, 2)
-        device_layout.addWidget(self.sensitivity_set_btn, 1, 3)
-        device_layout.addWidget(self.sensitivity_read_btn, 1, 4)
+        device_layout.addWidget(self.sensitivity_title_label, 3, 0)
+        device_layout.addWidget(self.sensitivity_label, 3, 1)
+        device_layout.addWidget(self.sensitivity_spin, 3, 2)
+        device_layout.addWidget(self.sensitivity_set_btn, 3, 3)
+        device_layout.addWidget(self.sensitivity_read_btn, 3, 4)
         
         # Relay Control (探头继电器 — 发往当前选中探头，勿发主控)
         self.relay0_checkbox = QCheckBox("Relay 0")
@@ -1423,14 +1449,14 @@ class UIBase():
         relay_checkbox_layout.addStretch()  # 添加弹性空间
         
         self.relay_control_title_label = QLabel(_t("set_probe_relay_control"))
-        device_layout.addWidget(self.relay_control_title_label, 2, 0)
-        device_layout.addLayout(relay_checkbox_layout, 2, 1, 1, 3)
-        device_layout.addWidget(self.relay_read_btn, 2, 4)
-        device_layout.addWidget(self.relay_status_label, 3, 0, 1, 5)
+        device_layout.addWidget(self.relay_control_title_label, 4, 0)
+        device_layout.addLayout(relay_checkbox_layout, 4, 1, 1, 3)
+        device_layout.addWidget(self.relay_read_btn, 4, 4)
+        device_layout.addWidget(self.relay_status_label, 5, 0, 1, 5)
         self.probe_relay_hint_label = QLabel(_t("tip_probe_relay_hint"))
         self.probe_relay_hint_label.setStyleSheet("color: #888888; font-size: 11px;")
         self.probe_relay_hint_label.setWordWrap(True)
-        device_layout.addWidget(self.probe_relay_hint_label, 4, 0, 1, 5)
+        device_layout.addWidget(self.probe_relay_hint_label, 6, 0, 1, 5)
         
         # Alarm Status (报警状态)
         self.alarm_status_label = QLabel("--")
@@ -1438,21 +1464,21 @@ class UIBase():
         self.alarm_read_btn.clicked.connect(self.read_alarm_status)
         
         self.alarm_status_title_label = QLabel(_t("card_alarm_title"))
-        device_layout.addWidget(self.alarm_status_title_label, 5, 0)
-        device_layout.addWidget(self.alarm_status_label, 5, 1, 1, 3)
-        device_layout.addWidget(self.alarm_read_btn, 5, 4)
+        device_layout.addWidget(self.alarm_status_title_label, 7, 0)
+        device_layout.addWidget(self.alarm_status_label, 7, 1, 1, 3)
+        device_layout.addWidget(self.alarm_read_btn, 7, 4)
         
         # Occupancy Status — 通道占用跟主控 L2（红外/雷达），不跟探头 bit5
         self.occupancy_status_label = QLabel("--")
         self.occupancy_title_label = QLabel(_t("set_occupancy"))
-        device_layout.addWidget(self.occupancy_title_label, 6, 0)
-        device_layout.addWidget(self.occupancy_status_label, 6, 1, 1, 4)
+        device_layout.addWidget(self.occupancy_title_label, 8, 0)
+        device_layout.addWidget(self.occupancy_status_label, 8, 1, 1, 4)
         
         # Counter Display
         self.counter_label = QLabel("--")
         self.counter_title_label = QLabel(_t("set_counter"))
-        device_layout.addWidget(self.counter_title_label, 7, 0)
-        device_layout.addWidget(self.counter_label, 7, 1, 1, 4)
+        device_layout.addWidget(self.counter_title_label, 9, 0)
+        device_layout.addWidget(self.counter_label, 9, 1, 1, 4)
         
         settings_layout.addWidget(self.device_group)
 
@@ -1901,18 +1927,18 @@ class UIBase():
         has_spec = spec is not None and np.sum(spec) > 0
         if not ts and not has_spec:
             QMessageBox.warning(self, _t("msg_no_data_title"), _t("msg_no_data_text"))
-                return
+            return
             
         label = self._export_probe_label(client_id, 0)
         meta = self._export_probe_meta(client_id)
-                timestamp = time.strftime("%Y%m%d_%H%M%S")
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
         default_filename = "rayzen_spectrometer_data_%s.xlsx" % (
             self._export_file_stem(client_id, timestamp)
         )
-            filename, _ = QFileDialog.getSaveFileName(
-                    self,
+        filename, _ = QFileDialog.getSaveFileName(
+            self,
             _t("dlg_save_data_for", client=label),
-                    default_filename,
+            default_filename,
             "Excel Files (*.xlsx);;All Files (*)",
         )
         if not filename:
@@ -2091,8 +2117,7 @@ class UIBase():
         ip = meta.get("ip") or ""
         spec_col = self._export_fs_token("_".join([probe, loc])) or "Spectrum"
         spec_col = "Counts_%s" % spec_col if spec_col != "Spectrum" else "Spectrum"
-
-                df_spectrum = pd.DataFrame({
+        df_spectrum = pd.DataFrame({
             "Channel": list(range(len(spectrum_data_to_save))),
             spec_col: spectrum_data_to_save,
         })
@@ -2100,10 +2125,10 @@ class UIBase():
             "Probe", "Location", "IP",
             "Timestamp", "Counter", "Temperature", "HV", "Spectrum_Counts",
         ]
-                if time_series_data:
-                    timestamps, counters, temperatures, hvs, spec_counts = zip(*time_series_data)
+        if time_series_data:
+            timestamps, counters, temperatures, hvs, spec_counts = zip(*time_series_data)
             n = len(timestamps)
-                    df_time_series = pd.DataFrame({
+            df_time_series = pd.DataFrame({
                 "Probe": [probe] * n,
                 "Location": [loc] * n,
                 "IP": [ip] * n,
@@ -2115,11 +2140,11 @@ class UIBase():
                 "Temperature": temperatures,
                 "HV": hvs,
                 "Spectrum_Counts": spec_counts,
-                    })
-                else:
+            })
+        else:
             df_time_series = pd.DataFrame(columns=ts_cols)
                 
-                df_client_info = pd.DataFrame({
+        df_client_info = pd.DataFrame({
             "Probe": [probe],
             "Location": [loc or "--"],
             "IP": [ip or "--"],
@@ -2136,9 +2161,9 @@ class UIBase():
 
         def _write(tmp: str):
             with pd.ExcelWriter(tmp, engine="openpyxl") as writer:
-                    df_spectrum.to_excel(writer, sheet_name='Spectrum', index=False)
-                    df_time_series.to_excel(writer, sheet_name='TimeSeries', index=False)
-                    df_client_info.to_excel(writer, sheet_name='DeviceInfo', index=False)
+                df_spectrum.to_excel(writer, sheet_name='Spectrum', index=False)
+                df_time_series.to_excel(writer, sheet_name='TimeSeries', index=False)
+                df_client_info.to_excel(writer, sheet_name='DeviceInfo', index=False)
                 
         size = write_excel_atomic(filename, _write, min_bytes=200)
         return len(time_series_data), float(np.sum(spectrum_data_to_save)), size
@@ -2202,11 +2227,10 @@ class UIBase():
         elif self._autosave_running:
             self.log("Auto-save skipped: previous run still in progress", "DEBUG")
             return 0
-
-                timestamp = time.strftime("%Y%m%d_%H%M%S")
-                if self.auto_save_path:
-                    save_dir = self.auto_save_path
-                else:
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        if self.auto_save_path:
+            save_dir = self.auto_save_path
+        else:
             save_dir = os.path.join(os.path.expanduser("~"), "Raysen", "AutoSave")
 
         jobs = self._build_autosave_jobs(timestamp, save_dir)
@@ -2275,11 +2299,11 @@ class UIBase():
         try:
             self.log(f"Auto-save triggered after {time_since_last_save:.1f}s", 'INFO')
             self._auto_save_all_clients(force=False, blocking=False)
-            except Exception as e:
+        except Exception as e:
             self._autosave_running = False
             self.log(f"Auto-save error: {str(e)}", 'ERROR')
-                import traceback
-                self.log(f"Auto-save traceback: {traceback.format_exc()}", 'ERROR')
+            import traceback
+            self.log(f"Auto-save traceback: {traceback.format_exc()}", 'ERROR')
     
     def toggle_virtual_keyboard(self, state):
         """切换虚拟键盘自动触发开关（写入设置，电脑/工控可手动覆盖自动检测）。"""
@@ -2448,6 +2472,9 @@ class UIBase():
         elif from_master and packet.control_code == 0x19:
             if hasattr(self, "on_sensor_mode_feedback"):
                 self.on_sensor_mode_feedback(packet)
+        elif packet.control_code == 0x0E:
+            if hasattr(self, "on_product_id_feedback"):
+                self.on_product_id_feedback(packet)
         elif from_master and packet.control_code in (0x06, 0x11, 0x12) and hasattr(self, "master_relay_status_label"):
             if not packet.status:
                 from core.translation import _t
@@ -2664,8 +2691,8 @@ class UIBase():
                 'rates': float(last[1]),
                 'temp': last[2] / 100
             }
-                if self.data_updated_callback is not None:
-                    self.data_updated_callback(self.current_stat, 0, self.client_data)
+            if self.data_updated_callback is not None:
+                self.data_updated_callback(self.current_stat, 0, self.client_data)
 
             if update_cps and hasattr(self, "curve_cps"):
                 timestamps, counters, temperatures, hvs, spec_counts = zip(*time_series_data)
@@ -2966,14 +2993,15 @@ class UIBase():
             self.hv_spin.setValue(float(hv))
             self.threshold_spin.setValue(int(thr))
             self.sensitivity_spin.setValue(int(sens))
-            if hasattr(self, "product_id_spin") and pid is not None:
+            if hasattr(self, "product_id_spin"):
                 try:
-                    self.product_id_spin.setValue(int(pid))
+                    self.product_id_spin.setValue(int(pid or 0))
                 except Exception:
-                    pass
+                    self.product_id_spin.setValue(0)
         finally:
             for w in widgets:
                 w.blockSignals(False)
+        self._refresh_product_id_lock_ui(cid)
 
     def persist_hv_setting(self):
         try:
@@ -3467,10 +3495,94 @@ class UIBase():
         self.curve_cps.setData([],[])
 
     # Device control methods (根据参考代码添加)
+    def _current_probe_live_product_id(self, client_id: str = None):
+        cid = client_id or self.primary_client_id
+        pkt = self.client_latest_packets.get(cid) if cid else None
+        if pkt is not None:
+            try:
+                return int(getattr(pkt, "product_id", 0) or 0)
+            except (TypeError, ValueError):
+                pass
+        data = self.client_data.get(cid) if cid else None
+        if data:
+            try:
+                return int(data.get("product_id", 0) or 0)
+            except (TypeError, ValueError):
+                pass
+        return 0
+
+    def _refresh_product_id_lock_ui(self, client_id: str = None):
+        label = getattr(self, "product_id_lock_label", None)
+        spin = getattr(self, "product_id_spin", None)
+        write_btn = getattr(self, "product_id_write_btn", None)
+        unlock_btn = getattr(self, "product_id_unlock_btn", None)
+        if label is None:
+            return
+        key = self._current_probe_key(client_id)
+        live_pid = self._current_probe_live_product_id(client_id)
+        state = self.config.get_product_id_state(key, live_product_id=live_pid) if key else {"locked": True, "unlocked": False}
+        pending_info = getattr(self, "_pending_product_id_write", None)
+        if pending_info and (time.time() - float(pending_info.get("requested_at", 0.0) or 0.0)) > 8.0:
+            pending_info = None
+            self._pending_product_id_write = None
+        pending = bool(pending_info)
+        if pending:
+            label.setText(_t("status_product_id_pending"))
+            label.setStyleSheet("color: #888888; font-size: 11px;")
+        elif state["unlocked"]:
+            label.setText(_t("status_product_id_unlocked"))
+            label.setStyleSheet("color: #ffb74d; font-size: 11px;")
+        elif state["locked"]:
+            label.setText(_t("status_product_id_locked"))
+            label.setStyleSheet("color: #888888; font-size: 11px;")
+        else:
+            label.setText(_t("status_product_id_unset"))
+            label.setStyleSheet("color: #4caf50; font-size: 11px;")
+        can_write = bool(state["unlocked"] or (not state["locked"]))
+        if spin is not None:
+            spin.setEnabled(can_write and not pending and spin.isVisible())
+        if write_btn is not None:
+            write_btn.setEnabled(can_write and not pending and write_btn.isVisible())
+        if unlock_btn is not None:
+            unlock_btn.setEnabled(state["locked"] and not pending and unlock_btn.isVisible())
+
+    def _apply_product_id_readback(self, client_id: str, product_id: int):
+        pending = getattr(self, "_pending_product_id_write", None) or {}
+        want_cid = pending.get("client_id")
+        want_pid = pending.get("product_id")
+        if want_cid is None or want_pid is None:
+            self._refresh_product_id_lock_ui(client_id)
+            return
+        cid = client_id or "serial_client"
+        if want_cid != cid or int(product_id) != int(want_pid):
+            self._refresh_product_id_lock_ui(client_id)
+            return
+        key = self._current_probe_key(cid)
+        if key:
+            self._save_probe_panel_settings(client_id=cid, product_id=int(product_id))
+            self.config.set_product_id_state(key, locked=True, unlocked=False)
+            self.config.save_settings()
+        self._pending_product_id_write = None
+        if hasattr(self, "product_id_spin"):
+            self.product_id_spin.blockSignals(True)
+            self.product_id_spin.setValue(int(product_id))
+            self.product_id_spin.blockSignals(False)
+        self._refresh_product_id_lock_ui(cid)
+        self.log(_t("msg_product_id_set_ok", pid=int(product_id)), "INFO")
+
+    def unlock_product_id_edit(self):
+        key = self._current_probe_key()
+        if not key:
+            return False
+        self.config.set_product_id_state(key, locked=True, unlocked=True)
+        self.config.save_settings()
+        self._refresh_product_id_lock_ui()
+        return True
+
     def set_product_id(self):
         if self.ensure_serial_ready():
             product_id = self.product_id_spin.value()
-            self._save_probe_panel_settings(product_id=product_id)
+            target_client = self.primary_client_id if self.primary_client_id else "serial_client"
             # 如果TCP模式且有多客户端，发送到当前选中客户端
             if self.config.tcp_enabled and self.primary_client_id:
                 # TCP模式下，需要将命令发送到特定客户端
@@ -3492,6 +3604,15 @@ class UIBase():
                     self.log(f"Set product ID command sent: {product_id}")
                 else:
                     self.log("Failed to send set product ID command", "ERROR")
+            if success:
+                self._pending_product_id_write = {
+                    "client_id": target_client,
+                    "product_id": int(product_id),
+                    "requested_at": time.time(),
+                }
+                self._refresh_product_id_lock_ui(target_client)
+                return True
+        return False
     
     def read_product_id(self):
         if self.ensure_serial_ready():
@@ -3500,6 +3621,8 @@ class UIBase():
                 self.log("Read product ID command sent")
             else:
                 self.log("Failed to send read product ID command", "ERROR")
+            return bool(success)
+        return False
     
     def set_sensitivity_coefficient(self):
         coefficient = self._read_spinbox_value(self.sensitivity_spin, self.sensitivity_spin.value())
@@ -3575,7 +3698,7 @@ class UIBase():
                     "Probe relay %d → %s (0x06) via %s"
                     % (int(relay_num), "ON" if state else "OFF", probe_cid)
                 )
-                    else:
+            else:
                 self.log("Failed to send probe relay 0x06", "ERROR")
                 _revert()
             return ok
@@ -3584,7 +3707,7 @@ class UIBase():
         if ok:
             self._probe_relay_hold_until = time.time() + 2.0
             self.log("Control relay %d command sent: %s" % (relay_num, "ON" if state else "OFF"))
-                else:
+        else:
             self.log("Failed to send control relay %d command" % relay_num, "ERROR")
             _revert()
         return ok
@@ -3607,9 +3730,9 @@ class UIBase():
             return ok
         ok = self.worker.read_relay_status(True)
         if ok:
-                self.log("Read relay status command sent")
-            else:
-                self.log("Failed to send read relay status command", "ERROR")
+            self.log("Read relay status command sent")
+        else:
+            self.log("Failed to send read relay status command", "ERROR")
         return ok
 
     def _get_probe_client_id_for_settings(self):
@@ -3880,6 +4003,11 @@ class UIBase():
         if client_id is None or client_id == self.primary_client_id:
             # 更新产品ID显示
             self.product_id_label.setText(f"{packet.product_id}")
+            if hasattr(self, "product_id_spin"):
+                self.product_id_spin.blockSignals(True)
+                self.product_id_spin.setValue(int(packet.product_id))
+                self.product_id_spin.blockSignals(False)
+            self._refresh_product_id_lock_ui(client_id)
             
             # 更新灵敏度系数显示
             self.sensitivity_label.setText(f"{packet.sen_coef}")
@@ -3890,17 +4018,17 @@ class UIBase():
             relay2_state = (packet.device_status & 0b00100) != 0
             hold = time.time() < float(getattr(self, "_probe_relay_hold_until", 0) or 0)
             if not hold:
-            self.relay0_checkbox.blockSignals(True)
-            self.relay0_checkbox.setChecked(relay0_state)
-            self.relay0_checkbox.blockSignals(False)
-            
-            self.relay1_checkbox.blockSignals(True)
-            self.relay1_checkbox.setChecked(relay1_state)
-            self.relay1_checkbox.blockSignals(False)
-            
-            self.relay2_checkbox.blockSignals(True)
-            self.relay2_checkbox.setChecked(relay2_state)
-            self.relay2_checkbox.blockSignals(False)
+                self.relay0_checkbox.blockSignals(True)
+                self.relay0_checkbox.setChecked(relay0_state)
+                self.relay0_checkbox.blockSignals(False)
+                
+                self.relay1_checkbox.blockSignals(True)
+                self.relay1_checkbox.setChecked(relay1_state)
+                self.relay1_checkbox.blockSignals(False)
+                
+                self.relay2_checkbox.blockSignals(True)
+                self.relay2_checkbox.setChecked(relay2_state)
+                self.relay2_checkbox.blockSignals(False)
             
                 self.relay_states = (relay0_state, relay1_state, relay2_state)
                 relay_status_text = _t("relay_status_format", r0=int(relay0_state), r1=int(relay1_state), r2=int(relay2_state))
@@ -3959,6 +4087,7 @@ class UIBase():
         
         self.client_data[client_id] = client_data
         self._remember_probe(client_id, packet.product_id)
+        self._apply_product_id_readback(client_id, packet.product_id)
         
         # 清理过期的客户端数据（30秒无更新）；编号登记表按 IP 保留，不断线丢失
         expired_clients = []
@@ -4087,8 +4216,6 @@ class UIBase():
                         hv=self._read_spinbox_value(self.hv_spin, self.hv_spin.value()),
                         threshold=self._read_spinbox_value(self.threshold_spin, self.threshold_spin.value()),
                         sensitivity=self._read_spinbox_value(self.sensitivity_spin, self.sensitivity_spin.value()),
-                        product_id=(self.product_id_spin.value()
-                                    if hasattr(self, "product_id_spin") else None),
                     )
                 except Exception:
                     pass
@@ -4449,7 +4576,7 @@ class UIBase():
                 elif probe:
                     display_name = probe
                 else:
-                display_name = client_id
+                    display_name = client_id
                 
                 # 正确设置itemData
                 self.client_selection_combo.addItem(display_name)

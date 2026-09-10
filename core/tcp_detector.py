@@ -484,7 +484,7 @@ class TcpPacketWorker(QObject):
         Args:
             client_id: ID of the client to send command to
             command_type: Type of command ('set_hv', 'set_threshold', 'set_operation_mode', 
-                          'set_product_id', 'set_sensitivity_coefficient', 'control_single_relay',
+                          'set_product_id', 'read_product_id', 'set_sensitivity_coefficient', 'control_single_relay',
                           'control_multiple_relays', 'read_relay_status',
                           'channel_alarm_reset', 'channel_alarm_clear_mode',
                           'channel_sensor_mode', 'reset_factory_defaults')
@@ -606,6 +606,14 @@ class TcpPacketWorker(QObject):
             checksum = self.calculate_xor_checksum(command_data)
             command_data.append(checksum)
             description = f"Set product ID to {product_id}"
+
+        elif command_type == 'read_product_id':
+            # Read product ID command
+            flag_byte = 0x01 if bool(command_value) else 0x00
+            command_data = [0x55, 0xAA, 0x03, 0x0D, flag_byte, 0x00]
+            checksum = self.calculate_xor_checksum(command_data)
+            command_data.append(checksum)
+            description = description or "Read product ID (0x0D)"
             
         elif command_type == 'set_sensitivity_coefficient':
             # Set sensitivity coefficient command

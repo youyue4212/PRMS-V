@@ -178,10 +178,13 @@ class ConfigManager:
             "threshold": int(stored.get("threshold", self.threshold)),
             "sensitivity": int(stored.get("sensitivity", self.sensitivity)),
             "product_id": stored.get("product_id", None),
+            "product_id_locked": stored.get("product_id_locked", None),
+            "product_id_unlocked": bool(stored.get("product_id_unlocked", False)),
         }
 
     def update_probe_settings(self, probe_key: str, hv=None, threshold=None,
-                              sensitivity=None, product_id=None):
+                              sensitivity=None, product_id=None,
+                              product_id_locked=None, product_id_unlocked=None):
         """Update and persist panel settings for one probe (keyed by IP)."""
         if not probe_key:
             return
@@ -204,8 +207,34 @@ class ConfigManager:
                 entry["product_id"] = int(product_id)
             except (TypeError, ValueError):
                 pass
+        if product_id_locked is not None:
+            entry["product_id_locked"] = bool(product_id_locked)
+            if bool(product_id_locked):
+                entry["product_id_unlocked"] = False
+        if product_id_unlocked is not None:
+            entry["product_id_unlocked"] = bool(product_id_unlocked)
         self.client_probe_settings[key] = entry
         self.settings.setValue("CLIENT_PROBE_SETTINGS", json.dumps(self.client_probe_settings))
+
+    def get_product_id_state(self, probe_key: str, live_product_id=None) -> dict:
+        key = str(probe_key or "")
+        stored = (self.client_probe_settings or {}).get(key, {}) if key else {}
+        locked = stored.get("product_id_locked", None)
+        unlocked = bool(stored.get("product_id_unlocked", False))
+        if locked is None:
+            try:
+                live_pid = int(live_product_id)
+            except (TypeError, ValueError):
+                live_pid = 0
+            locked = live_pid > 0
+        return {"locked": bool(locked), "unlocked": bool(unlocked)}
+
+    def set_product_id_state(self, probe_key: str, locked=None, unlocked=None):
+        self.update_probe_settings(
+            probe_key,
+            product_id_locked=locked,
+            product_id_unlocked=unlocked,
+        )
 
     def update_settings(self, baudrate=None, device=None, adc_channels=None, hv=None, threshold=None, sensitivity=None,
                        tcp_enabled=None, tcp_mode=None, tcp_host=None, tcp_port=None,
