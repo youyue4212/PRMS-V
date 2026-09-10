@@ -156,7 +156,7 @@ class MainWindow(QMainWindow, UIBase):
         self.control_room_page = ControlRoomPage(self)
         self.control_room_page.probe_selected.connect(self._on_control_room_probe)
         self.control_room_page.open_alarm_log.connect(lambda: self.switch_page(4))
-        self.control_room_page.open_diagnostics.connect(lambda: self.switch_page(3))
+        self.control_room_page.open_diagnostics.connect(self.open_health_or_commissioning)
         self.control_room_page.reset_requested.connect(self.request_channel_alarm_reset)
         self.control_room_page.login_requested.connect(self._on_control_room_session_btn)
         self.control_room_page.reorder_requested.connect(self._on_control_room_reorder)
@@ -520,6 +520,23 @@ class MainWindow(QMainWindow, UIBase):
         # 更新操作时间（重置超时计时器）
         self.update_operate_time()
         self._note_ui_activity()
+
+    def open_health_or_commissioning(self):
+        """首页健康卡：传感器未配置去设置开通页，其它情况去诊断页。"""
+        pkt = getattr(self, "latest_master_summary", None)
+        uncfg = False
+        try:
+            if pkt is not None and self.is_master_online():
+                uncfg = int(pkt.sensor_mode_code()) == 2
+        except Exception:
+            uncfg = False
+        if uncfg:
+            if (not self.is_logged_in()) and getattr(self, "control_room_mode", False):
+                self.switch_page(3)
+                return
+            self.switch_page(5)
+            return
+        self.switch_page(3)
 
     def _apply_page_index(self, index):
         """切页后的统一收尾：状态栏、首页/曲线刷新、绘图节拍。登录/退出也走这里。"""
@@ -1126,7 +1143,7 @@ class MainWindow(QMainWindow, UIBase):
         else:
             dm.remove_fault(_MASTER_FAULT_CLIENT_ID, FaultCode.M101)
 
-        if link_timeout:
+        if link_timeout and not dm.comm_timeouts_suppressed(now):
             dm.add_fault(_MASTER_FAULT_CLIENT_ID, FaultCode.M102)
         else:
             dm.remove_fault(_MASTER_FAULT_CLIENT_ID, FaultCode.M102)
@@ -1168,7 +1185,13 @@ class MainWindow(QMainWindow, UIBase):
                 MASTER_SENSOR_MODE_UNCONFIGURED,
             )
             code = int(pkt.sensor_mode_code())
-            self._master_sensor_mode = code
+            pending_age = time.time() - float(getattr(self, "_pending_sensor_mode_at", 0) or 0)
+            pending = 0 < pending_age <= 5.0
+            if not pending:
+                self._master_sensor_mode = code
+                if getattr(self, "_sensor_mode_dirty", False):
+                    if self._selected_sensor_mode() == code:
+                        self._sensor_mode_dirty = False
             ir_status = format_sensor_mode_brief(pkt, lang=lang)
             sensor_unconfigured = code == MASTER_SENSOR_MODE_UNCONFIGURED
             if sensor_unconfigured or ir_degraded_raw or not bool(pkt.occ_gate_enabled):
@@ -2148,6 +2171,11 @@ class MainWindow(QMainWindow, UIBase):
         combo = getattr(self, "sensor_mode_combo", None)
         if combo is None:
             return
+        if getattr(self, "_sensor_mode_dirty", False):
+            return
+        pending_age = time.time() - float(getattr(self, "_pending_sensor_mode_at", 0) or 0)
+        if 0 < pending_age <= 5.0:
+            return
         try:
             want = int(mode_code)
         except (TypeError, ValueError):
@@ -2162,6 +2190,66 @@ class MainWindow(QMainWindow, UIBase):
             combo.setCurrentIndex(idx)
         combo.blockSignals(False)
 
+    def _selected_sensor_mode(self) -> int:
+        combo = getattr(self, "sensor_mode_combo", None)
+        if combo is None or combo.currentData() is None:
+            return 2
+        try:
+            mode = int(combo.currentData())
+        except (TypeError, ValueError):
+            return 2
+        return mode if mode in (0, 1, 2) else 2
+
+    def _refresh_commissioning_status(self, packet=None, lang="zh"):
+        from core.translation import _t
+
+        label = getattr(self, "commission_status_label", None)
+        if label is None:
+            return
+        keys = {
+            0: "sensor_mode_ir",
+            1: "sensor_mode_radar",
+            2: "sensor_mode_unconfigured",
+        }
+        selected = self._selected_sensor_mode()
+        pending_age = time.time() - float(getattr(self, "_pending_sensor_mode_at", 0) or 0)
+        pending = 0 < pending_age <= 5.0
+        master_online = False
+        try:
+            master_online = bool(self.is_master_online() and packet is not None)
+        except Exception:
+            master_online = False
+
+        if pending:
+            label.setText(_t("commission_status_pending"))
+            label.setStyleSheet("color: #888888; font-size: 12px; font-weight: bold;")
+            return
+        if getattr(self, "_sensor_mode_dirty", False):
+            label.setText(_t("commission_status_dirty", mode=_t(keys[selected])))
+            label.setStyleSheet("color: #ffb74d; font-size: 12px; font-weight: bold;")
+            return
+        if not master_online:
+            label.setText(_t("commission_status_need_master"))
+            label.setStyleSheet("color: #888888; font-size: 12px; font-weight: bold;")
+            return
+        try:
+            code = int(packet.sensor_mode_code())
+        except Exception:
+            code = 2
+        gate_ok = bool(getattr(packet, "occ_gate_enabled", False))
+        if code == 0 and gate_ok:
+            label.setText(_t("commission_status_done_ir"))
+            label.setStyleSheet("color: #4caf50; font-size: 12px; font-weight: bold;")
+        elif code == 1:
+            label.setText(_t("commission_status_done_radar"))
+            label.setStyleSheet("color: #4caf50; font-size: 12px; font-weight: bold;")
+        elif code == 2:
+            label.setText(_t("commission_status_done_none"))
+            label.setStyleSheet("color: #ffb74d; font-size: 12px; font-weight: bold;")
+        else:
+            label.setText(_t("commission_status_incomplete"))
+            label.setStyleSheet("color: #ffb74d; font-size: 12px; font-weight: bold;")
+
     def _update_sensor_mode_status_label(self, packet=None, lang="zh"):
         from core.translation import _t
         from core.master_summary import format_sensor_mode_brief
@@ -2172,6 +2260,7 @@ class MainWindow(QMainWindow, UIBase):
         if packet is None:
             label.setText(_t("tip_sensor_mode"))
             label.setStyleSheet("color: #888888; font-size: 11px;")
+            self._refresh_commissioning_status(None, lang=lang)
             return
         text = format_sensor_mode_brief(packet, lang=lang)
         uncfg = int(packet.sensor_mode_code()) == 2
@@ -2180,19 +2269,48 @@ class MainWindow(QMainWindow, UIBase):
         label.setStyleSheet(
             "color: %s; font-size: 11px;" % ("#ffb74d" if warn else "#4caf50")
         )
+        self._refresh_commissioning_status(packet, lang=lang)
 
     def on_sensor_mode_combo_changed(self, _index=None):
-        """Settings: switch master sensor mode via 0x19."""
-        combo = getattr(self, "sensor_mode_combo", None)
-        if combo is None:
-            return
-        mode = int(combo.currentData())
+        """下拉只选型，不发 0x19。"""
+        committed = int(getattr(self, "_master_sensor_mode", 2) or 2)
+        if committed not in (0, 1, 2):
+            committed = 2
+        self._sensor_mode_dirty = self._selected_sensor_mode() != committed
+        self._refresh_commissioning_status(getattr(self, "latest_master_summary", None))
+
+    def write_master_sensor_mode(self):
+        """确认后把当前下拉的传感器模式写入主控 0x19。"""
+        from core.translation import _t
+
+        mode = self._selected_sensor_mode()
         if not self.check_permission_before_action(
             "Set sensor mode", Permission.MODIFY_DETECTOR_SETTINGS
         ):
+            self._sensor_mode_dirty = False
             self._sync_sensor_mode_ui(int(getattr(self, "_master_sensor_mode", 2) or 2))
+            self._refresh_commissioning_status(getattr(self, "latest_master_summary", None))
+            return
+        if not getattr(self, "is_tcp_mode", False) or not getattr(self, "master_client_id", None):
+            show_warn(self, _t("msg_sensor_mode_title"), _t("msg_sensor_mode_need_master"))
+            return
+        keys = {
+            0: "sensor_mode_ir",
+            1: "sensor_mode_radar",
+            2: "sensor_mode_unconfigured",
+        }
+        if not ask_confirm(
+            self,
+            _t("msg_sensor_mode_title"),
+            _t("msg_sensor_mode_write_text", mode=_t(keys[mode])),
+            danger=False,
+        ):
+            self._sensor_mode_dirty = False
+            self._sync_sensor_mode_ui(int(getattr(self, "_master_sensor_mode", 2) or 2))
+            self._refresh_commissioning_status(getattr(self, "latest_master_summary", None))
             return
         self.set_master_sensor_mode(mode)
+        self._refresh_commissioning_status(getattr(self, "latest_master_summary", None))
 
     def set_master_sensor_mode(self, mode: int):
         """PC → 主控 0x19 设置传感器模式（0=对射，1=雷达，2=未配置）。"""
@@ -2252,11 +2370,13 @@ class MainWindow(QMainWindow, UIBase):
         if int(getattr(packet, "status", 0) or 0) != 1:
             self.log("Sensor mode 0x19 rejected", "WARNING")
             show_warn(self, _t("msg_sensor_mode_title"), _t("msg_sensor_mode_fail"))
+            self._refresh_commissioning_status(getattr(self, "latest_master_summary", None))
             return
         mode = int(getattr(packet, "value", 0) or 0) & 0xFF
         if mode not in (0, 1, 2):
             mode = 2
         self._master_sensor_mode = mode
+        self._sensor_mode_dirty = False
         self._sync_sensor_mode_ui(mode)
         names = {0: "IR", 1: "RADAR", 2: "UNCONFIGURED"}
         label = getattr(self, "sensor_mode_status_label", None)
@@ -2274,6 +2394,7 @@ class MainWindow(QMainWindow, UIBase):
             "Sensor mode ack → %s (value=%d)" % (names.get(mode, str(mode)), mode),
             "INFO",
         )
+        self._refresh_commissioning_status(getattr(self, "latest_master_summary", None))
         # L2 下一帧会刷新 bit3/bit4；先用应答刷新健康行
         if hasattr(self, "_update_home_health_and_faults"):
             self._update_home_health_and_faults()
@@ -3298,6 +3419,8 @@ class MainWindow(QMainWindow, UIBase):
             self.sensor_mode_combo.setEnabled(can_modify_settings)
         if getattr(self, 'sensor_mode_read_btn', None) is not None:
             self.sensor_mode_read_btn.setEnabled(can_modify_settings)
+        if getattr(self, 'sensor_mode_write_btn', None) is not None:
+            self.sensor_mode_write_btn.setEnabled(can_modify_settings)
 
         if hasattr(self, 'alarm_read_btn'):
             self.alarm_read_btn.setEnabled(can_modify_settings)
@@ -4344,6 +4467,9 @@ class MainWindow(QMainWindow, UIBase):
                 combo.blockSignals(False)
             if getattr(self, 'sensor_mode_read_btn', None) is not None:
                 self.sensor_mode_read_btn.setText(_t("btn_read_sensor_mode"))
+            if getattr(self, 'sensor_mode_write_btn', None) is not None:
+                self.sensor_mode_write_btn.setText(_t("btn_write_sensor_mode"))
+                self.sensor_mode_write_btn.setToolTip(_t("tip_write_sensor_mode"))
             if getattr(self, 'sensor_mode_status_label', None) is not None:
                 pkt = getattr(self, "latest_master_summary", None)
                 if pkt is not None and self.is_master_online():
@@ -4353,6 +4479,7 @@ class MainWindow(QMainWindow, UIBase):
                     self.sensor_mode_status_label.setStyleSheet(
                         "color: #888888; font-size: 11px;"
                     )
+                    self._refresh_commissioning_status(None, lang=lang)
             
         if hasattr(self, 'log_group'):
             self.log_group.setTitle(_t("set_raw_logging"))

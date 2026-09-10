@@ -1,13 +1,16 @@
 # -*- mode: python ; coding: utf-8 -*-
 # PyInstaller spec for daq_tablet (run build_windows.bat / build_linux.sh)
 import os
+import sys
 
-from PyInstaller.utils.hooks import collect_data_files
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 block_cipher = None
 
 spec_dir = os.path.dirname(os.path.abspath(SPEC))
 app_dir = os.path.abspath(os.path.join(spec_dir, ".."))
+if app_dir not in sys.path:
+    sys.path.insert(0, app_dir)
 
 hiddenimports = [
     "PyQt5",
@@ -19,10 +22,52 @@ hiddenimports = [
     "numpy",
     "pandas",
     "serial",
+    "serial.tools",
+    "serial.tools.list_ports",
     "openpyxl",
+    "openpyxl.cell",
+    "openpyxl.workbook",
+    "openpyxl.styles",
     "psutil",
     "scipy",
+    "core",
+    "core.algorithm",
+    "core.alarm_log_page",
+    "core.alarm_logger",
+    "core.alarm_logger_english",
+    "core.autosave_worker",
+    "core.config",
+    "core.config_ui",
+    "core.control_room_page",
+    "core.detector",
+    "core.diagnostics",
+    "core.excel_io",
+    "core.home_page",
+    "core.icons",
+    "core.industrial_dialogs",
+    "core.logger",
+    "core.login_dialog",
+    "core.main_window",
+    "core.master_summary",
+    "core.pages",
+    "core.raw_logger",
+    "core.singleton",
+    "core.software_keyboard",
+    "core.tcp_detector",
+    "core.themes",
+    "core.timeout_manager",
+    "core.translation",
+    "core.ui_base",
+    "core.ui_components",
+    "core.ui_tokens",
+    "core.user_management_dialog",
+    "core.user_manager",
+    "core.utils",
 ]
+try:
+    hiddenimports += collect_submodules("core")
+except Exception:
+    pass
 
 datas = [
     (os.path.join(app_dir, "hmi_web"), "hmi_web"),

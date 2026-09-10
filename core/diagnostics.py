@@ -89,6 +89,8 @@ class DiagnosticsManager:
         self.peak_connected_count = 0
         # 最近一次周期检查中因“在线数已恢复”而清除的离线 client_id
         self.purged_offline_clients: List[str] = []
+        # 写盘/重 I/O 期间暂缓 E102，避免主线程卡顿导致假超时
+        self.comm_timeout_grace_until: float = 0.0
 
         # 分探头高压设定：{probe_key(IP): voltage}；仅对该探头启用 E202
         self.client_hv_setpoints: Dict[str, float] = {}
@@ -105,9 +107,26 @@ class DiagnosticsManager:
             return
         self.client_hv_setpoints[key] = float(voltage)
 
+    def defer_comm_timeouts(self, seconds: float):
+        """Pause E102 injection until UI/I/O catch up (e.g. background autosave)."""
+        try:
+            sec = max(0.0, float(seconds))
+        except (TypeError, ValueError):
+            sec = 0.0
+        if sec <= 0:
+            return
+        until = time.time() + sec
+        if until > self.comm_timeout_grace_until:
+            self.comm_timeout_grace_until = until
+
+    def comm_timeouts_suppressed(self, now: float = None) -> bool:
+        ts = time.time() if now is None else float(now)
+        return ts < float(self.comm_timeout_grace_until or 0)
+
     def start_acquisition(self):
         self.acquisition_start_time = time.time()
         self.is_acquiring = True
+        self.comm_timeout_grace_until = 0.0
         self.active_faults.clear()
         self.temp_history.clear()
         self.hv_history.clear()
@@ -356,7 +375,9 @@ class DiagnosticsManager:
                     self.remove_fault(client_id, FaultCode.E101)
                     
                     # E102: Communication timeout (no packet for > COMM_TIMEOUT_SEC)
-                    if now - last_seen > self.COMM_TIMEOUT_SEC:
+                    if self.comm_timeouts_suppressed(now):
+                        self.remove_fault(client_id, FaultCode.E102)
+                    elif now - last_seen > self.COMM_TIMEOUT_SEC:
                         self.add_fault(client_id, FaultCode.E102)
                     else:
                         self.remove_fault(client_id, FaultCode.E102)
@@ -395,6 +416,8 @@ class DiagnosticsManager:
                 # 在线数已达到期望（或峰值）→ 清除旧离线 E102（支持换 IP 热替换）
                 self.purged_offline_clients.append(client_id)
                 self.remove_client(client_id)
+                continue
+            if self.comm_timeouts_suppressed(now):
                 continue
             if client_id in self.last_packet_time or FaultCode.E102 in self.active_faults.get(client_id, {}):
                 self.add_fault(client_id, FaultCode.E102)

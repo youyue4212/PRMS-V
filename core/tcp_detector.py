@@ -131,6 +131,8 @@ class TcpPacketWorker(QObject):
         self.client_buffers = {}  # Buffer for each client {client_id: bytearray}
         self.client_infos = {}    # Client information dictionary {client_id: ClientInfo}
         self.master_client_id = None  # last client that sent valid L2 summary
+        self._last_l2_online_mask = None
+        self._last_l2_timestamp_ms = None
         self.client_counter = 0  # Client counter for generating unique IDs
         self.buffer = bytearray()  # Main buffer (backward compatibility)
         self.is_running = False
@@ -336,9 +338,11 @@ class TcpPacketWorker(QObject):
             return
         
         try:
-            # Check timeout
+            # Check timeout only while clients exist. Empty listen is standby, not a fault.
             current_time = time.time()
-            if current_time - self.last_packet_time > self.timeout_threshold:
+            if self.client_sockets and (
+                current_time - self.last_packet_time > self.timeout_threshold
+            ):
                 self.stats['timeouts'] += 1
                 self.error_occurred.emit("TCP communication timeout - no data received")
                 self.last_packet_time = current_time  # Reset timeout timer
@@ -369,6 +373,8 @@ class TcpPacketWorker(QObject):
                         packets_received=0
                     )
                     self.client_infos[client_id] = client_info
+                    # New socket has no payload yet; do not inherit idle-listen age.
+                    self.last_packet_time = time.time()
                     
                     self.stats['clients_connected'] += 1
                     
@@ -1006,28 +1012,52 @@ class TcpPacketWorker(QObject):
                         if client_id in self.client_infos:
                             self.client_infos[client_id].packets_received += 1
                             self.client_infos[client_id].last_active = time.time()
-                        if self.stats['master_packets'] == 1 or (self.stats['master_packets'] % 30) == 0:
+                        n_pkt = int(self.stats['master_packets'])
+                        mask = int(getattr(parsed_packet, "online_mask", 0) or 0)
+                        tick = int(getattr(parsed_packet, "timestamp_ms", 0) or 0)
+                        prev_mask = self._last_l2_online_mask
+                        prev_tick = self._last_l2_timestamp_ms
+                        mask_changed = prev_mask is not None and mask != prev_mask
+                        # 主控复位：毫秒 tick 明显回跳（排除 uint32 回绕）
+                        tick_reset = (
+                            prev_tick is not None
+                            and tick + 5000 < prev_tick
+                            and prev_tick < 0xF0000000
+                        )
+                        periodic = n_pkt == 1 or (n_pkt % 30) == 0
+                        if periodic or mask_changed or tick_reset:
                             n_slots = int(parsed_packet.probe_count_cfg or 0) or 2
                             slot_cps = list(parsed_packet.probe_cps or [])[:n_slots]
                             slot_txt = ",".join(
                                 "%d:%d" % (i + 1, int(v or 0))
                                 for i, v in enumerate(slot_cps)
                             ) or "-"
+                            extra = ""
+                            if mask_changed:
+                                extra += " mask_changed"
+                            if tick_reset:
+                                extra += " timestamp_reset"
                             self.has_log.emit(
-                                "Master L2 OK from %s: total_cps=%d slot_cps=[%s] probes=%d decision=0x%02X (#%d)"
+                                "Master L2 OK from %s: total_cps=%d slot_cps=[%s] probes=%d "
+                                "decision=0x%02X online_mask=0x%04X timestamp_ms=%d (#%d)%s"
                                 % (
                                     client_id,
                                     int(parsed_packet.total_cps),
                                     slot_txt,
                                     int(parsed_packet.probe_count_cfg),
                                     int(parsed_packet.decision_result),
-                                    self.stats['master_packets'],
+                                    mask,
+                                    tick,
+                                    n_pkt,
+                                    extra,
                                 ),
                                 'INFO',
                             )
-                            if self.stats['master_packets'] == 1:
+                            if n_pkt == 1:
                                 hx = ' '.join('%02X' % b for b in packet_data)
                                 self.has_log.emit("Master L2 raw60: %s" % hx, 'INFO')
+                        self._last_l2_online_mask = mask
+                        self._last_l2_timestamp_ms = tick
                         self.master_summary_received.emit(parsed_packet, client_id)
                     elif isinstance(parsed_packet, DevMessage):
                         self.stats['dev_messages'] += 1

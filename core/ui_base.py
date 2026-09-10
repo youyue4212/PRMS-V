@@ -6,7 +6,7 @@ import serial
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QFileDialog, QCheckBox,QLineEdit,
                              QComboBox, QDoubleSpinBox, QSpinBox, QPushButton, QLabel, QTextEdit, QFormLayout, QGridLayout,QSizePolicy,QStyle,
                              QTabWidget, QDockWidget, QAction, QToolBar, QStatusBar, QMessageBox)
-from PyQt5.QtCore import QThread, QTimer, QMutex, pyqtSignal, Qt, QObject, QEvent
+from PyQt5.QtCore import QThread, QTimer, QMutex, pyqtSignal, Qt, QObject, QEvent, QMetaObject, Q_ARG
 from PyQt5.QtGui import QFont, QIcon
 from dataclasses import dataclass
 from typing import Optional
@@ -27,6 +27,7 @@ from core.raw_logger import RawLogger
 from core import logger 
 from core.alarm_logger import get_alarm_logger  # 导入报警记录器
 from core.diagnostics import DiagnosticsManager  # 导入诊断管理器
+from core.autosave_worker import AutoSaveWorker
 from core.translation import _t  # 导入翻译函数
 
 log_inst=logger.get_logger()
@@ -71,13 +72,13 @@ class FocusEventFilter(QObject):
 
     def _resolve_keyboard_target(self, obj):
         """若聚焦在 SpinBox 内部 lineEdit，绑定到父 SpinBox。"""
-        target_obj = obj
-        if isinstance(obj, QLineEdit):
-            parent = obj.parent()
-            while parent is not None:
-                if isinstance(parent, (QSpinBox, QDoubleSpinBox)):
+                        target_obj = obj
+                        if isinstance(obj, QLineEdit):
+                            parent = obj.parent()
+                            while parent is not None:
+                                if isinstance(parent, (QSpinBox, QDoubleSpinBox)):
                     return parent
-                parent = parent.parent()
+                                parent = parent.parent()
         return target_obj
 
     def _show_internal_software_keyboard(self, obj):
@@ -92,16 +93,16 @@ class FocusEventFilter(QObject):
             if current_time - getattr(km, "last_closed_time", 0) < 0.5:
                 return False
             target_obj = self._resolve_keyboard_target(obj)
-            if km.is_visible() and getattr(km, "current_input", None) is target_obj:
+                        if km.is_visible() and getattr(km, "current_input", None) is target_obj:
                 return False
             self.last_trigger_time = current_time
             self.current_focused_obj = target_obj
             log_inst.debug("Showing internal software keyboard")
             # 传入所属窗口：登录模态时键盘会挂到登录框前，避免被挡在后面
-            km.show_keyboard_for_input(target_obj, obj.window())
+                        km.show_keyboard_for_input(target_obj, obj.window())
             return True
-        except Exception as e:
-            log_inst.error(f"Failed to show internal software keyboard: {e}")
+                    except Exception as e:
+                        log_inst.error(f"Failed to show internal software keyboard: {e}")
             return False
 
     def eventFilter(self, obj, event):
@@ -590,6 +591,9 @@ class UIBase():
         self.master_summary_callback = None
         self._master_was_online = False
         self._last_master_ip = ""
+        self._master_sensor_mode = 2
+        self._sensor_mode_dirty = False
+        self._pending_sensor_mode_at = 0.0
         
         self.spectrum_data = np.zeros(self.config.adc_channels)  # Current displayed spectrum data
         self.temperature_data = []
@@ -603,6 +607,10 @@ class UIBase():
         self.gain_stabilizer_pending = False  # Flag to indicate we're waiting for device confirmation
         
         self.worker_thread.start()
+        self._autosave_worker = None
+        self._autosave_running = False
+        self._read_timer_bound = False
+        self._bind_read_timer_to_worker()
         
         # Setup UI connections
         self.setup_ui()
@@ -616,7 +624,7 @@ class UIBase():
         self.auto_save_path = ""
         self.auto_save_timer = QTimer()
         self.auto_save_timer.timeout.connect(self.auto_save_data)
-        self.last_auto_save_time = 0
+        self.last_auto_save_time = time.time()
         self.auto_save_counter = 0
         
         # Start auto-save timer if enabled
@@ -1183,7 +1191,7 @@ class UIBase():
 
     def add_widgets_to_setting_layout(self, settings_layout):
        # Settings placeholder
-
+        
         from core.translation import _t
         self.comm_group = QGroupBox(_t("set_comm_settings"))
         comm_layout = QGridLayout(self.comm_group)
@@ -1302,22 +1310,7 @@ class UIBase():
         ctrl_layout.addWidget(self.gain_stabilizer_label, 0, 1)
         ctrl_layout.addWidget(self.gain_stabilizer_btn, 0, 2)
 
-        # 期望探头数：在线不足则报缺；达到期望则清除旧离线故障（支持换 IP）
-        self.expected_probe_label = QLabel(_t("set_expected_probes"))
-        self.expected_probe_spin = QSpinBox()
-        self.expected_probe_spin.setRange(0, 16)
-        self.expected_probe_spin.setValue(int(getattr(self.config, "expected_probe_count", 2) or 0))
-        self.expected_probe_spin.setToolTip(_t("tip_expected_probes"))
-        self.expected_probe_spin.valueChanged.connect(self.on_expected_probe_count_changed)
-        self.adopt_probe_count_btn = QPushButton(_t("btn_adopt_probe_count"))
-        self.adopt_probe_count_btn.setToolTip(_t("tip_adopt_probe_count"))
-        self.adopt_probe_count_btn.clicked.connect(self.adopt_current_probe_count)
-        ctrl_layout.addWidget(self.expected_probe_label, 1, 0)
-        ctrl_layout.addWidget(self.expected_probe_spin, 1, 1)
-        ctrl_layout.addWidget(self.adopt_probe_count_btn, 1, 2)
-
         # UI mode: field tablet vs control-room PC (restart required)
-        # 「本通道接了红外」已迁到主控组「传感器模式」旁，避免与 0x19 配置语义打架
         self.ui_mode_label = QLabel(_t("set_ui_mode"))
         self.ui_mode_label.setToolTip(_t("tip_ui_mode"))
         self.ui_mode_combo = QComboBox()
@@ -1328,13 +1321,13 @@ class UIBase():
         self.ui_mode_combo.setCurrentIndex(idx if idx >= 0 else 0)
         self.ui_mode_combo.setToolTip(_t("tip_ui_mode"))
         self.ui_mode_combo.currentIndexChanged.connect(self.on_ui_mode_changed)
-        ctrl_layout.addWidget(self.ui_mode_label, 2, 0)
-        ctrl_layout.addWidget(self.ui_mode_combo, 2, 1, 1, 2)
+        ctrl_layout.addWidget(self.ui_mode_label, 1, 0)
+        ctrl_layout.addWidget(self.ui_mode_combo, 1, 1, 1, 2)
 
         # Home probe card location labels (count follows expected_probe_count)
         self.probe_locations_label = QLabel(_t("set_probe_locations"))
         self.probe_locations_label.setToolTip(_t("tip_probe_locations"))
-        ctrl_layout.addWidget(self.probe_locations_label, 3, 0, 1, 3)
+        ctrl_layout.addWidget(self.probe_locations_label, 2, 0, 1, 3)
         self.probe_location_wrap = QWidget()
         self.probe_location_grid = QGridLayout(self.probe_location_wrap)
         self.probe_location_grid.setContentsMargins(0, 0, 0, 0)
@@ -1343,7 +1336,7 @@ class UIBase():
         self.probe_location_slot_labels = []
         self.probe_location_cells = []
         self._rebuild_probe_location_edits()
-        ctrl_layout.addWidget(self.probe_location_wrap, 4, 0, 1, 3)
+        ctrl_layout.addWidget(self.probe_location_wrap, 3, 0, 1, 3)
 
         # One-click factory parameter reset (command 0x14 → probe TCP/serial)
         self.factory_reset_label = QLabel(_t("set_factory_reset"))
@@ -1353,9 +1346,9 @@ class UIBase():
         self.reset_defaults_all_btn = QPushButton(_t("btn_reset_all"))
         self.reset_defaults_all_btn.setToolTip(_t("tip_reset_defaults"))
         self.reset_defaults_all_btn.clicked.connect(lambda: self.reset_factory_defaults(all_probes=True))
-        ctrl_layout.addWidget(self.factory_reset_label, 5, 0)
-        ctrl_layout.addWidget(self.reset_defaults_current_btn, 5, 1)
-        ctrl_layout.addWidget(self.reset_defaults_all_btn, 5, 2)
+        ctrl_layout.addWidget(self.factory_reset_label, 4, 0)
+        ctrl_layout.addWidget(self.reset_defaults_current_btn, 4, 1)
+        ctrl_layout.addWidget(self.reset_defaults_all_btn, 4, 2)
 
         settings_layout.addWidget(self.ctrl_group)
 
@@ -1370,7 +1363,7 @@ class UIBase():
         self.focus_filter.keyboard_enabled = kb_on
         self.keyboard_enable_checkbox.stateChanged.connect(self.toggle_virtual_keyboard)
         keyboard_layout.addWidget(self.keyboard_enable_checkbox, 0, 0, 1, 2)
-
+        
         self.keyboard_status_label = QLabel(
             _t("status_enabled") if kb_on else _t("status_disabled")
         )
@@ -1379,7 +1372,7 @@ class UIBase():
         else:
             self.keyboard_status_label.setStyleSheet("color: gray;")
         keyboard_layout.addWidget(self.keyboard_status_label, 1, 0, 1, 2)
-
+        
         settings_layout.addWidget(self.keyboard_group)
 
         # --- Device Control and Status Group (根据参考代码添加) ---
@@ -1454,7 +1447,7 @@ class UIBase():
         self.occupancy_title_label = QLabel(_t("set_occupancy"))
         device_layout.addWidget(self.occupancy_title_label, 6, 0)
         device_layout.addWidget(self.occupancy_status_label, 6, 1, 1, 4)
-
+        
         # Counter Display
         self.counter_label = QLabel("--")
         self.counter_title_label = QLabel(_t("set_counter"))
@@ -1516,9 +1509,22 @@ class UIBase():
 
         settings_layout.addWidget(self.master_relay_group)
 
-        # --- 通道门控 / 传感器（开通配置，与继电器危险操作分开）---
+        # --- 通道开通（期望探头数 + 传感器模式；占用状态只读，不在此写入）---
         self.channel_gate_group = QGroupBox(_t("set_channel_gate"))
         gate_layout = QGridLayout(self.channel_gate_group)
+
+        self.expected_probe_label = QLabel(_t("set_expected_probes"))
+        self.expected_probe_spin = QSpinBox()
+        self.expected_probe_spin.setRange(0, 16)
+        self.expected_probe_spin.setValue(int(getattr(self.config, "expected_probe_count", 2) or 0))
+        self.expected_probe_spin.setToolTip(_t("tip_expected_probes"))
+        self.expected_probe_spin.valueChanged.connect(self.on_expected_probe_count_changed)
+        self.adopt_probe_count_btn = QPushButton(_t("btn_adopt_probe_count"))
+        self.adopt_probe_count_btn.setToolTip(_t("tip_adopt_probe_count"))
+        self.adopt_probe_count_btn.clicked.connect(self.adopt_current_probe_count)
+        gate_layout.addWidget(self.expected_probe_label, 0, 0)
+        gate_layout.addWidget(self.expected_probe_spin, 0, 1)
+        gate_layout.addWidget(self.adopt_probe_count_btn, 0, 2, 1, 3)
 
         self.sensor_mode_label = QLabel(_t("set_sensor_mode"))
         self.sensor_mode_combo = QComboBox()
@@ -1529,13 +1535,21 @@ class UIBase():
         self.sensor_mode_combo.currentIndexChanged.connect(self.on_sensor_mode_combo_changed)
         self.sensor_mode_read_btn = QPushButton(_t("btn_read_sensor_mode"))
         self.sensor_mode_read_btn.clicked.connect(self.read_master_sensor_mode)
+        self.sensor_mode_write_btn = QPushButton(_t("btn_write_sensor_mode"))
+        self.sensor_mode_write_btn.setToolTip(_t("tip_write_sensor_mode"))
+        self.sensor_mode_write_btn.clicked.connect(self.write_master_sensor_mode)
         self.sensor_mode_status_label = QLabel(_t("tip_sensor_mode"))
         self.sensor_mode_status_label.setStyleSheet("color: #888888; font-size: 11px;")
         self.sensor_mode_status_label.setWordWrap(True)
-        gate_layout.addWidget(self.sensor_mode_label, 0, 0)
-        gate_layout.addWidget(self.sensor_mode_combo, 0, 1, 1, 3)
-        gate_layout.addWidget(self.sensor_mode_read_btn, 0, 4)
-        gate_layout.addWidget(self.sensor_mode_status_label, 1, 0, 1, 5)
+        self.commission_status_label = QLabel(_t("commission_status_need_master"))
+        self.commission_status_label.setStyleSheet("color: #888888; font-size: 12px; font-weight: bold;")
+        self.commission_status_label.setWordWrap(True)
+        gate_layout.addWidget(self.sensor_mode_label, 1, 0)
+        gate_layout.addWidget(self.sensor_mode_combo, 1, 1, 1, 2)
+        gate_layout.addWidget(self.sensor_mode_read_btn, 1, 3)
+        gate_layout.addWidget(self.sensor_mode_write_btn, 1, 4)
+        gate_layout.addWidget(self.sensor_mode_status_label, 2, 0, 1, 5)
+        gate_layout.addWidget(self.commission_status_label, 3, 0, 1, 5)
 
         self.alarm_clear_mode_label = QLabel(_t("set_alarm_clear_mode"))
         self.alarm_clear_mode_combo = QComboBox()
@@ -1545,14 +1559,14 @@ class UIBase():
         self.alarm_clear_mode_combo.currentIndexChanged.connect(self.on_alarm_clear_mode_combo_changed)
         self.alarm_clear_mode_read_btn = QPushButton(_t("btn_read_clear_mode"))
         self.alarm_clear_mode_read_btn.clicked.connect(self.read_master_alarm_clear_mode)
-        gate_layout.addWidget(self.alarm_clear_mode_label, 2, 0)
-        gate_layout.addWidget(self.alarm_clear_mode_combo, 2, 1, 1, 3)
-        gate_layout.addWidget(self.alarm_clear_mode_read_btn, 2, 4)
+        gate_layout.addWidget(self.alarm_clear_mode_label, 4, 0)
+        gate_layout.addWidget(self.alarm_clear_mode_combo, 4, 1, 1, 3)
+        gate_layout.addWidget(self.alarm_clear_mode_read_btn, 4, 4)
 
         self.channel_gate_hint_label = QLabel(_t("tip_channel_gate"))
         self.channel_gate_hint_label.setStyleSheet("color: #888888; font-size: 11px;")
         self.channel_gate_hint_label.setWordWrap(True)
-        gate_layout.addWidget(self.channel_gate_hint_label, 3, 0, 1, 5)
+        gate_layout.addWidget(self.channel_gate_hint_label, 5, 0, 1, 5)
 
         # 旧「本通道接了红外」勾选已取消：对射明细跟主控传感器模式自动对齐
         self.ir_installed_checkbox = None
@@ -1724,9 +1738,11 @@ class UIBase():
                 return True
             else:
                 # Worker type mismatch, reinitialize
+                self._read_timer_bound = False
                 self.initialize_worker()
                 if self.worker:
                     self.worker.moveToThread(self.worker_thread)
+                    self._bind_read_timer_to_worker()
                 return False
         else:
             # Serial mode
@@ -1736,10 +1752,54 @@ class UIBase():
                 return True
             else:
                 # Worker type mismatch, reinitialize
+                self._read_timer_bound = False
                 self.initialize_worker()
                 if self.worker:
                     self.worker.moveToThread(self.worker_thread)
+                    self._bind_read_timer_to_worker()
                 return False
+    
+    def _bind_read_timer_to_worker(self):
+        """TCP read timer on worker thread so Excel/UI stalls do not stop recv."""
+        if self._read_timer_bound or self.worker is None:
+            return
+        try:
+            self.read_timer.setInterval(10)
+            try:
+                self.read_timer.timeout.disconnect()
+            except TypeError:
+                pass
+            if isinstance(self.worker, TcpPacketWorker):
+                self.read_timer.timeout.connect(
+                    self.worker.read_tcp_loop, Qt.DirectConnection
+                )
+            elif isinstance(self.worker, SerialPacketWorker):
+                self.read_timer.timeout.connect(
+                    self.worker.read_serial_loop, Qt.DirectConnection
+                )
+            self.read_timer.moveToThread(self.worker_thread)
+            self._read_timer_bound = True
+        except Exception as e:
+            self.log("Failed to bind read timer to worker thread: %s" % e, "WARNING")
+
+    def _start_read_timer(self):
+        if self.worker is None:
+            return
+        if not self._read_timer_bound:
+            self._bind_read_timer_to_worker()
+        if not self._read_timer_bound:
+            self.read_timer.start()
+            return
+        if not self.read_timer.isActive():
+            QMetaObject.invokeMethod(self.read_timer, "start", Qt.QueuedConnection)
+
+    def _stop_read_timer(self):
+        if self.worker is None:
+            return
+        if self._read_timer_bound and self.read_timer.isActive():
+            QMetaObject.invokeMethod(self.read_timer, "stop", Qt.QueuedConnection)
+        else:
+            self.read_timer.stop()
     
     def ensure_serial_ready(self):
         """Backward compatibility method"""
@@ -1749,14 +1809,14 @@ class UIBase():
     
     def start_acquisition(self):
         if self.ensure_connection_ready():
-            # 优化：先启动定时器，再开始读取，减少卡顿
-            self.read_timer.start()
+            self._start_read_timer()
             
             # 延迟启动数据读取，让UI先响应
             QTimer.singleShot(100, lambda: self._delayed_start_reading())
             
             self.is_acquiring = True
             self.diagnostics_manager.start_acquisition()
+            self.last_auto_save_time = time.time()
             self.set_status_label('Starting acquisition...', True)
             
             # 重置数据状态，准备接收新数据（但不清除客户端选择）
@@ -1789,12 +1849,12 @@ class UIBase():
             # 停止前先落盘一次，避免随后清内存导致只能导出空文件
             try:
                 if self.auto_save_enabled:
-                    self._auto_save_all_clients(force=True)
+                    self._auto_save_all_clients(force=True, blocking=True)
             except Exception as e:
                 self.log(f"Final auto-save before stop failed: {e}", 'WARNING')
 
             self.worker.stop_reading()
-            self.read_timer.stop()
+            self._stop_read_timer()
             self.is_acquiring = False
             self.diagnostics_manager.stop_acquisition()
             
@@ -1835,24 +1895,24 @@ class UIBase():
                 self, _t("msg_no_client_data_title"), _t("msg_save_select_probe")
             )
             return
-
+        
         ts = self.client_time_series.get(client_id) or []
         spec = self.client_spectrum_data.get(client_id)
         has_spec = spec is not None and np.sum(spec) > 0
         if not ts and not has_spec:
             QMessageBox.warning(self, _t("msg_no_data_title"), _t("msg_no_data_text"))
-            return
-
+                return
+            
         label = self._export_probe_label(client_id, 0)
         meta = self._export_probe_meta(client_id)
-        timestamp = time.strftime("%Y%m%d_%H%M%S")
+                timestamp = time.strftime("%Y%m%d_%H%M%S")
         default_filename = "rayzen_spectrometer_data_%s.xlsx" % (
             self._export_file_stem(client_id, timestamp)
         )
-        filename, _ = QFileDialog.getSaveFileName(
-            self,
+            filename, _ = QFileDialog.getSaveFileName(
+                    self,
             _t("dlg_save_data_for", client=label),
-            default_filename,
+                    default_filename,
             "Excel Files (*.xlsx);;All Files (*)",
         )
         if not filename:
@@ -2032,7 +2092,7 @@ class UIBase():
         spec_col = self._export_fs_token("_".join([probe, loc])) or "Spectrum"
         spec_col = "Counts_%s" % spec_col if spec_col != "Spectrum" else "Spectrum"
 
-        df_spectrum = pd.DataFrame({
+                df_spectrum = pd.DataFrame({
             "Channel": list(range(len(spectrum_data_to_save))),
             spec_col: spectrum_data_to_save,
         })
@@ -2040,10 +2100,10 @@ class UIBase():
             "Probe", "Location", "IP",
             "Timestamp", "Counter", "Temperature", "HV", "Spectrum_Counts",
         ]
-        if time_series_data:
-            timestamps, counters, temperatures, hvs, spec_counts = zip(*time_series_data)
+                if time_series_data:
+                    timestamps, counters, temperatures, hvs, spec_counts = zip(*time_series_data)
             n = len(timestamps)
-            df_time_series = pd.DataFrame({
+                    df_time_series = pd.DataFrame({
                 "Probe": [probe] * n,
                 "Location": [loc] * n,
                 "IP": [ip] * n,
@@ -2055,11 +2115,11 @@ class UIBase():
                 "Temperature": temperatures,
                 "HV": hvs,
                 "Spectrum_Counts": spec_counts,
-            })
-        else:
+                    })
+                else:
             df_time_series = pd.DataFrame(columns=ts_cols)
-
-        df_client_info = pd.DataFrame({
+                
+                df_client_info = pd.DataFrame({
             "Probe": [probe],
             "Location": [loc or "--"],
             "IP": [ip or "--"],
@@ -2076,30 +2136,28 @@ class UIBase():
 
         def _write(tmp: str):
             with pd.ExcelWriter(tmp, engine="openpyxl") as writer:
-                df_spectrum.to_excel(writer, sheet_name='Spectrum', index=False)
-                df_time_series.to_excel(writer, sheet_name='TimeSeries', index=False)
-                df_client_info.to_excel(writer, sheet_name='DeviceInfo', index=False)
-
+                    df_spectrum.to_excel(writer, sheet_name='Spectrum', index=False)
+                    df_time_series.to_excel(writer, sheet_name='TimeSeries', index=False)
+                    df_client_info.to_excel(writer, sheet_name='DeviceInfo', index=False)
+                
         size = write_excel_atomic(filename, _write, min_bytes=200)
         return len(time_series_data), float(np.sum(spectrum_data_to_save)), size
 
-    def _auto_save_all_clients(self, force=False):
-        """Save every client that has real data. Skip empty snapshots."""
+    def _wait_autosave_worker(self, timeout: float = 120.0):
+        worker = getattr(self, "_autosave_worker", None)
+        if worker is not None and worker.isRunning():
+            worker.wait(int(max(1.0, float(timeout)) * 1000))
+        self._autosave_running = False
+        self._autosave_worker = None
+
+    def _build_autosave_jobs(self, timestamp: str, save_dir: str):
+        """Snapshot in-memory probe data on UI thread (fast copy)."""
         clients = self._clients_with_saveable_data()
         if not clients:
-            self.log("Auto-save skipped: no spectrum/time-series data in memory", 'INFO')
-            return 0
-
-        timestamp = time.strftime("%Y%m%d_%H%M%S")
-        if self.auto_save_path:
-            save_dir = self.auto_save_path
-        else:
-            home_dir = os.path.expanduser("~")
-            save_dir = os.path.join(home_dir, "Raysen", "AutoSave")
+            return []
         os.makedirs(save_dir, exist_ok=True)
-
         is_tcp_mode = bool(self.config.tcp_enabled)
-        saved = 0
+        jobs = []
         for client_id in clients:
             stem = self._export_file_stem(client_id, timestamp)
             filename = os.path.join(save_dir, "data_auto_%s.xlsx" % stem)
@@ -2108,38 +2166,104 @@ class UIBase():
                     save_dir,
                     "data_auto_%s_%s.xlsx" % (stem, self._export_client_tag(client_id)),
                 )
-            try:
-                n_ts, spec_sum, size = self._write_client_excel(filename, client_id, is_tcp_mode)
-                meta = self._export_probe_meta(client_id)
-                ident = " ".join(
-                    p for p in (meta.get("label"), meta.get("location")) if p
-                ) or client_id
-                self.log(
-                    "Auto-saved %s (probe=%s, points=%d, spectrum_sum=%.1f, bytes=%d)"
-                    % (filename, ident, n_ts, spec_sum, size),
-                    "INFO",
-                )
-                saved += 1
-                self.auto_save_counter += 1
-            except Exception as e:
-                self.log(f"Auto-save failed for {client_id}: {e}", 'ERROR')
-        if saved:
-            self.update_auto_save_counter_label()
+            spec = self.client_spectrum_data.get(
+                client_id, np.zeros(self.config.adc_channels)
+            )
+            meta = self._export_probe_meta(client_id)
+            ident = " ".join(
+                p for p in (meta.get("label"), meta.get("location")) if p
+            ) or client_id
+            jobs.append({
+                "filename": filename,
+                "client_id": client_id,
+                "spectrum": np.array(spec, copy=True),
+                "time_series": list(self.client_time_series.get(client_id, [])),
+                "client_info": dict(self.client_data.get(client_id, {}) or {}),
+                "meta": dict(meta),
+                "ident": ident,
+                "is_tcp_mode": is_tcp_mode,
+            })
+        return jobs
+
+    def _on_autosave_worker_done(self, saved: int, logs):
+        self._autosave_running = False
+        self._autosave_worker = None
+        for msg, level in list(logs or []):
+            self.log(msg, level)
+        if int(saved or 0) > 0:
+            self.auto_save_counter += int(saved)
             self.last_auto_save_time = time.time()
-        return saved
+            self.update_auto_save_counter_label()
+
+    def _auto_save_all_clients(self, force=False, blocking=False):
+        """Save every client that has real data. Default: background thread."""
+        if blocking:
+            self._wait_autosave_worker()
+        elif self._autosave_running:
+            self.log("Auto-save skipped: previous run still in progress", "DEBUG")
+            return 0
+
+                timestamp = time.strftime("%Y%m%d_%H%M%S")
+                if self.auto_save_path:
+                    save_dir = self.auto_save_path
+                else:
+            save_dir = os.path.join(os.path.expanduser("~"), "Raysen", "AutoSave")
+
+        jobs = self._build_autosave_jobs(timestamp, save_dir)
+        if not jobs:
+            self.log("Auto-save skipped: no spectrum/time-series data in memory", "INFO")
+            return 0
+
+        dm = getattr(self, "diagnostics_manager", None)
+        if dm is not None and hasattr(dm, "defer_comm_timeouts"):
+            # 写盘期间 + 主线程消化积压包：暂缓 E102/M102
+            dm.defer_comm_timeouts(max(20.0, 5.0 + 3.0 * len(jobs)))
+
+        if blocking:
+            from core.autosave_worker import write_autosave_job
+            saved = 0
+            for job in jobs:
+                try:
+                    n_ts, spec_sum, size = write_autosave_job(job)
+                    self.log(
+                        "Auto-saved %s (probe=%s, points=%d, spectrum_sum=%.1f, bytes=%d)"
+                        % (job["filename"], job.get("ident"), n_ts, spec_sum, size),
+                        "INFO",
+                    )
+                    saved += 1
+                    self.auto_save_counter += 1
+                except Exception as e:
+                    self.log("Auto-save failed for %s: %s" % (job.get("client_id"), e), "ERROR")
+            if saved:
+                self.last_auto_save_time = time.time()
+                self.update_auto_save_counter_label()
+            return saved
+
+        self._autosave_running = True
+        worker = AutoSaveWorker(jobs)
+        worker.finished_ok.connect(self._on_autosave_worker_done)
+        worker.finished.connect(worker.deleteLater)
+        self._autosave_worker = worker
+        worker.start()
+        return len(jobs)
 
     def auto_save_data(self):
-        """自动保存数据"""
+        """自动保存数据（后台线程写 Excel，不阻塞 TCP/界面）。"""
         if not self.auto_save_enabled:
             self.log("Auto-save is disabled, skipping", 'DEBUG')
             return
 
-        # 未在采集时不写空文件（停止采集前会单独 force 保存）
         if not getattr(self, 'is_acquiring', False):
             self.log("Auto-save skipped: acquisition not running", 'DEBUG')
             return
 
+        if self._autosave_running:
+            self.log("Auto-save skipped: previous run still in progress", 'DEBUG')
+            return
+
         current_time = time.time()
+        if self.last_auto_save_time <= 0:
+            self.last_auto_save_time = current_time
         time_since_last_save = current_time - self.last_auto_save_time
         if time_since_last_save < self.auto_save_interval:
             self.log(
@@ -2150,11 +2274,12 @@ class UIBase():
 
         try:
             self.log(f"Auto-save triggered after {time_since_last_save:.1f}s", 'INFO')
-            self._auto_save_all_clients(force=False)
-        except Exception as e:
+            self._auto_save_all_clients(force=False, blocking=False)
+            except Exception as e:
+            self._autosave_running = False
             self.log(f"Auto-save error: {str(e)}", 'ERROR')
-            import traceback
-            self.log(f"Auto-save traceback: {traceback.format_exc()}", 'ERROR')
+                import traceback
+                self.log(f"Auto-save traceback: {traceback.format_exc()}", 'ERROR')
     
     def toggle_virtual_keyboard(self, state):
         """切换虚拟键盘自动触发开关（写入设置，电脑/工控可手动覆盖自动检测）。"""
@@ -2516,7 +2641,7 @@ class UIBase():
         """绘图节流：有新数据才刷新。未打开曲线/能谱页时不重绘 pyqtgraph。"""
         if not self._plot_dirty:
             return
-        self._plot_dirty = False
+            self._plot_dirty = False
         idx = self._stacked_page_index()
         self.update_data(update_cps=(idx == 1), update_spectrum=(idx == 2))
 
@@ -2531,7 +2656,7 @@ class UIBase():
             self.primary_client_id = first_client_id
             time_series_data = self.client_time_series[first_client_id]
             self.log(f"Auto-selected {first_client_id} as primary client", 'INFO')
-
+        
         if time_series_data:
             last = time_series_data[-1]
             self.current_stat = {
@@ -2539,8 +2664,8 @@ class UIBase():
                 'rates': float(last[1]),
                 'temp': last[2] / 100
             }
-            if self.data_updated_callback is not None:
-                self.data_updated_callback(self.current_stat, 0, self.client_data)
+                if self.data_updated_callback is not None:
+                    self.data_updated_callback(self.current_stat, 0, self.client_data)
 
             if update_cps and hasattr(self, "curve_cps"):
                 timestamps, counters, temperatures, hvs, spec_counts = zip(*time_series_data)
@@ -2570,10 +2695,10 @@ class UIBase():
                     self.spectrum_data = alg.hampel_filter(
                         self.spectrum_data, FILTER_WIN_SIZE, FILTER_NUM_SIGMA
                     )
-                if len(self.channels) != len(self.spectrum_data) + 1:
-                    self.channels = np.arange(len(self.spectrum_data) + 1)
-                self.curve_spectrum.setData(self.channels, self.spectrum_data)
-                self.update_spectrogram()
+            if len(self.channels) != len(self.spectrum_data) + 1:
+                self.channels = np.arange(len(self.spectrum_data) + 1)
+            self.curve_spectrum.setData(self.channels, self.spectrum_data)
+            self.update_spectrogram()
         
     def on_connection_status_changed(self, connected: bool, message: str):
         self.set_status_label(message, connected)
@@ -2597,8 +2722,16 @@ class UIBase():
 
     
     def on_error_occurred(self, error_message: str):
+        msg = str(error_message or "")
+        dm = getattr(self, "diagnostics_manager", None)
+        if (
+            dm is not None
+            and hasattr(dm, "comm_timeouts_suppressed")
+            and dm.comm_timeouts_suppressed()
+            and "communication timeout" in msg.lower()
+        ):
+            return
         self.packet_counts['errors'] += 1
-        #self.error_label.setText(f"Errors: {self.packet_counts['errors']}")
         self.log(f"ERROR: {error_message}")
     
     
@@ -2959,7 +3092,7 @@ class UIBase():
         if self.worker:
             # Stop current worker
             self.worker.stop_reading()
-            self.read_timer.stop()
+            self._stop_read_timer()
             
             # Disconnect based on worker type
             if isinstance(self.worker, SerialPacketWorker):
@@ -2975,18 +3108,15 @@ class UIBase():
                 self.data_updated_callback(self.current_stat, 0, {})
             
             # Reinitialize worker
+            self._read_timer_bound = False
             self.initialize_worker()
             if self.worker:
                 self.worker.moveToThread(self.worker_thread)
                 # Reconnect signals
                 self.setup_ui()
-                
-                # Reconnect read_timer timeout signal based on new worker type
-                self.read_timer.timeout.disconnect()
-                if isinstance(self.worker, SerialPacketWorker):
-                    self.read_timer.timeout.connect(self.worker.read_serial_loop)
-                elif isinstance(self.worker, TcpPacketWorker):
-                    self.read_timer.timeout.connect(self.worker.read_tcp_loop)
+                self._bind_read_timer_to_worker()
+                if self.is_acquiring:
+                    self._start_read_timer()
         
         self.log(f"TCP/IP server mode {'enabled' if enabled else 'disabled'}", 'INFO')
     
@@ -3306,8 +3436,9 @@ class UIBase():
             self.tcp_host_input.setPlaceholderText("Bind address (0.0.0.0 for all interfaces)")
     
     def closeEvent(self, event):
+        self._wait_autosave_worker(timeout=30.0)
         self.worker.stop_reading()
-        self.read_timer.stop()
+        self._stop_read_timer()
         
         # Disconnect based on worker type
         if isinstance(self.worker, SerialPacketWorker):
@@ -3444,7 +3575,7 @@ class UIBase():
                     "Probe relay %d → %s (0x06) via %s"
                     % (int(relay_num), "ON" if state else "OFF", probe_cid)
                 )
-            else:
+                    else:
                 self.log("Failed to send probe relay 0x06", "ERROR")
                 _revert()
             return ok
@@ -3453,11 +3584,11 @@ class UIBase():
         if ok:
             self._probe_relay_hold_until = time.time() + 2.0
             self.log("Control relay %d command sent: %s" % (relay_num, "ON" if state else "OFF"))
-        else:
+                else:
             self.log("Failed to send control relay %d command" % relay_num, "ERROR")
             _revert()
         return ok
-
+    
     def read_relay_status(self):
         """Probe relay read 0x12 — targeted to current probe only (not broadcast)."""
         if not self.ensure_serial_ready():
@@ -3476,9 +3607,9 @@ class UIBase():
             return ok
         ok = self.worker.read_relay_status(True)
         if ok:
-            self.log("Read relay status command sent")
-        else:
-            self.log("Failed to send read relay status command", "ERROR")
+                self.log("Read relay status command sent")
+            else:
+                self.log("Failed to send read relay status command", "ERROR")
         return ok
 
     def _get_probe_client_id_for_settings(self):
@@ -3759,18 +3890,18 @@ class UIBase():
             relay2_state = (packet.device_status & 0b00100) != 0
             hold = time.time() < float(getattr(self, "_probe_relay_hold_until", 0) or 0)
             if not hold:
-                self.relay0_checkbox.blockSignals(True)
-                self.relay0_checkbox.setChecked(relay0_state)
-                self.relay0_checkbox.blockSignals(False)
-
-                self.relay1_checkbox.blockSignals(True)
-                self.relay1_checkbox.setChecked(relay1_state)
-                self.relay1_checkbox.blockSignals(False)
-
-                self.relay2_checkbox.blockSignals(True)
-                self.relay2_checkbox.setChecked(relay2_state)
-                self.relay2_checkbox.blockSignals(False)
-
+            self.relay0_checkbox.blockSignals(True)
+            self.relay0_checkbox.setChecked(relay0_state)
+            self.relay0_checkbox.blockSignals(False)
+            
+            self.relay1_checkbox.blockSignals(True)
+            self.relay1_checkbox.setChecked(relay1_state)
+            self.relay1_checkbox.blockSignals(False)
+            
+            self.relay2_checkbox.blockSignals(True)
+            self.relay2_checkbox.setChecked(relay2_state)
+            self.relay2_checkbox.blockSignals(False)
+            
                 self.relay_states = (relay0_state, relay1_state, relay2_state)
                 relay_status_text = _t("relay_status_format", r0=int(relay0_state), r1=int(relay1_state), r2=int(relay2_state))
                 self.relay_status_label.setText(relay_status_text)
@@ -3782,7 +3913,7 @@ class UIBase():
                         "relay_status_format",
                         r0=int(states[0]), r1=int(states[1]), r2=int(states[2]),
                     )
-                    self.relay_status_label.setText(relay_status_text)
+            self.relay_status_label.setText(relay_status_text)
             
             # 更新报警状态
             remote_sig_alarm = (packet.device_status & 0b10000) != 0
@@ -3872,7 +4003,11 @@ class UIBase():
                         "slot%d=%d" % (i + 1, int(v or 0))
                         for i, v in enumerate(slot_cps)
                     ]
-                    slot_txt = " | L2: " + ", ".join(names)
+                    mask = int(getattr(pkt, "online_mask", 0) or 0)
+                    tick = int(getattr(pkt, "timestamp_ms", 0) or 0)
+                    slot_txt = " | L2: %s mask=0x%04X tick=%d" % (
+                        ", ".join(names), mask, tick
+                    )
             if not parts and not slot_txt:
                 return
             self._last_probe_cps_log_at = now
@@ -4204,6 +4339,14 @@ class UIBase():
         if never and n_clients == 0:
             dm.remove_fault("system", FaultCode.E103)
             return
+        try:
+            expected = int(getattr(self.config, "expected_probe_count", 0) or 0)
+        except (TypeError, ValueError):
+            expected = 0
+        # E103 只对照已设置的期望路数；未设置时不要用合成 target=1 误报
+        if expected <= 0:
+            dm.remove_fault("system", FaultCode.E103)
+            return
         online, target = self.probe_online_and_target()
         if target > 0 and online < target:
             dm.add_fault("system", FaultCode.E103)
@@ -4306,7 +4449,7 @@ class UIBase():
                 elif probe:
                     display_name = probe
                 else:
-                    display_name = client_id
+                display_name = client_id
                 
                 # 正确设置itemData
                 self.client_selection_combo.addItem(display_name)
@@ -4348,7 +4491,7 @@ class UIBase():
         if hasattr(self, "is_master_online") and self.is_master_online():
             return True
         return False
-
+    
     def log_alarm_event(self, packet: SpectrumPacket, client_id: str, alarm_status: bool):
         """
         记录报警事件到报警日志。
@@ -4359,10 +4502,10 @@ class UIBase():
             if self._skip_probe_radiation_log(client_id):
                 return
             alarm_logger = get_alarm_logger()
-
+            
             if client_id is None:
                 client_id = "serial_device"
-
+            
             alarm_logger.log_alarm_event(
                 client_id=client_id,
                 alarm_status=alarm_status,
@@ -4374,7 +4517,7 @@ class UIBase():
                 alarm_type="Radiation",
                 message=""
             )
-
+            
         except Exception as e:
             self.log(f"记录报警事件失败: {e}", 'ERROR')
 
@@ -4505,7 +4648,7 @@ class UIBase():
                         self.worker.start_reading()
                     # 确保定时器在运行
                     if not self.read_timer.isActive():
-                        self.read_timer.start()
+                        self._start_read_timer()
                     
                     # 更新状态
                     self.is_acquiring = True

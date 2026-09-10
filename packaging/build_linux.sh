@@ -1,6 +1,6 @@
 #!/bin/bash
-# ÔÚ¡¸Ä¿±ê¼Ü¹¹¡¹µÄ Linux ÉÏÖ´ĞĞ£¨Pi5 / ARM ¹¤¿Ø»ú / x86 ¹¤¿Ø»ú£©
-# ¹æÔò£ºÔÚ aarch64 ÉÏ´ò³öµÄ°üÖ»ÄÜ¸ø aarch64 ÓÃ£»x86_64 Í¬Àí¡£
+# åœ¨ã€Œç›®æ ‡æ¶æ„ã€çš„ Linux ä¸Šæ‰§è¡Œï¼ˆPi5 / ARM å·¥æ§æœº / x86 å·¥æ§æœºï¼‰
+# è§„åˆ™ï¼šåœ¨ aarch64 ä¸Šæ‰“å‡ºçš„åŒ…åªèƒ½ç»™ aarch64 ç”¨ï¼›x86_64 åŒç†ã€‚
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -9,13 +9,13 @@ ARCH="$(uname -m)"
 OUT_NAME="daq_tablet_linux_${ARCH}"
 
 echo "========================================"
-echo " ´ò°üÆ½Ì¨: $(uname -s) / ${ARCH}"
-echo " ¹¤³ÌÄ¿Â¼: ${APP_DIR}"
+echo " æ‰“åŒ…å¹³å°: $(uname -s) / ${ARCH}"
+echo " å·¥ç¨‹ç›®å½•: ${APP_DIR}"
 echo "========================================"
 
 cd "$APP_DIR"
 
-# 1) ½¨ÒéÓÃĞéÄâ»·¾³£¬±ÜÃâÎÛÈ¾ÏµÍ³ Python
+# 1) å»ºè®®ç”¨è™šæ‹Ÿç¯å¢ƒï¼Œé¿å…æ±¡æŸ“ç³»ç»Ÿ Python
 if [ ! -d ".venv_pack" ]; then
     python3 -m venv .venv_pack
 fi
@@ -23,27 +23,28 @@ fi
 source .venv_pack/bin/activate
 
 pip install -U pip wheel
-pip install pyinstaller
-# °´ÄãÏÖ³¡ĞèÒª°²×°ÔËĞĞÒÀÀµ£¨¿É¸Ä³É -r requirements.txt£©
+# ä¸ Windows ä¸€è‡´ï¼šæ–°ç‰ˆæœ¬æ‰èƒ½ç¨³å®šæ”¶é›† core.* å­æ¨¡å—
+pip install "pyinstaller>=6.16"
+# æŒ‰ä½ ç°åœºéœ€è¦å®‰è£…è¿è¡Œä¾èµ–ï¼ˆå¯æ”¹æˆ -r requirements.txtï¼‰
 pip install PyQt5 PyQtWebEngine pyqtgraph numpy pandas pyserial openpyxl psutil scipy
 
-# 2) ÇåÀí¾É²úÎï
+# 2) æ¸…ç†æ—§äº§ç‰©
 rm -rf "$SCRIPT_DIR/dist" "$SCRIPT_DIR/build"
 
-# 3) ´ò°ü£¨Ä¿Â¼Ä£Ê½£¬±Èµ¥ÎÄ¼ş¸üÎÈ£¬Æô¶¯Ò²¸ü¿ì£©
+# 3) æ‰“åŒ…ï¼ˆç›®å½•æ¨¡å¼ï¼Œæ¯”å•æ–‡ä»¶æ›´ç¨³ï¼Œå¯åŠ¨ä¹Ÿæ›´å¿«ï¼‰
 cd "$SCRIPT_DIR"
 pyinstaller --noconfirm --clean daq_tablet.spec
 
-# 4) ¸½´ø°²×°½Å±¾ÓëËµÃ÷
+# 4) é™„å¸¦å®‰è£…è„šæœ¬ä¸è¯´æ˜
 cp install.sh "dist/daq_tablet/"
 chmod +x "dist/daq_tablet/install.sh" "dist/daq_tablet/daq_tablet" || true
 
-# 5) ´ò³ÉÑ¹Ëõ°ü£¬·½±ã¿½µ½ U ÅÌ
+# 5) æ‰“æˆå‹ç¼©åŒ…ï¼Œæ–¹ä¾¿æ‹·åˆ° U ç›˜
 cd dist
 tar -czvf "${OUT_NAME}.tar.gz" daq_tablet
 echo ""
-echo "Íê³É£¡"
-echo "²úÎï: ${SCRIPT_DIR}/dist/${OUT_NAME}.tar.gz"
-echo "¿½µ½Ä¿±ê»úºó:"
+echo "å®Œæˆï¼"
+echo "äº§ç‰©: ${SCRIPT_DIR}/dist/${OUT_NAME}.tar.gz"
+echo "æ‹·åˆ°ç›®æ ‡æœºå:"
 echo "  tar -xzvf ${OUT_NAME}.tar.gz"
 echo "  cd daq_tablet && sudo ./install.sh"

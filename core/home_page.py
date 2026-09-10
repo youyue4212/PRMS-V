@@ -143,7 +143,7 @@ class HomePage(QWidget):
 
             self.bridge.page_ready.connect(self._on_page_ready)
             self.bridge.reset_requested.connect(self._on_js_reset)
-            self.bridge.health_requested.connect(lambda: self._nav(3))
+            self.bridge.health_requested.connect(self._on_js_health)
             self.bridge.fault_requested.connect(lambda: self._nav(3))
             self.bridge.probe_requested.connect(self._on_js_probe)
             self.bridge.login_requested.connect(self._on_js_login)
@@ -276,8 +276,14 @@ class HomePage(QWidget):
         parent = self.parent
         if parent is None or not hasattr(parent, "switch_page"):
             return
-        # 健康卡 / 故障摘要 → 诊断页(3)；报警日志走底栏
         parent.switch_page(page_index)
+
+    def _on_js_health(self):
+        parent = self.parent
+        if parent is not None and hasattr(parent, "open_health_or_commissioning"):
+            parent.open_health_or_commissioning()
+            return
+        self._nav(3)
 
     def _on_js_reset(self):
         # 触发 main_window 已连接的 clicked 槽（二次确认 + 0x15）
