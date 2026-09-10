@@ -558,6 +558,47 @@ class MainWindow(QMainWindow, UIBase):
             return _t("role_maintainer")
         return _t("role_viewer")
 
+    def _describe_last_tcp_timeout(self) -> str:
+        worker = getattr(self, "worker", None)
+        meta = dict(getattr(worker, "last_timeout_meta", None) or {})
+        if not meta and worker is not None:
+            recent = dict(getattr(worker, "_last_link_event", None) or {})
+            if recent.get("kind") in ("socket_error", "peer_closed", "client_removed"):
+                cid = str(recent.get("client_id") or "")
+                tail = ("：" + cid) if cid else ""
+                return "链路断开/Socket异常%s" % tail
+            return ""
+        if not meta:
+            return ""
+        kind = str(meta.get("kind") or "")
+        if kind == "link_drop":
+            prefix = "链路断开/Socket异常后超时"
+        elif kind == "rx_stall":
+            prefix = "连接未断开，仅接收空窗超时"
+        else:
+            prefix = "通信超时"
+        extras = []
+        try:
+            age = float(meta.get("age_sec", 0.0) or 0.0)
+            if age > 0:
+                extras.append("空窗%.1fs" % age)
+        except (TypeError, ValueError):
+            pass
+        try:
+            clients = int(meta.get("clients", 0) or 0)
+            if clients > 0:
+                extras.append("在线连接%d" % clients)
+        except (TypeError, ValueError):
+            pass
+        recent_kind = str(meta.get("recent_kind") or "")
+        recent_cid = str(meta.get("recent_client_id") or "")
+        if recent_kind:
+            tail = recent_kind
+            if recent_cid:
+                tail += ":" + recent_cid
+            extras.append(tail)
+        return prefix + ("（%s）" % "，".join(extras) if extras else "")
+
     def _product_id_is_unique(self, product_id: int, current_client_id: str = None) -> bool:
         for cid, data in (getattr(self, "client_data", None) or {}).items():
             if not cid or cid == current_client_id:
@@ -1101,8 +1142,15 @@ class MainWindow(QMainWindow, UIBase):
 
         for code in sorted(current - previous):
             name, desc, severity, _ = FaultCode.get_info(code)
+            desc_text = desc
+            alarm_message = "%s %s" % (code, name)
+            if code == FaultCode.M102:
+                timeout_note = self._describe_last_tcp_timeout()
+                if timeout_note:
+                    desc_text = "%s | %s" % (desc, timeout_note)
+                    alarm_message = "%s %s | %s" % (code, name, timeout_note)
             self.log(
-                "[MASTER FAULT DETECTED] Code: %s | %s: %s" % (code, name, desc),
+                "[MASTER FAULT DETECTED] Code: %s | %s: %s" % (code, name, desc_text),
                 severity,
             )
             if alarm_logger is not None:
@@ -1116,7 +1164,7 @@ class MainWindow(QMainWindow, UIBase):
                         product_id=mid,
                         sensitivity=0,
                         alarm_type="MasterFault",
-                        message="%s %s" % (code, name),
+                        message=alarm_message,
                     )
                 except Exception:
                     pass
@@ -1166,6 +1214,7 @@ class MainWindow(QMainWindow, UIBase):
         latest = getattr(self, "latest_master_summary", None)
         never_seen = last_any <= 0
         link_timeout = (not never_seen) and ((now - last_any) > dm.COMM_TIMEOUT_SEC)
+        timeout_pending_since = float(getattr(self, "_master_timeout_pending_since", 0.0) or 0.0)
         # 仅监听、零客户端：不算 M101（避免开软件即「主控无数据」）
         expect_master = self._tcp_client_count() > 0 or bool(getattr(self, "master_client_id", None))
 
@@ -1176,8 +1225,15 @@ class MainWindow(QMainWindow, UIBase):
             dm.remove_fault(_MASTER_FAULT_CLIENT_ID, FaultCode.M101)
 
         if link_timeout and not dm.comm_timeouts_suppressed(now):
-            dm.add_fault(_MASTER_FAULT_CLIENT_ID, FaultCode.M102)
+            if timeout_pending_since <= 0:
+                self._master_timeout_pending_since = now
+                dm.remove_fault(_MASTER_FAULT_CLIENT_ID, FaultCode.M102)
+            elif (now - timeout_pending_since) >= dm.COMM_TIMEOUT_DEBOUNCE_SEC:
+                dm.add_fault(_MASTER_FAULT_CLIENT_ID, FaultCode.M102)
+            else:
+                dm.remove_fault(_MASTER_FAULT_CLIENT_ID, FaultCode.M102)
         else:
+            self._master_timeout_pending_since = 0.0
             dm.remove_fault(_MASTER_FAULT_CLIENT_ID, FaultCode.M102)
 
         if last_any > 0 and (now - last_any) <= dm.COMM_TIMEOUT_SEC:

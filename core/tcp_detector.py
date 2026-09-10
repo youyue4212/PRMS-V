@@ -149,6 +149,9 @@ class TcpPacketWorker(QObject):
         # Timeout control（与诊断 E102 一致，加快掉线提醒）
         self.last_packet_time = time.time()
         self.timeout_threshold = 5.0  # seconds without data
+        self.timeout_debounce_sec = 1.2
+        self.last_timeout_meta = {}
+        self._last_link_event = {}
         
         # TCP socket settings
         self.receive_buffer_size = 4096  # Size of receive buffer
@@ -175,6 +178,118 @@ class TcpPacketWorker(QObject):
     
     def get_stats(self):
         return self.stats
+
+    @staticmethod
+    def _socket_error_detail(err: Exception) -> str:
+        parts = []
+        winerror = getattr(err, "winerror", None)
+        errno = getattr(err, "errno", None)
+        if winerror is not None:
+            parts.append(f"winerror={winerror}")
+        if errno is not None:
+            parts.append(f"errno={errno}")
+        parts.append(str(err))
+        return " ".join(p for p in parts if p).strip()
+
+    @staticmethod
+    def _is_would_block_error(err: Exception) -> bool:
+        winerror = getattr(err, "winerror", None)
+        errno = getattr(err, "errno", None)
+        return (
+            errno in (getattr(socket, "EWOULDBLOCK", None), getattr(socket, "EAGAIN", None), 11, 35, 10035)
+            or winerror in (10035,)
+        )
+
+    def _record_link_event(self, kind: str, client_id: str = "", detail: str = ""):
+        self._last_link_event = {
+            "kind": str(kind or ""),
+            "client_id": str(client_id or ""),
+            "detail": str(detail or ""),
+            "at": time.time(),
+        }
+
+    def _remove_duplicate_ip_sessions(self, ip_address: str, keep_client_id: str):
+        ip = str(ip_address or "").strip()
+        if not ip:
+            return
+        duplicates = []
+        for cid, info in list(self.client_infos.items()):
+            if cid == keep_client_id:
+                continue
+            if str(getattr(info, "ip_address", "") or "").strip() == ip:
+                duplicates.append(cid)
+        for cid in duplicates:
+            self.has_log.emit(
+                f"Replacing stale session {cid} with new connection {keep_client_id} from {ip}",
+                "WARNING",
+            )
+            self._remove_client(
+                cid,
+                reason=f"replaced by newer session from {ip}",
+                emit_signal=False,
+            )
+
+    def _classify_timeout(self, current_time: float) -> dict:
+        age = max(0.0, float(current_time) - float(self.last_packet_time or current_time))
+        recent = dict(self._last_link_event or {})
+        recent_age = current_time - float(recent.get("at", 0.0) or 0.0)
+        if recent and recent_age <= 2.5 and recent.get("kind") in ("socket_error", "peer_closed", "client_removed"):
+            kind = "link_drop"
+        else:
+            kind = "rx_stall"
+        meta = {
+            "kind": kind,
+            "age_sec": age,
+            "clients": len(self.client_sockets),
+            "recent_kind": recent.get("kind", ""),
+            "recent_client_id": recent.get("client_id", ""),
+            "recent_detail": recent.get("detail", ""),
+            "at": float(current_time),
+        }
+        self.last_timeout_meta = meta
+        return meta
+
+    @staticmethod
+    def _timeout_kind_label(meta: dict) -> str:
+        kind = str((meta or {}).get("kind") or "")
+        if kind == "link_drop":
+            return "链路断开型"
+        if kind == "rx_stall":
+            return "接收停顿型"
+        return "通信超时"
+
+    def _format_timeout_error_message(self, meta: dict) -> str:
+        label = self._timeout_kind_label(meta)
+        parts = [f"TCP通信超时 - 未收到数据（判定：{label}"]
+        try:
+            age = float((meta or {}).get("age_sec", 0.0) or 0.0)
+            if age > 0:
+                parts.append(f"；空窗={age:.1f}s")
+        except (TypeError, ValueError):
+            pass
+        try:
+            clients = int((meta or {}).get("clients", 0) or 0)
+            if clients > 0:
+                parts.append(f"；在线连接={clients}")
+        except (TypeError, ValueError):
+            pass
+        recent_kind = str((meta or {}).get("recent_kind") or "")
+        recent_client = str((meta or {}).get("recent_client_id") or "")
+        if recent_kind:
+            recent_label = {
+                "socket_error": "最近Socket异常",
+                "peer_closed": "最近对端关闭",
+                "client_removed": "最近连接移除",
+            }.get(recent_kind, recent_kind)
+            if recent_client:
+                parts.append(f"；{recent_label}={recent_client}")
+            else:
+                parts.append(f"；{recent_label}")
+        parts.append("）")
+        kind = str((meta or {}).get("kind") or "")
+        if kind:
+            parts.append(f" [timeout_class={kind}]")
+        return "".join(parts)
     
     def connect_tcp(self, host: str, port: int, mode: str = "client"):
         """
@@ -341,10 +456,11 @@ class TcpPacketWorker(QObject):
             # Check timeout only while clients exist. Empty listen is standby, not a fault.
             current_time = time.time()
             if self.client_sockets and (
-                current_time - self.last_packet_time > self.timeout_threshold
+                current_time - self.last_packet_time > (self.timeout_threshold + self.timeout_debounce_sec)
             ):
                 self.stats['timeouts'] += 1
-                self.error_occurred.emit("TCP communication timeout - no data received")
+                meta = self._classify_timeout(current_time)
+                self.error_occurred.emit(self._format_timeout_error_message(meta))
                 self.last_packet_time = current_time  # Reset timeout timer
             
             # For server mode: accept incoming connections
@@ -375,6 +491,7 @@ class TcpPacketWorker(QObject):
                     self.client_infos[client_id] = client_info
                     # New socket has no payload yet; do not inherit idle-listen age.
                     self.last_packet_time = time.time()
+                    self._remove_duplicate_ip_sessions(client_address[0], client_id)
                     
                     self.stats['clients_connected'] += 1
                     
@@ -384,7 +501,7 @@ class TcpPacketWorker(QObject):
                     
                 except socket.error as e:
                     # No incoming connections (non-blocking socket)
-                    if e.errno != socket.EWOULDBLOCK and e.errno != socket.EAGAIN:
+                    if not self._is_would_block_error(e):
                         self.has_log.emit(f"Socket accept error: {str(e)}", 'ERROR')
             
             # Try to receive data from all clients
@@ -429,12 +546,15 @@ class TcpPacketWorker(QObject):
                         self.parse_packets_with_client_id(client_id)
                     else:
                         # No data received (empty bytes) - connection closed
+                        self._record_link_event("peer_closed", client_id, "recv returned 0 bytes")
                         disconnected_clients.append(client_id)
                         
                 except socket.error as e:
                     # No data available (non-blocking socket)
-                    if e.errno != socket.EWOULDBLOCK and e.errno != socket.EAGAIN:
-                        self.has_log.emit(f"Socket error from {client_id}: {str(e)}", 'ERROR')
+                    if not self._is_would_block_error(e):
+                        detail = self._socket_error_detail(e)
+                        self._record_link_event("socket_error", client_id, detail)
+                        self.has_log.emit(f"Socket error from {client_id}: {detail}", 'ERROR')
                         disconnected_clients.append(client_id)
             
             # Remove disconnected clients
@@ -444,8 +564,10 @@ class TcpPacketWorker(QObject):
         except Exception as e:
             self.error_occurred.emit(f"TCP read error: {str(e)}")
     
-    def _remove_client(self, client_id):
+    def _remove_client(self, client_id, reason: str = "", emit_signal: bool = True):
         """Remove disconnected client"""
+        if client_id == self.master_client_id:
+            self.master_client_id = None
         if client_id in self.client_sockets:
             try:
                 self.client_sockets[client_id].close()
@@ -460,8 +582,11 @@ class TcpPacketWorker(QObject):
             del self.client_infos[client_id]
             
         self.stats['clients_disconnected'] += 1
-        self.has_log.emit(f"Client {client_id} disconnected", 'INFO')
-        self.client_disconnected.emit(client_id)
+        reason_txt = f" ({reason})" if reason else ""
+        self._record_link_event("client_removed", client_id, reason or "removed")
+        self.has_log.emit(f"Client {client_id} disconnected{reason_txt}", 'INFO')
+        if emit_signal:
+            self.client_disconnected.emit(client_id)
         connected = len(self.client_sockets) > 0
         message = f"{len(self.client_sockets)} client(s) connected" if connected else "Listening, no clients connected"
         self.connection_status_changed.emit(connected, message)

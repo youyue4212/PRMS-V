@@ -64,6 +64,8 @@ class FaultCode:
 class DiagnosticsManager:
     # 通讯中断判定：无数据包超过该秒数即报 E102（原 30s 现场反馈过慢）
     COMM_TIMEOUT_SEC = 5.0
+    # 去抖：超过超时阈值后还需再持续一小段时间，避免 1 次调度抖动就报码
+    COMM_TIMEOUT_DEBOUNCE_SEC = 1.2
     # 开机后长时间完全无数据报 E101
     NO_DATA_STARTUP_SEC = 8.0
 
@@ -91,6 +93,8 @@ class DiagnosticsManager:
         self.purged_offline_clients: List[str] = []
         # 写盘/重 I/O 期间暂缓 E102，避免主线程卡顿导致假超时
         self.comm_timeout_grace_until: float = 0.0
+        # 超时去抖起点：{client_id: first_seen_timeout_ts}
+        self.timeout_pending_since: Dict[str, float] = {}
 
         # 分探头高压设定：{probe_key(IP): voltage}；仅对该探头启用 E202
         self.client_hv_setpoints: Dict[str, float] = {}
@@ -134,6 +138,7 @@ class DiagnosticsManager:
         self.last_packet_time.clear()
         self.peak_connected_count = 0
         self.purged_offline_clients = []
+        self.timeout_pending_since.clear()
         # 保留分探头高压设定（不随开停采集清空）
         self._load_client_hv_setpoints_from_config()
 
@@ -159,6 +164,7 @@ class DiagnosticsManager:
             del self.cps_history[client_id]
         if client_id in self.last_packet_time:
             del self.last_packet_time[client_id]
+        self.timeout_pending_since.pop(client_id, None)
 
     def add_fault(self, client_id: str, code: str):
         self.register_client(client_id)
@@ -194,6 +200,20 @@ class DiagnosticsManager:
             if self._extract_ip(cid) == ip:
                 self.remove_client(cid)
 
+    def _timeout_debounced(self, client_id: str, now: float, last_seen: float) -> bool:
+        if last_seen <= 0:
+            self.timeout_pending_since.pop(client_id, None)
+            return False
+        overdue = float(now) - float(last_seen) - self.COMM_TIMEOUT_SEC
+        if overdue <= 0:
+            self.timeout_pending_since.pop(client_id, None)
+            return False
+        first = self.timeout_pending_since.get(client_id)
+        if first is None:
+            self.timeout_pending_since[client_id] = float(now)
+            return False
+        return (float(now) - float(first)) >= self.COMM_TIMEOUT_DEBOUNCE_SEC
+
     def process_packet(self, client_id: str, packet) -> List[str]:
         """
         Process a received spectrum packet and run diagnostics.
@@ -206,6 +226,7 @@ class DiagnosticsManager:
         # Clear connection faults since we received data
         self.remove_fault(client_id, FaultCode.E101)
         self.remove_fault(client_id, FaultCode.E102)
+        self.timeout_pending_since.pop(client_id, None)
         self._clear_stale_sessions_for_ip(client_id)
 
         # 1. High Voltage (高压) Diagnostics
@@ -376,8 +397,9 @@ class DiagnosticsManager:
                     
                     # E102: Communication timeout (no packet for > COMM_TIMEOUT_SEC)
                     if self.comm_timeouts_suppressed(now):
+                        self.timeout_pending_since.pop(client_id, None)
                         self.remove_fault(client_id, FaultCode.E102)
-                    elif now - last_seen > self.COMM_TIMEOUT_SEC:
+                    elif self._timeout_debounced(client_id, now, last_seen):
                         self.add_fault(client_id, FaultCode.E102)
                     else:
                         self.remove_fault(client_id, FaultCode.E102)
