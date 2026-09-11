@@ -1681,6 +1681,34 @@ class UIBase():
         
         settings_layout.addWidget(self.auto_save_group)
 
+        # --- Accounts & Data / Maintenance actions ---
+        self.admin_ops_group = QGroupBox(_t("set_admin_ops"))
+        admin_ops_layout = QVBoxLayout(self.admin_ops_group)
+        self.admin_ops_hint = QLabel(_t("tip_admin_ops"))
+        self.admin_ops_hint.setStyleSheet("color: #888888; font-size: 11px;")
+        self.admin_ops_hint.setWordWrap(True)
+        admin_ops_layout.addWidget(self.admin_ops_hint)
+
+        admin_ops_btn_row = QHBoxLayout()
+        self.settings_save_btn = self._make_settings_action_btn(_t("btn_save"), "#2196F3")
+        self.settings_save_btn.clicked.connect(self.save_data)
+        admin_ops_btn_row.addWidget(self.settings_save_btn)
+
+        self.settings_clear_btn = self._make_settings_action_btn(_t("btn_clear"), "#ff9800")
+        self.settings_clear_btn.clicked.connect(self.clear_data)
+        admin_ops_btn_row.addWidget(self.settings_clear_btn)
+
+        self.settings_users_btn = self._make_settings_action_btn(_t("btn_user_mgmt"), "#9C27B0")
+        self.settings_users_btn.clicked.connect(self.show_user_management)
+        admin_ops_btn_row.addWidget(self.settings_users_btn)
+
+        self.settings_logout_btn = self._make_settings_action_btn(_t("btn_logout"), "#e53935")
+        self.settings_logout_btn.clicked.connect(self.logout)
+        admin_ops_btn_row.addWidget(self.settings_logout_btn)
+        admin_ops_btn_row.addStretch()
+        admin_ops_layout.addLayout(admin_ops_btn_row)
+        settings_layout.addWidget(self.admin_ops_group)
+
         settings_layout.addStretch()
 
 

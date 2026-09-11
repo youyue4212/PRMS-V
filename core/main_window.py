@@ -203,13 +203,10 @@ class MainWindow(QMainWindow, UIBase):
         self.button_container.setStyleSheet("background-color: #1a1a1a;")
         button_layout = QHBoxLayout()
         button_layout.setContentsMargins(20, 6, 20, 6)
+        button_layout.setSpacing(12)
         
         # 工控触控目标约 44px
         button_height = 44
-        
-        self.acquisition_btn = AcquisitionButton()
-        self.acquisition_btn.clicked.connect(self.clear_data)
-        button_layout.addWidget(self.acquisition_btn)
         
         # Add save data button
         self.save_data_btn = QPushButton(_t("btn_save"))
@@ -235,6 +232,10 @@ class MainWindow(QMainWindow, UIBase):
         """)
         self.save_data_btn.clicked.connect(self.save_data)
         button_layout.addWidget(self.save_data_btn)
+
+        self.acquisition_btn = AcquisitionButton()
+        self.acquisition_btn.clicked.connect(self.clear_data)
+        button_layout.addWidget(self.acquisition_btn)
         
         # Add user management button (visible only to admin)
         self.user_management_btn = QPushButton(_t("btn_user_mgmt"))
@@ -694,7 +695,7 @@ class MainWindow(QMainWindow, UIBase):
                 return
             # 停止采集（不会断开TCP连接，只是停止数据处理）
             self.stop_acquisition()
-            self.log("Acquisition stopped for data clearing (TCP connection remains)", 'INFO')
+            self.log("Acquisition stopped for clearing current accumulation (TCP connection remains)", 'INFO')
             import time
             time.sleep(0.5)
 
@@ -729,7 +730,7 @@ class MainWindow(QMainWindow, UIBase):
             self.home_page.total_cps_label.setText("0")
             self.home_page.update_probe_tiles_from_master(None, False)
 
-        self.log("All data cleared", 'INFO')
+        self.log("Current display and accumulation cleared", 'INFO')
     
     def save_data(self, auto_save=False, auto_save_path=""):
         """Save current data to file"""
@@ -1030,7 +1031,7 @@ class MainWindow(QMainWindow, UIBase):
             btn.setStyleSheet(qss)
 
     def _sync_control_room_action_bar(self):
-        """主控室：总览值班墙不放操作条；概览/能谱等登录后显示清除、保存、用户管理。"""
+        """实时概览/能谱分析保留运行快捷；账户类动作统一收进设置页。"""
         if not hasattr(self, "button_container"):
             return
         logged = self.is_logged_in()
@@ -1038,15 +1039,28 @@ class MainWindow(QMainWindow, UIBase):
         page = 0
         if hasattr(self, "stacked_widget") and self.stacked_widget is not None:
             page = int(self.stacked_widget.currentIndex())
+        show_runtime_shortcut = bool(
+            logged
+            and page in (1, 2)
+            and (
+                (
+                    getattr(self, "acquisition_btn", None) is not None
+                    and not self.acquisition_btn.isHidden()
+                )
+                or (
+                    getattr(self, "save_data_btn", None) is not None
+                    and not self.save_data_btn.isHidden()
+                )
+            )
+        )
         if cr:
-            # 0=总览值班墙、5=设置：不放操作条；1=概览、2=能谱登录后显示
-            self.button_container.setVisible(bool(logged and page in (1, 2)))
+            self.button_container.setVisible(show_runtime_shortcut)
             if logged:
                 self._apply_control_room_ops_chrome()
             if hasattr(self, "status_bar") and hasattr(self.status_bar, "set_ops_buttons"):
                 self.status_bar.set_ops_buttons(False, False, False)
         elif logged:
-            self.button_container.setVisible(True)
+            self.button_container.setVisible(show_runtime_shortcut)
             if hasattr(self, "status_bar") and hasattr(self.status_bar, "set_ops_buttons"):
                 self.status_bar.set_ops_buttons(False, False, False)
         else:
@@ -2716,7 +2730,7 @@ class MainWindow(QMainWindow, UIBase):
         return bool(getattr(self.config, "ir_installed", True))
 
     def _ir_degraded_ui(self, packet) -> bool:
-        """门控降级跟 L2 bit0；不依赖本机勾选。"""
+        """门控未生效/降级态跟 L2 bit0；不依赖本机勾选。"""
         return bool(packet is not None and getattr(packet, "ir_degraded", False))
 
     def _io_brief(self, packet, lang="zh") -> str:
@@ -3077,7 +3091,7 @@ class MainWindow(QMainWindow, UIBase):
             )
 
     def _update_overview_occupancy_from_master(self, packet=None, master_offline=False):
-        """概览页占用卡：跟主控 L2，未接红外时不显示人员经过/红外降级。"""
+        """概览页占用卡：跟主控 L2，非对射模式时不显示红外挡光细节。"""
         from core.translation import _t
 
         if not hasattr(self, "overview_page"):
@@ -3304,9 +3318,10 @@ class MainWindow(QMainWindow, UIBase):
         
         role = self.current_user['role']
         self.bottom_nav.setVisible(True)
-        self.acquisition_btn.setVisible(True)
-        self.save_data_btn.setVisible(True)
-        self.logout_btn.setVisible(True)
+        self.acquisition_btn.setVisible(False)
+        self.user_management_btn.setVisible(False)
+        self.logout_btn.setVisible(False)
+        self.save_data_btn.setVisible(False)
         if hasattr(self, "status_bar"):
             on_home = self.stacked_widget.currentIndex() == 0
             if getattr(self, "control_room_mode", False):
@@ -3322,75 +3337,27 @@ class MainWindow(QMainWindow, UIBase):
         # 更新用户管理按钮可见性
         # 注意：这里需要检查本地角色，而不是用户管理器中的角色
         can_manage_users = self.user_manager.has_permission(Permission.MANAGE_USERS)
-        self.user_management_btn.setVisible(can_manage_users)
         
         # 更新操作按钮状态（清除数据和保存数据）
         # 注意：这里需要检查本地角色，而不是用户管理器中的角色
         can_clear_data = self.user_manager.has_permission(Permission.CLEAR_DATA)
         can_save_data = self.user_manager.has_permission(Permission.SAVE_DATA)
-        
-        # 禁用或启用清除数据按钮
         self.acquisition_btn.setEnabled(can_clear_data)
-        
-        # 禁用或启用保存数据按钮
+        self.acquisition_btn.setVisible(can_clear_data)
         self.save_data_btn.setEnabled(can_save_data)
+        self.save_data_btn.setVisible(can_save_data)
         
         # 更新logout/login按钮文本和功能
         from core.translation import _t
         if role == UserRole.VIEWER:
-            # 普通用户模式：显示Login按钮
-            self.logout_btn.setText(_t("btn_login"))
-            self.logout_btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #4CAF50;
-                    color: white;
-                    border: none;
-                    border-radius: 8px;
-                    font-size: 14px;
-                    font-weight: bold;
-                    padding: 0 16px;
-                }
-                QPushButton:pressed {
-                    background-color: #45a049;
-                }
-                QPushButton:disabled {
-                    background-color: #666666;
-                    color: #aaaaaa;
-                }
-            """)
-            # 断开原来的logout连接，连接login功能
-            try:
-                self.logout_btn.clicked.disconnect()
-            except:
-                pass
-            self.logout_btn.clicked.connect(self.login)
-        else:
-            # 管理员模式：显示Logout按钮
             self.logout_btn.setText(_t("btn_logout"))
-            self.logout_btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #ff4444;
-                    color: white;
-                    border: none;
-                    border-radius: 8px;
-                    font-size: 14px;
-                    font-weight: bold;
-                    padding: 0 16px;
-                }
-                QPushButton:pressed {
-                    background-color: #d32f2f;
-                }
-                QPushButton:disabled {
-                    background-color: #666666;
-                    color: #aaaaaa;
-                }
-            """)
-            # 断开原来的login连接，连接logout功能
-            try:
-                self.logout_btn.clicked.disconnect()
-            except:
-                pass
-            self.logout_btn.clicked.connect(self.logout)
+        else:
+            self.logout_btn.setText(_t("btn_logout"))
+        try:
+            self.logout_btn.clicked.disconnect()
+        except:
+            pass
+        self.logout_btn.clicked.connect(self.logout)
         
         # 更新状态栏用户信息
         if 'username' in self.current_user:
@@ -3399,7 +3366,7 @@ class MainWindow(QMainWindow, UIBase):
         # 如果是管理员，启动超时计时器
         if self._is_privileged_user():
             self.timeout_manager.start_timer()
-            self.log("管理员模式已启动，3分钟无操作将自动退出", 'INFO')
+            self.log("管理登录已启动，3分钟无操作将自动退出", 'INFO')
         else:
             self.timeout_manager.stop_timer()
             self.status_bar.hide_timeout_display()
@@ -3426,6 +3393,26 @@ class MainWindow(QMainWindow, UIBase):
             can_maintain = True
             can_manage_pid = True
             can_runtime = True
+        can_clear_data = self.user_manager.has_permission(Permission.CLEAR_DATA) or allow_viewer_settings
+        can_manage_users = self.user_manager.has_permission(Permission.MANAGE_USERS) or allow_viewer_settings
+
+        for group_name in (
+            'comm_group',
+            'det_group',
+            'ctrl_group',
+            'keyboard_group',
+            'device_group',
+            'master_relay_group',
+            'channel_gate_group',
+            'log_group',
+        ):
+            group = getattr(self, group_name, None)
+            if group is not None:
+                group.setVisible(can_maintain)
+        if hasattr(self, 'auto_save_group'):
+            self.auto_save_group.setVisible(can_runtime)
+        if hasattr(self, 'admin_ops_group'):
+            self.admin_ops_group.setVisible(self.is_logged_in())
         
         # 禁用或启用设置控件
         if hasattr(self, 'tcp_enable_checkbox'):
@@ -3564,17 +3551,17 @@ class MainWindow(QMainWindow, UIBase):
             self._refresh_product_id_lock_ui()
 
         if hasattr(self, "settings_users_btn"):
-            self.settings_users_btn.setEnabled(
-                self.user_manager.has_permission(Permission.MANAGE_USERS)
-            )
+            self.settings_users_btn.setVisible(can_manage_users)
+            self.settings_users_btn.setEnabled(can_manage_users)
         if hasattr(self, "settings_clear_btn"):
-            self.settings_clear_btn.setEnabled(
-                self.user_manager.has_permission(Permission.CLEAR_DATA)
-            )
+            self.settings_clear_btn.setVisible(can_clear_data)
+            self.settings_clear_btn.setEnabled(can_clear_data)
         if hasattr(self, "settings_save_btn"):
-            self.settings_save_btn.setEnabled(
-                self.user_manager.has_permission(Permission.SAVE_DATA)
-            )
+            self.settings_save_btn.setVisible(can_runtime)
+            self.settings_save_btn.setEnabled(can_runtime)
+        if hasattr(self, "settings_logout_btn"):
+            self.settings_logout_btn.setVisible(self.is_logged_in())
+            self.settings_logout_btn.setEnabled(self.is_logged_in())
         
         # 更新按钮文本提示
         if not can_maintain and not can_runtime:
@@ -4206,7 +4193,7 @@ class MainWindow(QMainWindow, UIBase):
             self.timeout_manager.save_state()
             self.enter_public_mode()
             self._show_transient_notice(_t("msg_admin_timeout_notice"), msec=4000)
-            self.log("Admin idle timeout -> public home monitor", 'INFO')
+            self.log("Privileged login timed out -> public home monitor", 'INFO')
 
     def _show_transient_notice(self, text, msec=3500):
         """顶栏短时提示，不挡监测主区（非模态）。"""
@@ -4482,6 +4469,8 @@ class MainWindow(QMainWindow, UIBase):
                 self.settings_clear_btn.setText(_t("btn_clear"))
             if hasattr(self, "settings_save_btn"):
                 self.settings_save_btn.setText(_t("btn_save"))
+            if hasattr(self, "settings_logout_btn"):
+                self.settings_logout_btn.setText(_t("btn_logout"))
 
         # Retranslate settings page group boxes dynamically
         if hasattr(self, 'comm_group'):

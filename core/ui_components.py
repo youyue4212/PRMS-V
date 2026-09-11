@@ -919,7 +919,7 @@ class BottomNavBar(QWidget):
 
 
 class AcquisitionButton(QPushButton):
-    """Clear Data button"""
+    """Clear current accumulation button."""
     def __init__(self):
         from core.translation import _t
         super().__init__(_t("btn_clear"))
@@ -933,20 +933,22 @@ class AcquisitionButton(QPushButton):
     def update_style(self):
         self.setStyleSheet("""
             QPushButton {
-                background-color: #ff9800;
-                color: white;
-                border: none;
+                background-color: #2b2418;
+                color: #ffb74d;
+                border: 1px solid #ff9800;
                 border-radius: 8px;
                 font-size: 15px;
                 font-weight: bold;
                 padding: 0 16px;
             }
             QPushButton:pressed {
-                background-color: #f57c00;
+                background-color: #ff9800;
+                color: #111111;
             }
             QPushButton:disabled {
-                background-color: #666666;
-                color: #aaaaaa;
+                background-color: #252525;
+                color: #787878;
+                border: 1px solid #555555;
             }
         """)
 

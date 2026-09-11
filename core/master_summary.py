@@ -201,7 +201,7 @@ class MasterSummaryPacket:
         """通道占用显示态：只跟主控 decision，不自己用红外/雷达猜。
 
         0x02/0x03 = 硬报占用；0x04 = 入口挡住且未硬报（人员经过）。
-        强制红外降级时主控不会出 0x04，此时即使 io_status 有挡光也不算经过。
+        占用门控未生效/降级时主控不会出 0x04，此时即使 io_status 有占用原始位也不算经过。
         出口红外只上报，不参与本判定。
         """
         return (
@@ -359,7 +359,7 @@ def format_sensor_mode_brief(pkt: MasterSummaryPacket, lang: str = "zh") -> str:
 
 
 def format_io_brief(pkt: MasterSummaryPacket, lang: str = "zh", ir_installed: bool = True) -> str:
-    """IO 摘要。现场未接红外时不展示入口/出口挡光和「红外降级」。"""
+    """IO 摘要。非对射模式时不展示入口/出口红外细节。"""
     show_ir = bool(ir_installed)
     mode = format_sensor_mode_brief(pkt, lang=lang)
     if lang == "en":
