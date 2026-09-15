@@ -17,9 +17,9 @@ MASTER_PACKET_SIZE = 60
 MASTER_PACKET_CRC_LEN = 58
 MASTER_MAX_PROBES = 16
 
-# io_status bits
-MASTER_IO_IR_ENTRY = 1 << 0
-MASTER_IO_IR_EXIT = 1 << 1
+# io_status bits（主控 GPIO：PG14=入口，PG15=出口；挡光=低。仅对射模式才置这些位）
+MASTER_IO_IR_ENTRY = 1 << 0  # PG14
+MASTER_IO_IR_EXIT = 1 << 1   # PG15
 MASTER_IO_RADAR_GATE = 1 << 2
 MASTER_IO_CABINET_DOOR = 1 << 3
 MASTER_IO_RELAY0 = 1 << 4  # 总声光实际输出
@@ -28,7 +28,7 @@ MASTER_IO_RELAY2 = 1 << 6  # 道闸/辅路
 MASTER_IO_RELAY_OUTPUT = MASTER_IO_RELAY0  # 兼容旧名 = 继电器 0
 
 # sys_mode bits
-MASTER_MODE_IR_DEGRADED = 1 << 0      # 1=降级/无可靠门控（占位未生效）
+MASTER_MODE_IR_DEGRADED = 1 << 0      # 1=无占用门控/未配置（不再表示红外专属降级）
 MASTER_MODE_ONLINE_LOW_WARN = 1 << 1
 MASTER_MODE_ALARM_LATCH = 1 << 2     # 1=锁存消警（须 0x15）；0=自动（约 3s 条件消失可自灭）
 MASTER_MODE_RADAR = 1 << 3           # 1=雷达模式
@@ -52,9 +52,9 @@ MASTER_OFFLINE_TIMEOUT_SEC = 3.0
 
 _DECISION_TEXT_ZH = {
     MASTER_DECISION_NORMAL: "\u6b63\u5e38",
-    MASTER_DECISION_OVER_THRESHOLD: "\u8d85\u9608\u63d0\u793a",
-    MASTER_DECISION_WINDOW_MATCHED: "\u7a97\u7b26\u5408\uff08\u964d\u7ea7\uff09",
-    MASTER_DECISION_JOINT_ALARM: "\u8054\u62a5/\u7b26\u5408\u62a5\u8b66",
+    MASTER_DECISION_OVER_THRESHOLD: "\u8d85\u9608\u63d0\u793a\uff08\u672a\u8fbeN\u8def\uff0c\u975e\u786c\u62a5\uff09",
+    MASTER_DECISION_WINDOW_MATCHED: "\u6ed1\u52a8\u7a97\u7b26\u5408\uff08\u901a\u9053\u786c\u62a5\uff09",
+    MASTER_DECISION_JOINT_ALARM: "\u5bf9\u5c04\u7a97\u7b26\u5408\uff08\u901a\u9053\u786c\u62a5\uff09",
     MASTER_DECISION_PASSING_NO_ALARM: "\u4eba\u5458\u7ecf\u8fc7",
     MASTER_DECISION_MANUAL_RESET: "\u5df2\u4eba\u5de5\u590d\u4f4d",
     MASTER_DECISION_SYSTEM_FAULT: "\u7cfb\u7edf\u6545\u969c",
@@ -62,9 +62,9 @@ _DECISION_TEXT_ZH = {
 
 _DECISION_TEXT_EN = {
     MASTER_DECISION_NORMAL: "Normal",
-    MASTER_DECISION_OVER_THRESHOLD: "Over threshold (not channel alarm)",
-    MASTER_DECISION_WINDOW_MATCHED: "Window matched (degraded)",
-    MASTER_DECISION_JOINT_ALARM: "Joint / matched alarm",
+    MASTER_DECISION_OVER_THRESHOLD: "Over threshold (<N probes, not hard alarm)",
+    MASTER_DECISION_WINDOW_MATCHED: "Sliding-window match (channel hard alarm)",
+    MASTER_DECISION_JOINT_ALARM: "IR-window match (channel hard alarm)",
     MASTER_DECISION_PASSING_NO_ALARM: "Person passing",
     MASTER_DECISION_MANUAL_RESET: "Manually acknowledged",
     MASTER_DECISION_SYSTEM_FAULT: "System fault",
@@ -153,6 +153,7 @@ class MasterSummaryPacket:
 
     @property
     def ir_degraded(self) -> bool:
+        """sys_mode.bit0：无占用门控 / 未配置。保留旧属性名兼容调用方。"""
         return bool(self.sys_mode & MASTER_MODE_IR_DEGRADED)
 
     @property
@@ -175,7 +176,9 @@ class MasterSummaryPacket:
         return bool(self.sys_mode & MASTER_MODE_OCC_GATE_EN)
 
     def sensor_mode_code(self) -> int:
-        """推断 0x19 配置：bit3=1→雷达；bit3=0且bit4=1→对射；bit4=0→未配置。"""
+        """推断 0x19，顺序与现固件 sys_mode 一致：bit0 → bit3 → bit4。"""
+        if self.ir_degraded:
+            return MASTER_SENSOR_MODE_UNCONFIGURED
         if self.radar_mode:
             return MASTER_SENSOR_MODE_RADAR
         if self.occ_gate_enabled:
@@ -184,9 +187,11 @@ class MasterSummaryPacket:
 
     def is_channel_alarm(self) -> bool:
         """
-        通道符合硬报（上位机硬报 UI / 闸机态）仅绑 decision ∈ {0x02, 0x03}。
-        0x01 超阈提示、0x05 已人工复位、0xFF 故障 均不算硬报。
-        继电器 bit4/5/6 仅作辅助显示 / 闸机态，不单独拉起硬报 UI。
+        通道硬报 UI / 闸机态仅绑 decision ∈ {0x02, 0x03}。
+        0x02=滑动窗 ≥N 路超阈（未配置降级窗，以及雷达占用期间的滑动符合）；
+        0x03=对射窗内符合（只对射模式）；
+        0x01 超阈但不够 N 路、0x04 经过、0x05 已复位、0xFF 故障 均不算硬报。
+        未配置没有 0x04。继电器 bit4/5/6 仅作辅助显示，不单独拉起硬报 UI。
         """
         return self.decision_result in (
             MASTER_DECISION_WINDOW_MATCHED,
@@ -201,6 +206,7 @@ class MasterSummaryPacket:
         """通道占用显示态：只跟主控 decision，不自己用红外/雷达猜。
 
         0x02/0x03 = 硬报占用；0x04 = 入口挡住且未硬报（人员经过）。
+        未配置没有 0x04；雷达占用符合走 0x02，不是 0x03。
         占用门控未生效/降级时主控不会出 0x04，此时即使 io_status 有占用原始位也不算经过。
         出口红外只上报，不参与本判定。
         """
@@ -213,7 +219,8 @@ class MasterSummaryPacket:
         """
         首页报警区状态机（跟主控 L2 decision）:
           channel_alarm | acked | passing | over_threshold | fault | normal
-        硬报：0x02/0x03 进入；0x05/0x00/0x04 退出（不靠定时猜清除）。
+        硬报：0x02（滑动窗：未配置或雷达占用符合）/ 0x03（对射窗，只对射）进入；
+        0x05/0x00/0x04 退出。未配置没有 0x04，也不会出 0x03。
         """
         d = self.decision_result
         if d in (MASTER_DECISION_WINDOW_MATCHED, MASTER_DECISION_JOINT_ALARM):
@@ -280,6 +287,31 @@ def is_master_frame_candidate(data: bytes) -> bool:
     return header == MASTER_PACKET_HEADER and device_type == MASTER_DEVICE_TYPE
 
 
+def find_valid_master_frame_offset(data: bytes, start: int = 0) -> Optional[int]:
+    """First offset of a CRC-valid 60B L2 frame, or None.
+
+    Used after 0x19/0x15 ACK leftovers so we do not skip a whole 60B from a
+    false 0xA55A and freeze the homepage on a stale decision.
+    """
+    if not data:
+        return None
+    try:
+        start = max(0, int(start))
+    except (TypeError, ValueError):
+        start = 0
+    n = len(data)
+    last = n - MASTER_PACKET_SIZE
+    if last < start:
+        return None
+    for i in range(start, last + 1):
+        chunk = data[i:i + MASTER_PACKET_SIZE]
+        if not is_master_frame_candidate(chunk):
+            continue
+        if parse_master_summary(chunk) is not None:
+            return i
+    return None
+
+
 def parse_master_summary(data: bytes, received_at: Optional[float] = None) -> Optional[MasterSummaryPacket]:
     if len(data) < MASTER_PACKET_SIZE:
         return None
@@ -334,9 +366,12 @@ def hit_slots(mask: int, count: int) -> List[int]:
     return [i for i in range(min(count, MASTER_MAX_PROBES)) if mask & (1 << i)]
 
 
-def format_sensor_mode_brief(pkt: MasterSummaryPacket, lang: str = "zh") -> str:
-    """传感器模式 + 门控生效摘要（跟 sys_mode bit3/bit4/bit0）。"""
-    code = pkt.sensor_mode_code()
+def format_sensor_mode_brief(pkt: MasterSummaryPacket, lang: str = "zh", mode_override=None) -> str:
+    """传感器模式摘要：bit0 未配置，bit3 雷达，bit4 对射门控。"""
+    if mode_override in (0, 1, 2):
+        code = int(mode_override)
+    else:
+        code = pkt.sensor_mode_code()
     if lang == "en":
         if code == MASTER_SENSOR_MODE_UNCONFIGURED:
             return "Sensor: configure IR or radar"
@@ -344,7 +379,9 @@ def format_sensor_mode_brief(pkt: MasterSummaryPacket, lang: str = "zh") -> str:
             mode = "Radar"
         else:
             mode = "Beam IR"
-        if pkt.ir_degraded or not pkt.occ_gate_enabled:
+        if code == MASTER_SENSOR_MODE_UNCONFIGURED or pkt.ir_degraded or not pkt.occ_gate_enabled:
+            if code == MASTER_SENSOR_MODE_UNCONFIGURED:
+                return "Sensor: configure IR or radar"
             return "%s · gate inactive" % mode
         return "%s · gate active" % mode
     if code == MASTER_SENSOR_MODE_UNCONFIGURED:
@@ -358,28 +395,69 @@ def format_sensor_mode_brief(pkt: MasterSummaryPacket, lang: str = "zh") -> str:
     return "%s \u00b7 \u7a7a\u95f2\u5426\u51b3\u6709\u6548" % mode
 
 
-def format_io_brief(pkt: MasterSummaryPacket, lang: str = "zh", ir_installed: bool = True) -> str:
-    """IO 摘要。非对射模式时不展示入口/出口红外细节。"""
-    show_ir = bool(ir_installed)
-    mode = format_sensor_mode_brief(pkt, lang=lang)
+def format_ir_beam_states(pkt: MasterSummaryPacket, lang: str = "zh", only_blocked: bool = False) -> list:
+    """对射通/挡。现固件仅对射模式把 PG14/PG15 打进 L2。
+    only_blocked=True：操作员画面只报挡光，通光不写。
+    """
+    items = []
+    if lang == "en":
+        if pkt.ir_entry:
+            items.append("IR-IN blocked")
+        elif not only_blocked:
+            items.append("IR-IN clear")
+        if pkt.ir_exit:
+            items.append("IR-OUT blocked")
+        elif not only_blocked:
+            items.append("IR-OUT clear")
+        return items
+    if pkt.ir_entry:
+        items.append("\u5165\u53e3\u5bf9\u5c04\uff1a\u6321")
+    elif not only_blocked:
+        items.append("\u5165\u53e3\u5bf9\u5c04\uff1a\u901a")
+    if pkt.ir_exit:
+        items.append("\u51fa\u53e3\u5bf9\u5c04\uff1a\u6321")
+    elif not only_blocked:
+        items.append("\u51fa\u53e3\u5bf9\u5c04\uff1a\u901a")
+    return items
+
+
+def format_io_brief(
+    pkt: MasterSummaryPacket,
+    lang: str = "zh",
+    ir_installed: bool = True,
+    mode_override=None,
+    beam_detail: str = "exception",
+) -> str:
+    """IO 摘要。
+    beam_detail=exception：操作员/总览，只报挡光；always：开通/设置，通和挡都列。
+    未配置现固件不上报 PG14/PG15，不画通/挡。
+    """
+    if mode_override in (0, 1, 2):
+        code = int(mode_override)
+    else:
+        code = pkt.sensor_mode_code()
+    always = str(beam_detail or "exception") == "always"
+    show_ir = bool(ir_installed) and code == MASTER_SENSOR_MODE_IR
+    show_radar = code == MASTER_SENSOR_MODE_RADAR
+    mode = format_sensor_mode_brief(pkt, lang=lang, mode_override=code)
     if lang == "en":
         parts = [mode]
-        if show_ir and pkt.ir_entry:
-            parts.append("IR-IN")
-        if show_ir and pkt.ir_exit:
-            parts.append("IR-OUT")
-        if pkt.radar_gate:
-            parts.append("RADAR-raw")
+        if show_ir:
+            parts.extend(format_ir_beam_states(pkt, lang="en", only_blocked=not always))
+        if show_radar and pkt.radar_gate:
+            parts.append("RADAR occupied")
+        elif show_radar and always:
+            parts.append("RADAR clear")
         if pkt.relay0 or pkt.relay1 or pkt.relay2:
             parts.append("R%d%d%d" % (int(pkt.relay0), int(pkt.relay1), int(pkt.relay2)))
         return ", ".join(parts) if parts else "Idle"
     parts = [mode]
-    if show_ir and pkt.ir_entry:
-        parts.append("\u5165\u53e3\u7ea2\u5916")
-    if show_ir and pkt.ir_exit:
-        parts.append("\u51fa\u53e3\u7ea2\u5916")
-    if pkt.radar_gate:
-        parts.append("\u96f7\u8fbe\u539f\u59cb")
+    if show_ir:
+        parts.extend(format_ir_beam_states(pkt, lang="zh", only_blocked=not always))
+    if show_radar and pkt.radar_gate:
+        parts.append("\u96f7\u8fbe\u5360\u7528")
+    elif show_radar and always:
+        parts.append("\u96f7\u8fbe\u7a7a\u95f2")
     if pkt.relay0 or pkt.relay1 or pkt.relay2:
         parts.append(
             "\u7ee7\u7535\u5668 %d/%d/%d" % (int(pkt.relay0), int(pkt.relay1), int(pkt.relay2))

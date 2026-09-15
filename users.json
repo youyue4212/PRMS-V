@@ -1,12 +1,12 @@
 {
   "admin": {
     "username": "admin",
-    "password_hash": "240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9",
+    "password_hash": "pbkdf2_sha256$200000$ddc6a12dff062b7c5388de832dc2dcb9$91ec6be0756acb847dae95f52c382f09ebcbf2383b8d121fc537e8c2120bc8d5",
     "role": "maintainer",
     "full_name": "系统管理员",
     "email": "admin@example.com",
     "created_at": "2025-01-01",
-    "last_login": "2026-09-11 10:12:26"
+    "last_login": "2026-09-15 11:47:14"
   },
   "user": {
     "username": "user",
@@ -15,6 +15,6 @@
     "full_name": "",
     "email": "",
     "created_at": "2026-09-11 08:56:15",
-    "last_login": "2026-09-11 11:07:50"
+    "last_login": "2026-09-14 21:58:56"
   }
 }

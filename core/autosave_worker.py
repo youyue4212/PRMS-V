@@ -60,6 +60,7 @@ def write_autosave_job(job: Dict[str, Any]) -> Tuple[int, float, int]:
     else:
         df_time_series = pd.DataFrame(columns=ts_cols)
 
+    spec_kind = job.get("spectrum_kind") or "cumulative"
     df_client_info = pd.DataFrame({
         "Probe": [probe],
         "Location": [loc or "--"],
@@ -71,6 +72,7 @@ def write_autosave_job(job: Dict[str, Any]) -> Tuple[int, float, int]:
         "Save_Time": [time.strftime("%Y-%m-%d %H:%M:%S")],
         "TimeSeries_Points": [len(time_series_data)],
         "Spectrum_Sum": [float(np.sum(spectrum_data_to_save))],
+        "Spectrum_Kind": [spec_kind],
     })
 
     from core.excel_io import write_excel_atomic
@@ -88,7 +90,7 @@ def write_autosave_job(job: Dict[str, Any]) -> Tuple[int, float, int]:
 class AutoSaveWorker(QThread):
     """Write autosave jobs off the UI thread."""
 
-    finished_ok = pyqtSignal(int, object)  # saved_count, list[(msg, level)]
+    finished_ok = pyqtSignal(int, object, object)  # saved_count, logs, saved_client_ids
 
     def __init__(self, jobs: List[Dict[str, Any]]):
         super().__init__()
@@ -97,6 +99,7 @@ class AutoSaveWorker(QThread):
     def run(self):
         logs: List[Tuple[str, str]] = []
         saved = 0
+        saved_cids: List[str] = []
         for job in self.jobs:
             cid = job.get("client_id") or "?"
             try:
@@ -107,7 +110,39 @@ class AutoSaveWorker(QThread):
                     % (job.get("filename"), ident, n_ts, spec_sum, size),
                     "INFO",
                 ))
+                try:
+                    from core.archive_manager import archive_file
+
+                    archive = archive_file(
+                        job.get("filename"),
+                        "AutoSave",
+                        metadata={
+                            "client_id": cid,
+                            "probe": ident,
+                            "time_series_points": n_ts,
+                            "spectrum_sum": spec_sum,
+                            "spectrum_kind": job.get("spectrum_kind") or "segment",
+                        },
+                        settings=job.get("archive_settings") or {},
+                    )
+                    status = archive.get("archive_status")
+                    if status == "archived":
+                        logs.append((
+                            "Archived %s -> %s"
+                            % (job.get("filename"), archive.get("archive_path")),
+                            "INFO",
+                        ))
+                    elif status == "failed":
+                        logs.append((
+                            "Archive failed for %s: %s"
+                            % (job.get("filename"), archive.get("error") or archive.get("manifest_error")),
+                            "WARNING",
+                        ))
+                except Exception as e:
+                    logs.append(("Archive record failed for %s: %s" % (job.get("filename"), e), "WARNING"))
                 saved += 1
+                if cid and cid != "?":
+                    saved_cids.append(cid)
             except Exception as e:
                 logs.append(("Auto-save failed for %s: %s" % (cid, e), "ERROR"))
-        self.finished_ok.emit(saved, logs)
+        self.finished_ok.emit(saved, logs, saved_cids)

@@ -2,6 +2,8 @@
 用户管理模块
 提供用户认证、角色管理和权限检查功能
 """
+import hashlib
+import hmac
 import json
 import os
 import sys
@@ -9,6 +11,9 @@ from enum import Enum
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass, asdict
 from PyQt5.QtCore import QSettings, QObject, pyqtSignal
+
+_PASSWORD_ALG = "pbkdf2_sha256"
+_PASSWORD_ITERATIONS = 200000
 
 
 def _app_data_dir() -> str:
@@ -29,7 +34,7 @@ class UserRole(Enum):
 class User:
     """用户数据类"""
     username: str
-    password_hash: str  # 存储密码哈希，实际应用中应该使用加盐哈希
+    password_hash: str  # pbkdf2_sha256 for new passwords; legacy sha256 is migrated on login
     role: UserRole
     full_name: str = ""
     email: str = ""
@@ -181,10 +186,45 @@ class UserManager(QObject):
         self.save_users()
     
     def _hash_password(self, password: str) -> str:
-        """密码哈希函数（简化版，实际应用中应使用加盐哈希）"""
-        # 这里使用简单的哈希，实际应用中应该使用bcrypt或类似的安全哈希
-        import hashlib
-        return hashlib.sha256(password.encode()).hexdigest()
+        """Salted hash for new/changed passwords."""
+        salt = os.urandom(16)
+        digest = hashlib.pbkdf2_hmac(
+            "sha256",
+            str(password or "").encode("utf-8"),
+            salt,
+            _PASSWORD_ITERATIONS,
+        )
+        return "%s$%d$%s$%s" % (
+            _PASSWORD_ALG,
+            _PASSWORD_ITERATIONS,
+            salt.hex(),
+            digest.hex(),
+        )
+
+    def _legacy_hash_password(self, password: str) -> str:
+        return hashlib.sha256(str(password or "").encode("utf-8")).hexdigest()
+
+    def _verify_password(self, stored_hash: str, password: str) -> bool:
+        stored = str(stored_hash or "")
+        parts = stored.split("$")
+        if len(parts) == 4 and parts[0] == _PASSWORD_ALG:
+            try:
+                iterations = int(parts[1])
+                salt = bytes.fromhex(parts[2])
+                expected = bytes.fromhex(parts[3])
+                actual = hashlib.pbkdf2_hmac(
+                    "sha256",
+                    str(password or "").encode("utf-8"),
+                    salt,
+                    iterations,
+                )
+                return hmac.compare_digest(actual, expected)
+            except (TypeError, ValueError):
+                return False
+        return hmac.compare_digest(stored, self._legacy_hash_password(password))
+
+    def _password_needs_upgrade(self, stored_hash: str) -> bool:
+        return not str(stored_hash or "").startswith(_PASSWORD_ALG + "$")
 
     def ensure_viewer_user(self) -> str:
         """确保存在可用于免密自动登录的 viewer 账户，返回用户名。"""
@@ -230,10 +270,10 @@ class UserManager(QObject):
             return False, "用户不存在"
         
         user = self.users[username]
-        password_hash = self._hash_password(password)
-        
-        if user.password_hash != password_hash:
+        if not self._verify_password(user.password_hash, password):
             return False, "密码错误"
+        if self._password_needs_upgrade(user.password_hash):
+            user.password_hash = self._hash_password(password)
         
         # 更新最后登录时间
         from datetime import datetime
@@ -386,8 +426,7 @@ class UserManager(QObject):
         
         # 验证旧密码（如果是用户自己修改）
         if username == self.current_user.username:
-            old_password_hash = self._hash_password(old_password)
-            if user.password_hash != old_password_hash:
+            if not self._verify_password(user.password_hash, old_password):
                 return False, "旧密码错误"
         
         if len(new_password) < 6:

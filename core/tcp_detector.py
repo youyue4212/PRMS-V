@@ -21,6 +21,7 @@ from core.master_summary import (
     MASTER_PACKET_SIZE,
     MasterSummaryPacket,
     explain_master_summary_reject,
+    find_valid_master_frame_offset,
     is_master_frame_candidate,
     parse_master_summary,
 )
@@ -1105,8 +1106,18 @@ class TcpPacketWorker(QObject):
                             "Master L2 reject from %s: %s | head=%s" % (client_id, reason, hex_head),
                             'WARNING'
                         )
-                        # Consume full 60B candidate so we don't grind byte-by-byte on CRC fail
-                        del client_buffer[:MASTER_PACKET_SIZE]
+                        # 0x19 应答后若多 1～2 字节，假 0xA55A 再整帧丢 60B 会把真 L2
+                        # 裁掉，首页一直停在旧判决，看起来像灵敏度掉了。
+                        nxt = find_valid_master_frame_offset(bytes(client_buffer), 1)
+                        if nxt is not None and nxt > 0:
+                            del client_buffer[:nxt]
+                            self.has_log.emit(
+                                "Master L2 resync from %s: skipped %d leftover bytes"
+                                % (client_id, nxt),
+                                'WARNING',
+                            )
+                        else:
+                            del client_buffer[:1]
                         self.stats['errors'] += 1
                         continue
                     if (parsed_packet is not None
@@ -1130,6 +1141,21 @@ class TcpPacketWorker(QObject):
                         except Exception:
                             pass
                         self.cmd_feedback_received.emit(parsed_packet)
+                        # ACK 与 L2 可能粘在同一段 TCP 里；应答长度若与 10B 不完全一致，
+                        # 先对齐到下一帧合法 L2，避免通道判决停在写传感器之前的旧包。
+                        ctrl = int(getattr(parsed_packet, "control_code", 0) or 0)
+                        if (
+                            ctrl in (0x06, 0x11, 0x12, 0x15, 0x16, 0x19)
+                            or client_id == self.master_client_id
+                        ):
+                            nxt = find_valid_master_frame_offset(bytes(client_buffer), 0)
+                            if nxt is not None and nxt > 0:
+                                del client_buffer[:nxt]
+                                self.has_log.emit(
+                                    "Master buffer aligned after 0x%02X ack from %s: skip %d bytes"
+                                    % (ctrl, client_id, nxt),
+                                    'WARNING',
+                                )
                     elif isinstance(parsed_packet, SpectrumPacket):
                         self.stats['spectrum_packets'] += 1
                         # Update client info

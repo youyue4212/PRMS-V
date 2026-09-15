@@ -23,7 +23,7 @@ class AlarmEvent:
     alarm_type: str   # alarm type
     alarm_status: bool  # alarm status (True: alarm start, False: alarm end)
     count_rate: float  # count rate (cps)
-    temperature: float  # temperature (°„C)
+    temperature: float  # temperature (deg C)
     hv: float         # high voltage (V)
     product_id: int   # product ID
     sensitivity: int  # sensitivity coefficient
@@ -104,7 +104,7 @@ class AlarmLogger:
             client_id: client ID
             alarm_status: alarm status (True: alarm start, False: alarm end)
             count_rate: count rate (cps)
-            temperature: temperature (°„C)
+            temperature: temperature (deg C)
             hv: high voltage (V)
             product_id: product ID
             sensitivity: sensitivity coefficient

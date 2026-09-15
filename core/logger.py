@@ -58,9 +58,9 @@ class Logger:
             return 
         file_tag = f'_{str(file_tag)}' if file_tag else ''
 
-        date_str= datetime.now().strftime('%H%M%S')
+        date_str = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-        self.log_filename= Path(output_path)/'Raysen'/f'daq_log_{file_tag}_{date_str}.txt'
+        self.log_filename = Path(output_path) / "Raysen" / f"daq_log{file_tag}_{date_str}.txt"
         self.log_filename.parent.mkdir(parents=True, exist_ok=True)
 
         

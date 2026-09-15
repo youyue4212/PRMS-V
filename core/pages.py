@@ -714,21 +714,22 @@ class ClientsPage(QWidget):
             lang = TranslationManager().get_language()
         except Exception:
             lang = "zh"
-        ir_installed = True
-        _ir = getattr(self.parent, "_ir_installed", None)
-        if callable(_ir):
+        ir_installed = bool(getattr(getattr(self.parent, "config", None), "ir_installed", True))
+        _brief = getattr(self.parent, "_io_brief", None)
+        if pkt is not None and callable(_brief):
             try:
-                ir_installed = bool(_ir())
+                io_text = _brief(pkt, lang, beam_detail="always")
             except Exception:
-                ir_installed = True
+                io_text = format_io_brief(pkt, lang, ir_installed=ir_installed, beam_detail="always")
         else:
-            ir_installed = bool(getattr(getattr(self.parent, "config", None), "ir_installed", True))
-        io_text = (
-            format_io_brief(pkt, lang, ir_installed=ir_installed) if pkt is not None else "--"
-        )
-        sensor_brief = (
-            format_sensor_mode_brief(pkt, lang=lang) if pkt is not None else "--"
-        )
+            io_text = (
+                format_io_brief(pkt, lang, ir_installed=ir_installed, beam_detail="always") if pkt is not None else "--"
+            )
+        sensor_brief = "--"
+        if pkt is not None:
+            _sup = getattr(self.parent, "_occupancy_gate_suppressed", None)
+            ov = 2 if callable(_sup) and _sup() else None
+            sensor_brief = format_sensor_mode_brief(pkt, lang=lang, mode_override=ov)
         l2_time = "--"
         if pkt is not None:
             rx = float(getattr(pkt, "received_at", 0) or 0)

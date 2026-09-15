@@ -102,6 +102,10 @@ class ConfigManager:
 
         # 本通道是否接了入口/出口红外。未接时健康卡显示「未接入」，不报故障码。
         self.ir_installed = self._to_bool(self.settings.value("IR_INSTALLED", True), default=True)
+        self.archive_enabled = self._to_bool(self.settings.value("ARCHIVE_ENABLED", False), default=False)
+        self.archive_path = self.settings.value("ARCHIVE_PATH", "", str)
+        self.archive_site_id = self.settings.value("ARCHIVE_SITE_ID", "", str)
+        self.archive_machine_id = self.settings.value("ARCHIVE_MACHINE_ID", "", str)
 
     @staticmethod
     def _to_bool(value, default=False):
@@ -241,7 +245,9 @@ class ConfigManager:
                        tcp_client_host=None, tcp_client_port=None, language=None,
                        hv_user_set=None,
                        expected_probe_count=None, cps_window_minutes=None,
-                       ui_mode=None, ir_installed=None):
+                       ui_mode=None, ir_installed=None,
+                       archive_enabled=None, archive_path=None,
+                       archive_site_id=None, archive_machine_id=None):
         if language is not None:
             self.language = language
             self.settings.setValue("LANGUAGE", language)
@@ -254,6 +260,18 @@ class ConfigManager:
         if ir_installed is not None:
             self.ir_installed = bool(ir_installed)
             self.settings.setValue("IR_INSTALLED", self.ir_installed)
+        if archive_enabled is not None:
+            self.archive_enabled = bool(archive_enabled)
+            self.settings.setValue("ARCHIVE_ENABLED", self.archive_enabled)
+        if archive_path is not None:
+            self.archive_path = str(archive_path or "").strip()
+            self.settings.setValue("ARCHIVE_PATH", self.archive_path)
+        if archive_site_id is not None:
+            self.archive_site_id = str(archive_site_id or "").strip()
+            self.settings.setValue("ARCHIVE_SITE_ID", self.archive_site_id)
+        if archive_machine_id is not None:
+            self.archive_machine_id = str(archive_machine_id or "").strip()
+            self.settings.setValue("ARCHIVE_MACHINE_ID", self.archive_machine_id)
         if baudrate is not None:
             self.baudrate = baudrate
             self.settings.setValue("BAUDRATE", baudrate)

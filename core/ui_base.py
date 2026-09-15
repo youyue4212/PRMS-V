@@ -581,6 +581,10 @@ class UIBase():
         # Multi-client time series data storage
         self.client_time_series = {}  # {client_id: [(timestamp, counter, temperature, HV, spec_sum), ...]}
         self.client_spectrum_data = {}  # {client_id: spectrum_array} - Store spectrum data for each client
+        # Auto-save segment buffers (display keeps 15min trim; archive holds since last save)
+        self.client_archive_time_series = {}
+        self.client_segment_spectrum = {}
+        self._last_autosave_client_ids = []
         self.client_latest_packets = {}  # {client_id: latest SpectrumPacket} - used for immediate display switching
         self.primary_client_id = None  # The client whose data is displayed in the chart
         self._last_probe_cps_log_at = 0.0
@@ -593,6 +597,9 @@ class UIBase():
         self._last_master_ip = ""
         self._master_sensor_mode = 2
         self._sensor_mode_dirty = False
+        self._sensor_mode_ack_hold = False
+        self._sensor_mode_ack_hold_until = 0.0
+        self._sensor_mode_ack_unconfigured = False
         self._pending_sensor_mode_at = 0.0
         self._pending_product_id_write = None
         
@@ -621,7 +628,7 @@ class UIBase():
         
         # Auto-save configuration - DEFAULT ENABLED as requested by user
         self.auto_save_enabled = True  # Changed from False to True
-        self.auto_save_interval = 300  # 5 minutes in seconds
+        self.auto_save_interval = 3600  # 1 hour; segment archive supports long intervals
         self.auto_save_path = ""
         self.auto_save_timer = QTimer()
         self.auto_save_timer.timeout.connect(self.auto_save_data)
@@ -636,6 +643,8 @@ class UIBase():
         self.master_watchdog_timer = QTimer()
         self.master_watchdog_timer.timeout.connect(self._check_master_link)
         self.master_watchdog_timer.start(1000)
+
+        self._setup_data_retention_timers()
 
     def is_master_online(self) -> bool:
         from core.master_summary import is_master_online
@@ -1648,6 +1657,9 @@ class UIBase():
         self.auto_save_interval_spin.setSingleStep(300)  # 5 minute steps for better usability
         self.auto_save_interval_spin.valueChanged.connect(self.set_auto_save_interval)
         auto_save_layout.addWidget(self.auto_save_interval_spin, 1, 1)
+        _tip_archive = _t("tip_auto_save_interval")
+        self.save_interval_title_label.setToolTip(_tip_archive)
+        self.auto_save_interval_spin.setToolTip(_tip_archive)
         
         # Add time unit conversion helper
         self.auto_save_interval_label = QLabel(f"({self.format_time_interval(self.auto_save_interval)})")
@@ -1920,6 +1932,8 @@ class UIBase():
             self.client_data = {}
             self.client_time_series = {}
             self.client_spectrum_data = {}
+            self.client_archive_time_series = {}
+            self.client_segment_spectrum = {}
             self.client_latest_packets = {}
             self.primary_client_id = None
             self.total_count_rate = 0
@@ -2115,6 +2129,38 @@ class UIBase():
         except Exception:
             return "Probe %d" % (index + 1)
 
+    def _ensure_autosave_buffers(self, client_id, adc_channels: int):
+        if client_id not in self.client_archive_time_series:
+            self.client_archive_time_series[client_id] = []
+        if client_id not in self.client_segment_spectrum:
+            self.client_segment_spectrum[client_id] = np.zeros(int(adc_channels))
+
+    def _clear_autosave_segments(self, client_ids):
+        for cid in client_ids or []:
+            if cid in self.client_archive_time_series:
+                self.client_archive_time_series[cid] = []
+            if cid in self.client_segment_spectrum:
+                self.client_segment_spectrum[cid][:] = 0
+
+    def _clients_with_saveable_archive(self):
+        """Probe clients with pending segment data for auto-save."""
+        ids = set(self.client_archive_time_series.keys()) | set(
+            self.client_segment_spectrum.keys()
+        )
+        master = getattr(self, "master_client_id", None)
+        result = []
+        for cid in ids:
+            if not cid or cid in ("system", "master") or (master and cid == master):
+                continue
+            ts = self.client_archive_time_series.get(cid) or []
+            spec = self.client_segment_spectrum.get(cid)
+            has_ts = len(ts) > 0
+            has_spec = spec is not None and np.sum(spec) > 0
+            if has_ts or has_spec:
+                result.append(cid)
+        result.sort(key=lambda c: (self._export_probe_label(c, 0), c))
+        return result
+
     def _clients_with_saveable_data(self):
         """Return probe client_ids that have non-empty time series or non-zero spectrum."""
         ids = set(self.client_time_series.keys()) | set(self.client_spectrum_data.keys())
@@ -2203,9 +2249,17 @@ class UIBase():
         self._autosave_running = False
         self._autosave_worker = None
 
+    def _archive_settings(self):
+        return {
+            "archive_enabled": bool(getattr(self.config, "archive_enabled", False)),
+            "archive_path": getattr(self.config, "archive_path", "") or "",
+            "site_id": getattr(self.config, "archive_site_id", "") or "",
+            "machine_id": getattr(self.config, "archive_machine_id", "") or "",
+        }
+
     def _build_autosave_jobs(self, timestamp: str, save_dir: str):
-        """Snapshot in-memory probe data on UI thread (fast copy)."""
-        clients = self._clients_with_saveable_data()
+        """Snapshot segment archive on UI thread (since last auto-save)."""
+        clients = self._clients_with_saveable_archive()
         if not clients:
             return []
         os.makedirs(save_dir, exist_ok=True)
@@ -2219,7 +2273,7 @@ class UIBase():
                     save_dir,
                     "data_auto_%s_%s.xlsx" % (stem, self._export_client_tag(client_id)),
                 )
-            spec = self.client_spectrum_data.get(
+            spec = self.client_segment_spectrum.get(
                 client_id, np.zeros(self.config.adc_channels)
             )
             meta = self._export_probe_meta(client_id)
@@ -2230,20 +2284,25 @@ class UIBase():
                 "filename": filename,
                 "client_id": client_id,
                 "spectrum": np.array(spec, copy=True),
-                "time_series": list(self.client_time_series.get(client_id, [])),
+                "time_series": list(self.client_archive_time_series.get(client_id, [])),
                 "client_info": dict(self.client_data.get(client_id, {}) or {}),
                 "meta": dict(meta),
                 "ident": ident,
                 "is_tcp_mode": is_tcp_mode,
+                "spectrum_kind": "segment",
+                "archive_settings": self._archive_settings(),
             })
         return jobs
 
-    def _on_autosave_worker_done(self, saved: int, logs):
+    def _on_autosave_worker_done(self, saved: int, logs, saved_cids=None):
         self._autosave_running = False
         self._autosave_worker = None
         for msg, level in list(logs or []):
             self.log(msg, level)
         if int(saved or 0) > 0:
+            cids = list(saved_cids or []) or list(self._last_autosave_client_ids or [])
+            self._clear_autosave_segments(cids)
+            self._last_autosave_client_ids = []
             self.auto_save_counter += int(saved)
             self.last_auto_save_time = time.time()
             self.update_auto_save_counter_label()
@@ -2263,8 +2322,9 @@ class UIBase():
 
         jobs = self._build_autosave_jobs(timestamp, save_dir)
         if not jobs:
-            self.log("Auto-save skipped: no spectrum/time-series data in memory", "INFO")
+            self.log("Auto-save skipped: no pending segment data", "INFO")
             return 0
+        self._last_autosave_client_ids = [j.get("client_id") for j in jobs if j.get("client_id")]
 
         dm = getattr(self, "diagnostics_manager", None)
         if dm is not None and hasattr(dm, "defer_comm_timeouts"):
@@ -2274,6 +2334,7 @@ class UIBase():
         if blocking:
             from core.autosave_worker import write_autosave_job
             saved = 0
+            saved_ids = []
             for job in jobs:
                 try:
                     n_ts, spec_sum, size = write_autosave_job(job)
@@ -2282,11 +2343,44 @@ class UIBase():
                         % (job["filename"], job.get("ident"), n_ts, spec_sum, size),
                         "INFO",
                     )
+                    try:
+                        from core.archive_manager import archive_file
+
+                        archive = archive_file(
+                            job.get("filename"),
+                            "AutoSave",
+                            metadata={
+                                "client_id": job.get("client_id"),
+                                "probe": job.get("ident"),
+                                "time_series_points": n_ts,
+                                "spectrum_sum": spec_sum,
+                                "spectrum_kind": job.get("spectrum_kind") or "segment",
+                            },
+                            settings=job.get("archive_settings") or {},
+                        )
+                        if archive.get("archive_status") == "archived":
+                            self.log(
+                                "Archived %s -> %s"
+                                % (job.get("filename"), archive.get("archive_path")),
+                                "INFO",
+                            )
+                        elif archive.get("archive_status") == "failed":
+                            self.log(
+                                "Archive failed for %s: %s"
+                                % (job.get("filename"), archive.get("error") or archive.get("manifest_error")),
+                                "WARNING",
+                            )
+                    except Exception as e:
+                        self.log("Archive record failed for %s: %s" % (job.get("filename"), e), "WARNING")
                     saved += 1
                     self.auto_save_counter += 1
+                    cid = job.get("client_id")
+                    if cid:
+                        saved_ids.append(cid)
                 except Exception as e:
                     self.log("Auto-save failed for %s: %s" % (job.get("client_id"), e), "ERROR")
             if saved:
+                self._clear_autosave_segments(saved_ids)
                 self.last_auto_save_time = time.time()
                 self.update_auto_save_counter_label()
             return saved
@@ -2402,6 +2496,56 @@ class UIBase():
         if hasattr(self, 'auto_save_interval_label'):
             formatted_time = self.format_time_interval(interval)
             self.auto_save_interval_label.setText(f"({formatted_time})")
+
+    def _setup_data_retention_timers(self):
+        self._retention_midnight_timer = QTimer()
+        self._retention_midnight_timer.setSingleShot(True)
+        self._retention_midnight_timer.timeout.connect(self._run_retention_cleanup)
+        self._schedule_next_retention_cleanup()
+
+    def _schedule_next_retention_cleanup(self):
+        now = time.time()
+        lt = time.localtime(now)
+        next_midnight = time.mktime((
+            lt.tm_year, lt.tm_mon, lt.tm_mday + 1,
+            0, 0, 0, lt.tm_wday, lt.tm_yday, lt.tm_isdst,
+        ))
+        delay_ms = max(1000, int((next_midnight - now) * 1000))
+        self._retention_midnight_timer.start(delay_ms)
+
+    def _run_retention_cleanup(self):
+        try:
+            from pathlib import Path
+            from core.data_retention import run_retention_cleanup, raysen_root
+
+            extra = None
+            lp = (getattr(self, "log_file_path", None) or "").strip()
+            if lp:
+                extra = Path(lp).parent
+            result = run_retention_cleanup(extra_raw_dir=extra)
+            root = raysen_root()
+            root.mkdir(parents=True, exist_ok=True)
+            stamp = time.strftime("%Y-%m-%d %H:%M:%S")
+            summary = (
+                "%s retention keep_days=%s deleted=%s dry_run=%s\n"
+                % (stamp, result.get("keep_days"), result.get("deleted"), result.get("dry_run"))
+            )
+            log_path = root / "cleanup.log"
+            with open(log_path, "a", encoding="utf-8") as fh:
+                fh.write(summary)
+                for line in list(result.get("lines") or [])[:200]:
+                    fh.write("  %s\n" % line)
+            deleted = int(result.get("deleted") or 0)
+            if deleted:
+                self.log(
+                    "Data retention: removed %d file(s), keep %s day(s) — see %s"
+                    % (deleted, result.get("keep_days"), log_path),
+                    "INFO",
+                )
+        except Exception as e:
+            self.log("Data retention cleanup failed: %s" % e, "WARNING")
+        finally:
+            self._schedule_next_retention_cleanup()
     
     def format_time_interval(self, seconds):
         """格式化时间间隔为可读格式（随当前语言切换）"""
@@ -2598,6 +2742,7 @@ class UIBase():
             self.client_time_series[storage_client_id] = []
             # Initialize spectrum data with correct shape from packet
             self.client_spectrum_data[storage_client_id] = np.zeros(packet.adc_channels)
+            self._ensure_autosave_buffers(storage_client_id, packet.adc_channels)
             # Set as primary client if not set yet
             if self.primary_client_id is None:
                 self.primary_client_id = storage_client_id
@@ -2605,9 +2750,10 @@ class UIBase():
         
         # 用主机接收时刻作横轴（本地时间）；设备 tick 不能当挂钟
         host_ts = time.time()
-        self.client_time_series[storage_client_id].append(
-            [host_ts, packet.counter, packet.temperature, packet.HV, np.sum(spectrum)]
-        )
+        row = [host_ts, packet.counter, packet.temperature, packet.HV, np.sum(spectrum)]
+        self.client_time_series[storage_client_id].append(row)
+        self._ensure_autosave_buffers(storage_client_id, packet.adc_channels)
+        self.client_archive_time_series[storage_client_id].append(list(row))
         
         # Ensure spectrum data array has correct shape
         if self.client_spectrum_data[storage_client_id].shape != spectrum.shape:
@@ -2615,6 +2761,11 @@ class UIBase():
         
         # Accumulate spectrum data for this client
         self.client_spectrum_data[storage_client_id] += spectrum
+        seg = self.client_segment_spectrum[storage_client_id]
+        if seg.shape != spectrum.shape:
+            self.client_segment_spectrum[storage_client_id] = np.zeros_like(spectrum)
+            seg = self.client_segment_spectrum[storage_client_id]
+        seg += spectrum
         
         # 按时间裁剪：至少保留最大窗口（15 分钟）历史，便于切换 1/5/15
         cut = host_ts - CPS_HISTORY_KEEP_SEC
@@ -2951,7 +3102,11 @@ class UIBase():
     def _save_probe_panel_settings(self, client_id: str = None, hv=None, threshold=None,
                                    sensitivity=None, product_id=None):
         """Persist panel values for the given/current probe IP."""
-        key = self._current_probe_key(client_id)
+        cid = client_id or self.primary_client_id
+        master_cid = self._get_master_client_id() if hasattr(self, "_get_master_client_id") else getattr(self, "master_client_id", None)
+        if cid and master_cid and cid == master_cid:
+            return
+        key = self._current_probe_key(cid)
         if not key:
             return
         kwargs = {}
@@ -2971,6 +3126,9 @@ class UIBase():
     def load_probe_panel_settings(self, client_id: str = None):
         """Fill HV/threshold/sensitivity spinboxes for the selected probe."""
         cid = client_id or self.primary_client_id
+        master_cid = self._get_master_client_id() if hasattr(self, "_get_master_client_id") else getattr(self, "master_client_id", None)
+        if cid and master_cid and cid == master_cid:
+            return
         key = self._current_probe_key(cid)
         if not key or not hasattr(self, "hv_spin"):
             return
@@ -3146,9 +3304,13 @@ class UIBase():
         
         # Reinitialize worker if needed
         if self.worker:
+            was_acquiring = bool(self.is_acquiring)
             # Stop current worker
-            self.worker.stop_reading()
-            self._stop_read_timer()
+            if was_acquiring:
+                self.stop_acquisition()
+            else:
+                self.worker.stop_reading()
+                self._stop_read_timer()
             
             # Disconnect based on worker type
             if isinstance(self.worker, SerialPacketWorker):
@@ -3158,6 +3320,12 @@ class UIBase():
 
             self.reset_plots()
             self.client_data = {}
+            self.client_time_series = {}
+            self.client_spectrum_data = {}
+            self.client_archive_time_series = {}
+            self.client_segment_spectrum = {}
+            self.client_latest_packets = {}
+            self.primary_client_id = None
             self.current_stat = {'hv': 0, 'rates': 0, 'temp': 0}
             self.total_count_rate = 0
             if self.data_updated_callback is not None:
@@ -3171,8 +3339,8 @@ class UIBase():
                 # Reconnect signals
                 self.setup_ui()
                 self._bind_read_timer_to_worker()
-                if self.is_acquiring:
-                    self._start_read_timer()
+                if was_acquiring:
+                    self.start_acquisition()
         
         self.log(f"TCP/IP server mode {'enabled' if enabled else 'disabled'}", 'INFO')
     
@@ -3190,9 +3358,10 @@ class UIBase():
         # 如果串口设备改变，并且当前是串口模式，尝试重新连接
         if not self.config.tcp_enabled and port != old_port:
             self.log(f"Serial port changed from {old_port} to {port}, attempting to reconnect...", 'INFO')
+            was_acquiring = bool(self.is_acquiring)
             
             # 停止当前的数据采集
-            if self.is_acquiring:
+            if was_acquiring:
                 self.stop_acquisition()
             
             # 断开当前连接
@@ -3205,7 +3374,7 @@ class UIBase():
                 if connected:
                     self.log(f"Successfully reconnected to {port}", 'INFO')
                     # 如果之前正在采集数据，重新开始采集
-                    if self.is_acquiring:
+                    if was_acquiring:
                         self.start_acquisition()
                 else:
                     self.log(f"Failed to reconnect to {port}", 'ERROR')
@@ -4288,7 +4457,13 @@ class UIBase():
                 client_id for client_id in self.client_time_series.keys()
                 if client_id in connected_clients
             ]
-            return list(dict.fromkeys(connected_clients + historical_clients))
+            clients = list(dict.fromkeys(connected_clients + historical_clients))
+            master_cid = getattr(self, "master_client_id", None)
+            if not master_cid and getattr(self, "worker", None) is not None:
+                master_cid = getattr(self.worker, "master_client_id", None)
+            if master_cid:
+                clients = [cid for cid in clients if cid != master_cid]
+            return clients
 
         return list(self.client_time_series.keys())
 
