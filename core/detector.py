@@ -448,94 +448,11 @@ class SerialPacketWorker(QObject):
         """Try to establish connection and return status - optimized for faster failure when no USB device is connected"""
         if self.ser and self.ser.is_open:
             return True
-        else:
-            # First try to connect with configured device
-            if self.config.device:
-                connected = self.connect_serial(self.config.device, self.config.baudrate)
-                if connected:
-                    return True
-            
-            # If connection fails with configured device, try to find available devices
-            # Use a faster search with reduced timeout
-            available_ports = search_serial_devices()
-            if available_ports:
-                # 平台特定的端口优先级逻辑
-                def port_priority(port):
-                    try:
-                        if sys.platform.startswith('win'):
-                            # Windows: 获取COM号
-                            com_num = int(port[3:])
-                            # COM1和COM2通常是真实端口，优先级最高
-                            if com_num <= 2:
-                                return 100 + com_num  # 低端口优先级高
-                            else:
-                                return com_num  # 更高COM号有较低优先级
-                        else:
-                            # Linux/Mac: 串口设备端口号
-                            if 'ttyUSB' in port:
-                                # USB设备优先级最高
-                                try:
-                                    # 获取USB号（从ttyUSB0 -> 0）
-                                    usb_num = int(port[8:])
-                                    return usb_num  # 低端口号有较高优先级
-                                except:
-                                    return 1
-                            elif 'ttyACM' in port:
-                                # ACM设备（Arduino等）优先级其次
-                                try:
-                                    acm_num = int(port[8:])
-                                    return 100 + acm_num
-                                except:
-                                    return 101
-                            elif 'ttyAMA' in port:
-                                # 树莓派GPIO串口
-                                return 200
-                            elif 'ttyS' in port:
-                                # 系统串口
-                                try:
-                                    s_num = int(port[5:])
-                                    return 300 + s_num
-                                except:
-                                    return 301
-                            elif 'rfcomm' in port:
-                                # 蓝牙串口
-                                try:
-                                    rfcomm_num = int(port[7:])
-                                    return 400 + rfcomm_num
-                                except:
-                                    return 401
-                            else:
-                                return 999  # 未知端口优先级最高
-                    except:
-                        return 999  # 未知端口优先级最高
-                
-                # 根据优先级排序端口
-                sorted_ports = sorted(available_ports, key=port_priority)
-                
-                # 只保留前6个端口（通常是真实的USB设备的）
-                # 允许快速扫描而没有设备时减少超时时间
-                ports_to_try = sorted_ports[:6]
-                
-                self.has_log.emit(f"Trying ports (limited to 6 most likely): {ports_to_try}", 'DEBUG')
-                
-                # 尝试每个可用端口，如果已经通过兼容性测试的设备
-                for port in ports_to_try:
-                    if port == self.config.device:
-                        continue  # 已经测试过
-                    try:
-                        if self.connect_serial(port, self.config.baudrate):
-                            # 更新端口设置
-                            self.config.update_settings(device=port)
-                            self.config.save_settings()
-                            self.has_log.emit(f"Auto-switched to new USB port: {port}", 'INFO')
-                            # 发送信号通知UI重新创建连接
-                            self.has_log.emit(f"USB_PORT_CHANGED:{port}", 'SIGNAL')
-                            return True
-                    except Exception as e:
-                        self.has_log.emit(f"Failed to connect to {port}: {str(e)}", 'DEBUG')
-                        continue
-            return False
-    
+        if self.config.device:
+            return bool(self.connect_serial(self.config.device, self.config.baudrate))
+        # 不自动改连其它 COM，避免工控机多串口时采到错误设备
+        return False
+
     def send_command(self, command_data: list, description: str = ""):
         if not self.ser or not self.ser.is_open:
             self.error_occurred.emit("Serial port not connected")

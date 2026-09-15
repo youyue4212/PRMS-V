@@ -2,6 +2,7 @@ import sys
 import os
 import glob
 import time
+from datetime import datetime, timedelta
 import serial
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QFileDialog, QCheckBox,QLineEdit,
                              QComboBox, QDoubleSpinBox, QSpinBox, QPushButton, QLabel, QTextEdit, QFormLayout, QGridLayout,QSizePolicy,QStyle,
@@ -577,6 +578,8 @@ class UIBase():
         self.packet_counts = {'cmd': 0, 'spectrum': 0, 'errors': 0,'dev_msg':0}
         self.relay_states = None  # (r0, r1, r2) after first packet; None = not yet received
         self.is_acquiring = False
+        # 维护人员在概览/能谱点「停止」后置位：连着也不自动开采，直到点开始或退出登录
+        self._acq_hold_lock = False
         
         # Multi-client time series data storage
         self.client_time_series = {}  # {client_id: [(timestamp, counter, temperature, HV, spec_sum), ...]}
@@ -1873,8 +1876,43 @@ class UIBase():
 
 
     
-    def start_acquisition(self):
+    def is_acq_hold_locked(self) -> bool:
+        return bool(getattr(self, "_acq_hold_lock", False))
+
+    def set_acq_hold_lock(self, locked: bool):
+        self._acq_hold_lock = bool(locked)
+
+    def release_acq_hold_lock(self, resume=True):
+        """退出检修会话时解除停采锁；resume 时若已连接则恢复自动开采。"""
+        was_locked = self.is_acq_hold_locked()
+        self._acq_hold_lock = False
+        if not was_locked:
+            return False
+        self.log("Maintenance acquisition hold released", "INFO")
+        if resume and not self.is_acquiring:
+            try:
+                if self.ensure_connection_ready():
+                    self.start_acquisition()
+            except Exception as e:
+                self.log("Resume acquisition after hold release failed: %s" % e, "WARNING")
+        return True
+
+    def _ensure_tcp_link_layer(self):
+        """Keep TCP accept/recv running even when not accumulating (listen or hold)."""
+        if not isinstance(self.worker, TcpPacketWorker):
+            return
+        if not self.worker.is_tcp_ready():
+            return
+        if not getattr(self.worker, "is_running", False):
+            self.worker.start_reading()
+        self._start_read_timer()
+
+    def start_acquisition(self, from_auto=False):
+        if from_auto and self.is_acq_hold_locked():
+            self.log("Auto-start skipped: maintenance acquisition hold", "DEBUG")
+            return False
         if self.ensure_connection_ready():
+            self._acq_hold_lock = False
             self._start_read_timer()
             
             # 延迟启动数据读取，让UI先响应
@@ -1904,13 +1942,34 @@ class UIBase():
     
     def _delayed_start_reading(self):
         """延迟启动数据读取，减少UI卡顿"""
+        if not self.is_acquiring:
+            return
         if self.worker:
             self.worker.start_reading()
             self.set_status_label('Running ...', True)
             self.log("Acquisition started", 'INFO')
 
-    
-    def stop_acquisition(self):
+    def _clear_acquisition_memory(self):
+        self.reset_plots()
+        self.current_stat = {'hv': 0, 'rates': 0, 'temp': 0}
+        self.client_data = {}
+        self.client_time_series = {}
+        self.client_spectrum_data = {}
+        self.client_archive_time_series = {}
+        self.client_segment_spectrum = {}
+        self.client_latest_packets = {}
+        self.primary_client_id = None
+        self.total_count_rate = 0
+        self.spectrum_data = np.zeros(self.config.adc_channels)
+        if self.data_updated_callback is not None:
+            self.data_updated_callback(self.current_stat, 0, {})
+
+    def stop_acquisition(self, hold=False, clear_memory=None):
+        """Stop reading packets. hold=True: 检修停采锁，保留当前谱/曲线便于保存。"""
+        if hold:
+            self._acq_hold_lock = True
+        if clear_memory is None:
+            clear_memory = not bool(hold)
         if self.is_acquiring:
             # 停止前先落盘一次，避免随后清内存导致只能导出空文件
             try:
@@ -1919,33 +1978,23 @@ class UIBase():
             except Exception as e:
                 self.log(f"Final auto-save before stop failed: {e}", 'WARNING')
 
-            self.worker.stop_reading()
-            self._stop_read_timer()
+            if not hold:
+                self.worker.stop_reading()
+                self._stop_read_timer()
+                if self.raw_logger:
+                    self.raw_logger.stop()
+            else:
+                self._ensure_tcp_link_layer()
             self.is_acquiring = False
             self.diagnostics_manager.stop_acquisition()
-            
-            # 停止时清零数据，但保持连接
-            self.reset_plots()
-            
-            # 重置当前状态数据
-            self.current_stat = {'hv': 0, 'rates': 0, 'temp': 0}
-            self.client_data = {}
-            self.client_time_series = {}
-            self.client_spectrum_data = {}
-            self.client_archive_time_series = {}
-            self.client_segment_spectrum = {}
-            self.client_latest_packets = {}
-            self.primary_client_id = None
-            self.total_count_rate = 0
-            
-            # 如果有数据更新回调，通知UI清零
-            if self.data_updated_callback is not None:
-                self.data_updated_callback(self.current_stat, 0, {})
-            
-            self.set_status_label('Stopped.', False)
 
-            if self.raw_logger:
-                self.raw_logger.stop()
+            if clear_memory:
+                self._clear_acquisition_memory()
+
+            self.set_status_label('Held.' if hold else 'Stopped.', False)
+
+            if hold:
+                self.log("Acquisition held by maintenance (auto-start suppressed; link stays up)", "INFO")
 
 
     
@@ -2242,12 +2291,29 @@ class UIBase():
         size = write_excel_atomic(filename, _write, min_bytes=200)
         return len(time_series_data), float(np.sum(spectrum_data_to_save)), size
 
-    def _wait_autosave_worker(self, timeout: float = 120.0):
+    def _wait_autosave_worker(self, timeout: float = 120.0) -> bool:
+        """Wait for a background autosave thread. Apply its result on this thread
+        so queued finished_ok cannot double-clear segments after a later save."""
         worker = getattr(self, "_autosave_worker", None)
-        if worker is not None and worker.isRunning():
-            worker.wait(int(max(1.0, float(timeout)) * 1000))
-        self._autosave_running = False
-        self._autosave_worker = None
+        if worker is None:
+            self._autosave_running = False
+            return True
+        if worker.isRunning():
+            finished = worker.wait(int(max(1.0, float(timeout)) * 1000))
+            if not finished:
+                self.log("Auto-save worker still running after wait timeout", "WARNING")
+                return False
+        try:
+            worker.finished_ok.disconnect(self._on_autosave_worker_done)
+        except (TypeError, RuntimeError):
+            pass
+        result = getattr(worker, "result", None)
+        if result is not None and getattr(self, "_autosave_running", False):
+            self._on_autosave_worker_done(*result)
+        else:
+            self._autosave_running = False
+            self._autosave_worker = None
+        return True
 
     def _archive_settings(self):
         return {
@@ -2310,7 +2376,9 @@ class UIBase():
     def _auto_save_all_clients(self, force=False, blocking=False):
         """Save every client that has real data. Default: background thread."""
         if blocking:
-            self._wait_autosave_worker()
+            if not self._wait_autosave_worker():
+                self.log("Auto-save blocked: previous worker still running", "WARNING")
+                return 0
         elif self._autosave_running:
             self.log("Auto-save skipped: previous run still in progress", "DEBUG")
             return 0
@@ -2506,11 +2574,8 @@ class UIBase():
     def _schedule_next_retention_cleanup(self):
         now = time.time()
         lt = time.localtime(now)
-        next_midnight = time.mktime((
-            lt.tm_year, lt.tm_mon, lt.tm_mday + 1,
-            0, 0, 0, lt.tm_wday, lt.tm_yday, lt.tm_isdst,
-        ))
-        delay_ms = max(1000, int((next_midnight - now) * 1000))
+        next_midnight = datetime(lt.tm_year, lt.tm_mon, lt.tm_mday) + timedelta(days=1)
+        delay_ms = max(1000, int((next_midnight.timestamp() - now) * 1000))
         self._retention_midnight_timer.start(delay_ms)
 
     def _run_retention_cleanup(self):
@@ -2737,6 +2802,13 @@ class UIBase():
         # For serial mode (client_id is None), use a special client ID
         storage_client_id = client_id if client_id is not None else "serial_client"
         self.client_latest_packets[storage_client_id] = packet
+        if not getattr(self, "is_acquiring", False):
+            # 检修停采/未开采：保活链路与诊断，不改谱/曲线
+            try:
+                self.diagnostics_manager.process_packet(storage_client_id, packet)
+            except Exception:
+                pass
+            return
         
         if storage_client_id not in self.client_time_series:
             self.client_time_series[storage_client_id] = []
@@ -2847,7 +2919,7 @@ class UIBase():
         """绘图节流：有新数据才刷新。未打开曲线/能谱页时不重绘 pyqtgraph。"""
         if not self._plot_dirty:
             return
-            self._plot_dirty = False
+        self._plot_dirty = False
         idx = self._stacked_page_index()
         self.update_data(update_cps=(idx == 1), update_spectrum=(idx == 2))
 
@@ -3661,7 +3733,12 @@ class UIBase():
             self.tcp_host_input.setPlaceholderText("Bind address (0.0.0.0 for all interfaces)")
     
     def closeEvent(self, event):
-        self._wait_autosave_worker(timeout=30.0)
+        try:
+            if getattr(self, "auto_save_enabled", False):
+                self._auto_save_all_clients(force=True, blocking=True)
+        except Exception as e:
+            self.log("Final auto-save on close failed: %s" % e, "WARNING")
+        self._wait_autosave_worker(timeout=120.0)
         self.worker.stop_reading()
         self._stop_read_timer()
         

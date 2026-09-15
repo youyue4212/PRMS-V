@@ -233,6 +233,56 @@ class MainWindow(QMainWindow, UIBase):
         self.save_data_btn.clicked.connect(self.save_data)
         button_layout.addWidget(self.save_data_btn)
 
+        self.start_acq_btn = QPushButton(_t("btn_acq_start"))
+        self.start_acq_btn.setFixedHeight(button_height)
+        self.start_acq_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: #2E7D32;
+                color: white;
+                border: none;
+                border-radius: 8px;
+                font-size: 14px;
+                font-weight: bold;
+                padding: 0 15px;
+                min-height: {button_height}px;
+            }}
+            QPushButton:pressed {{
+                background-color: #1B5E20;
+            }}
+            QPushButton:disabled {{
+                background-color: #666666;
+                color: #aaaaaa;
+            }}
+        """)
+        self.start_acq_btn.clicked.connect(self.on_start_acq)
+        self.start_acq_btn.setVisible(False)
+        button_layout.addWidget(self.start_acq_btn)
+
+        self.stop_acq_btn = QPushButton(_t("btn_acq_stop"))
+        self.stop_acq_btn.setFixedHeight(button_height)
+        self.stop_acq_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: #C62828;
+                color: white;
+                border: none;
+                border-radius: 8px;
+                font-size: 14px;
+                font-weight: bold;
+                padding: 0 15px;
+                min-height: {button_height}px;
+            }}
+            QPushButton:pressed {{
+                background-color: #8E0000;
+            }}
+            QPushButton:disabled {{
+                background-color: #666666;
+                color: #aaaaaa;
+            }}
+        """)
+        self.stop_acq_btn.clicked.connect(self.on_stop_acq)
+        self.stop_acq_btn.setVisible(False)
+        button_layout.addWidget(self.stop_acq_btn)
+
         self.acquisition_btn = AcquisitionButton()
         self.acquisition_btn.clicked.connect(self.clear_data)
         button_layout.addWidget(self.acquisition_btn)
@@ -433,28 +483,50 @@ class MainWindow(QMainWindow, UIBase):
         
         is_connected = self.worker.try_connection()
         self.status_bar.update_connection_status(is_connected)
+        if isinstance(self.worker, TcpPacketWorker) and is_connected:
+            self._ensure_tcp_link_layer()
         
         # 如果连接失败且是串口模式，更新串口设备下拉列表
         if not is_connected and isinstance(self.worker, SerialPacketWorker):
             self.log("Serial connection failed, updating serial port list...", 'INFO')
             self.update_serial_port_combo()
+
+        n_tcp_clients = 0
+        if isinstance(self.worker, TcpPacketWorker):
+            n_tcp_clients = len(getattr(self.worker, "client_sockets", {}) or {})
+        # TCP：仅监听不算「有数据通路」，避免无探头空采；有客户端才自动累计。
+        data_path_up = bool(is_connected)
+        if isinstance(self.worker, TcpPacketWorker):
+            data_path_up = n_tcp_clients > 0
         
-        # 自动开始/停止数据采集
-        if is_connected and not self.is_acquiring:
-            # 连接建立，自动开始采集
-            self.log(f"Connection detected (is_connected={is_connected}, is_acquiring={self.is_acquiring}), starting acquisition automatically", 'INFO')
-            success = self.start_acquisition()
-            if success:
-                self.log("Acquisition started successfully", 'INFO')
+        # 自动开始/停止数据采集。检修停采锁期间连上也不自动再开。
+        if data_path_up and not self.is_acquiring:
+            if self.is_acq_hold_locked():
+                self.log(
+                    "Connection detected but maintenance hold is active; auto-start suppressed",
+                    "DEBUG",
+                )
             else:
-                self.log("Failed to start acquisition", 'WARNING')
+                self.log(
+                    f"Connection detected (is_connected={is_connected}, is_acquiring={self.is_acquiring}), starting acquisition automatically",
+                    'INFO',
+                )
+                success = self.start_acquisition(from_auto=True)
+                if success:
+                    self.log("Acquisition started successfully", 'INFO')
+                else:
+                    self.log("Failed to start acquisition", 'WARNING')
         elif not is_connected and self.is_acquiring:
-            # 连接断开，自动停止采集
+            # 连接断开，自动停止采集（不设停采锁，避免误当成检修停采）
             self.log("Connection lost, stopping acquisition automatically", 'INFO')
-            self.stop_acquisition()
+            if self.is_acq_hold_locked():
+                self.stop_acquisition(hold=True)
+            else:
+                self.stop_acquisition()
         else:
             # 调试信息
             self.log(f"Connection status: is_connected={is_connected}, is_acquiring={self.is_acquiring}", 'DEBUG')
+        self._sync_acq_action_buttons()
             
         # 特殊处理：如果连接存在但数据不显示，强制检查数据流
         if is_connected and self.is_acquiring:
@@ -655,6 +727,10 @@ class MainWindow(QMainWindow, UIBase):
             return
         self.button_container.setVisible(False)
         self.acquisition_btn.setVisible(False)
+        if hasattr(self, "start_acq_btn"):
+            self.start_acq_btn.setVisible(False)
+        if hasattr(self, "stop_acq_btn"):
+            self.stop_acq_btn.setVisible(False)
         self.save_data_btn.setVisible(False)
         self.user_management_btn.setVisible(False)
         # 主控室：公共模式也保留导航，便于看日志/回总览
@@ -674,32 +750,75 @@ class MainWindow(QMainWindow, UIBase):
             self.control_room_page.set_login_visible(True)
             self.control_room_page.set_reorder_enabled(False)
     
-    def clear_data(self):
-        """Clear all data (spectrum, time series, etc.)"""
-        from core.translation import _t
-        # 检查权限
-        if not self.check_permission_before_action("action_clear_data", Permission.CLEAR_DATA):
+    def on_start_acq(self):
+        """检修用户手动开始采集；同时解除停采锁。"""
+        if not self.check_permission_before_action(
+            "action_start_acq", Permission.START_STOP_ACQUISITION
+        ):
             return
-        
-        # 更新操作时间（重置超时计时器）
         self.update_operate_time()
-        
         if self.is_acquiring:
-            # 如果正在采集，询问用户是否要先停止采集
+            return
+        from core.translation import _t
+        has_held_data = False
+        try:
+            has_held_data = bool(self.client_time_series) or any(
+                spec is not None and float(np.sum(spec)) > 0
+                for spec in (self.client_spectrum_data or {}).values()
+            )
+        except Exception:
+            has_held_data = bool(self.client_time_series or self.client_spectrum_data)
+        if self.is_acq_hold_locked() and has_held_data:
             if not ask_confirm(
                 self,
-                _t("msg_acq_running_title"),
-                _t("msg_acq_running_text"),
+                _t("msg_acq_resume_title"),
+                _t("msg_acq_resume_text"),
                 danger=True,
             ):
                 return
-            # 停止采集（不会断开TCP连接，只是停止数据处理）
-            self.stop_acquisition()
-            self.log("Acquisition stopped for clearing current accumulation (TCP connection remains)", 'INFO')
-            import time
-            time.sleep(0.5)
-        
-        # 确认清除数据
+        ok = self.start_acquisition()
+        if ok:
+            self.log("Acquisition started by maintenance", "INFO")
+        else:
+            self.log("Start acquisition failed", "WARNING")
+        self._sync_acq_action_buttons()
+        if hasattr(self, "_update_home_health_and_faults"):
+            self._update_home_health_and_faults()
+        if getattr(self, "control_room_mode", False) and hasattr(self, "_refresh_control_room_snapshot"):
+            self._refresh_control_room_snapshot()
+
+    def on_stop_acq(self):
+        """检修用户停止采集并上停采锁；保留当前谱/曲线便于保存。"""
+        from core.translation import _t
+        if not self.check_permission_before_action(
+            "action_stop_acq", Permission.START_STOP_ACQUISITION
+        ):
+            return
+        self.update_operate_time()
+        if not self.is_acquiring:
+            return
+        if not ask_confirm(
+            self,
+            _t("msg_acq_hold_title"),
+            _t("msg_acq_hold_text"),
+            danger=True,
+        ):
+            return
+        self.stop_acquisition(hold=True)
+        self._sync_acq_action_buttons()
+        if hasattr(self, "_update_home_health_and_faults"):
+            self._update_home_health_and_faults()
+        if getattr(self, "control_room_mode", False) and hasattr(self, "_refresh_control_room_snapshot"):
+            self._refresh_control_room_snapshot()
+
+    def clear_data(self):
+        """清空当前显示累计；采集不停止。未存盘本段先落盘再开新段。"""
+        from core.translation import _t
+        if not self.check_permission_before_action("action_clear_data", Permission.CLEAR_DATA):
+            return
+
+        self.update_operate_time()
+
         if not ask_confirm(
             self,
             _t("msg_clear_data_title"),
@@ -708,10 +827,14 @@ class MainWindow(QMainWindow, UIBase):
         ):
             return
 
-        # 重置所有数据
+        was_acquiring = bool(self.is_acquiring)
+        try:
+            if self.auto_save_enabled:
+                self._auto_save_all_clients(force=True, blocking=True)
+        except Exception as e:
+            self.log("Auto-save before clear failed: %s" % e, "WARNING")
+
         self.reset_plots()
-        
-        # 重置当前状态数据
         self.current_stat = {'hv': 0, 'rates': 0, 'temp': 0}
         self.client_data = {}
         self.client_time_series = {}
@@ -722,19 +845,21 @@ class MainWindow(QMainWindow, UIBase):
             self.client_segment_spectrum = {}
         self.primary_client_id = None
         self.total_count_rate = 0
-        
-        # 如果有数据更新回调，通知UI清零
+        self.last_auto_save_time = time.time()
+
         if self.data_updated_callback is not None:
             self.data_updated_callback(self.current_stat, 0, {})
-            
-        # 更新原概览 + 主显示
+
         self.overview_page.radiation_card.update_data("0 cps", "")
         self.overview_page.status_card.update_data("0" + chr(176) + "C", "0 V")
         if hasattr(self, "home_page"):
             self.home_page.total_cps_label.setText("0")
             self.home_page.update_probe_tiles_from_master(None, False)
 
-        self.log("Current display and accumulation cleared", 'INFO')
+        if was_acquiring:
+            self.log("Current accumulation cleared; acquisition continues", "INFO")
+        else:
+            self.log("Current display and accumulation cleared", "INFO")
     
     def save_data(self, auto_save=False, auto_save_path=""):
         """Save current data to file"""
@@ -1019,6 +1144,8 @@ class MainWindow(QMainWindow, UIBase):
         bar_h = CR_CHROME_H + 4
         for btn in (
             getattr(self, "acquisition_btn", None),
+            getattr(self, "start_acq_btn", None),
+            getattr(self, "stop_acq_btn", None),
             getattr(self, "save_data_btn", None),
             getattr(self, "user_management_btn", None),
             getattr(self, "logout_btn", None),
@@ -1034,27 +1161,58 @@ class MainWindow(QMainWindow, UIBase):
                 qss = qss.replace("QPushButton {", "QPushButton { min-height: %dpx;" % bar_h, 1)
             btn.setStyleSheet(qss)
 
+    def _sync_acq_action_buttons(self):
+        """概览/能谱页：仅检修用户显示开始/停止；总览不显示。"""
+        from core.translation import _t
+        start_btn = getattr(self, "start_acq_btn", None)
+        stop_btn = getattr(self, "stop_acq_btn", None)
+        if start_btn is None or stop_btn is None:
+            return
+        page = 0
+        if hasattr(self, "stacked_widget") and self.stacked_widget is not None:
+            page = int(self.stacked_widget.currentIndex())
+        can = False
+        try:
+            can = bool(
+                self.is_logged_in()
+                and page in (1, 2)
+                and self.user_manager.has_permission(Permission.START_STOP_ACQUISITION)
+            )
+        except Exception:
+            can = False
+        start_btn.setText(_t("btn_acq_start"))
+        stop_btn.setText(_t("btn_acq_stop"))
+        start_btn.setVisible(can)
+        stop_btn.setVisible(can)
+        if not can:
+            return
+        acquiring = bool(self.is_acquiring)
+        start_btn.setEnabled(not acquiring)
+        stop_btn.setEnabled(acquiring)
+
     def _sync_control_room_action_bar(self):
         """实时概览/能谱分析保留运行快捷；账户类动作统一收进设置页。"""
         if not hasattr(self, "button_container"):
             return
+        self._sync_acq_action_buttons()
         logged = self.is_logged_in()
         cr = bool(getattr(self, "control_room_mode", False))
         page = 0
         if hasattr(self, "stacked_widget") and self.stacked_widget is not None:
             page = int(self.stacked_widget.currentIndex())
+
+        def _btn_shown(name):
+            btn = getattr(self, name, None)
+            return btn is not None and not btn.isHidden()
+
         show_runtime_shortcut = bool(
             logged
             and page in (1, 2)
             and (
-                (
-                    getattr(self, "acquisition_btn", None) is not None
-                    and not self.acquisition_btn.isHidden()
-                )
-                or (
-                    getattr(self, "save_data_btn", None) is not None
-                    and not self.save_data_btn.isHidden()
-                )
+                _btn_shown("acquisition_btn")
+                or _btn_shown("save_data_btn")
+                or _btn_shown("start_acq_btn")
+                or _btn_shown("stop_acq_btn")
             )
         )
         if cr:
@@ -1484,6 +1642,21 @@ class MainWindow(QMainWindow, UIBase):
                 "rgba(255, 183, 77, 0.12)", "rgba(255, 183, 77, 0.35)"
             )
             master_hw, master_tone = _t("health_master_ok"), "green"
+            self._set_home_aux_card_border(page.health_card, page.health_indicator_bar, "#ffb74d")
+        elif self.is_acq_hold_locked():
+            page.health_indicator.load(get_icon_svg('occupancy_inactive'))
+            page.health_status_label.setText(_t("status_acq_hold"))
+            page.health_desc_label.setText(_t("desc_acq_hold"))
+            self._set_home_status_style(
+                page.health_status_label, "#ffb74d",
+                "rgba(255, 183, 77, 0.12)", "rgba(255, 183, 77, 0.35)"
+            )
+            if master_online:
+                master_hw, master_tone = _t("health_master_ok"), "green"
+            elif never_seen:
+                master_hw, master_tone = _t("health_not_linked"), "muted"
+            else:
+                master_hw, master_tone = _t("health_master_offline"), "amber"
             self._set_home_aux_card_border(page.health_card, page.health_indicator_bar, "#ffb74d")
         else:
             page.health_indicator.load(get_icon_svg('occupancy_inactive'))
@@ -3511,6 +3684,10 @@ class MainWindow(QMainWindow, UIBase):
     def enter_public_mode(self):
         """Exit login session -> public home monitor only."""
         from core.translation import _t
+        try:
+            self.release_acq_hold_lock(resume=True)
+        except Exception as e:
+            self.log("Release acquisition hold on public mode failed: %s" % e, "WARNING")
         self.current_user = None
         try:
             self.user_manager.logout()
@@ -3531,6 +3708,10 @@ class MainWindow(QMainWindow, UIBase):
         # 主显示保持整洁：藏顶栏按钮；底栏仅报警日志页再显示（主控室除外）
         self.button_container.setVisible(False)
         self.acquisition_btn.setVisible(False)
+        if hasattr(self, "start_acq_btn"):
+            self.start_acq_btn.setVisible(False)
+        if hasattr(self, "stop_acq_btn"):
+            self.stop_acq_btn.setVisible(False)
         self.save_data_btn.setVisible(False)
         self.user_management_btn.setVisible(False)
         self.logout_btn.setVisible(False)
@@ -3550,6 +3731,16 @@ class MainWindow(QMainWindow, UIBase):
         self._apply_page_index(0)
         if getattr(self, "control_room_mode", False):
             self._apply_control_room_nav_labels()
+        if hasattr(self, "_update_home_health_and_faults"):
+            try:
+                self._update_home_health_and_faults()
+            except Exception:
+                pass
+        if getattr(self, "control_room_mode", False) and hasattr(self, "_refresh_control_room_snapshot"):
+            try:
+                self._refresh_control_room_snapshot()
+            except Exception:
+                pass
 
     def update_ui_for_user_role(self):
         """根据用户角色更新UI"""
@@ -3561,6 +3752,10 @@ class MainWindow(QMainWindow, UIBase):
         role = self.current_user['role']
         self.bottom_nav.setVisible(True)
         self.acquisition_btn.setVisible(False)
+        if hasattr(self, "start_acq_btn"):
+            self.start_acq_btn.setVisible(False)
+        if hasattr(self, "stop_acq_btn"):
+            self.stop_acq_btn.setVisible(False)
         self.user_management_btn.setVisible(False)
         self.logout_btn.setVisible(False)
         self.save_data_btn.setVisible(False)
@@ -3811,11 +4006,13 @@ class MainWindow(QMainWindow, UIBase):
     
     def show_user_management(self):
         """显示用户管理对话框"""
-        # 更新操作时间（重置超时计时器）
+        from core.translation import _t
+        if not self.check_permission_before_action(_t("btn_user_mgmt"), Permission.MANAGE_USERS):
+            return
         self.update_operate_time()
-        
+
         from core.user_management_dialog import UserManagementDialog
-        
+
         dialog = UserManagementDialog(self)
         dialog.exec_()
     
@@ -3836,6 +4033,9 @@ class MainWindow(QMainWindow, UIBase):
             return False
 
         if str(os.environ.get("ALLOW_VIEWER_SETTINGS", "0")).strip() == "1":
+            if not getattr(self, "_warned_viewer_settings_bypass", False):
+                self._warned_viewer_settings_bypass = True
+                self.log("ALLOW_VIEWER_SETTINGS=1: all action permissions bypassed", "WARNING")
             return True
         # 首先检查当前用户的本地角色
         if self.current_user and self.current_user['role'] == UserRole.VIEWER:
@@ -4234,9 +4434,9 @@ class MainWindow(QMainWindow, UIBase):
         ):
             return
 
-            self.timeout_manager.stop_timer()
-            self.timeout_manager.last_operate_time = 0
-            self.timeout_manager.save_state()
+        self.timeout_manager.stop_timer()
+        self.timeout_manager.last_operate_time = 0
+        self.timeout_manager.save_state()
         old = self.current_user.get("username") if self.current_user else "?"
         self.enter_public_mode()
         self.log(f"Logged out ({old}) -> public home monitor", 'INFO')
@@ -4948,6 +5148,12 @@ class MainWindow(QMainWindow, UIBase):
             self.bottom_nav.retranslate_ui()
         if hasattr(self, 'acquisition_btn'):
             self.acquisition_btn.retranslate_ui()
+        if hasattr(self, "start_acq_btn"):
+            self.start_acq_btn.setText(_t("btn_acq_start"))
+        if hasattr(self, "stop_acq_btn"):
+            self.stop_acq_btn.setText(_t("btn_acq_stop"))
+        if hasattr(self, "_sync_acq_action_buttons"):
+            self._sync_acq_action_buttons()
             
         # Call retranslate_ui on each page if they support it
         for page in [

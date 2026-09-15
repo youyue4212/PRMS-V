@@ -557,6 +557,21 @@ class TcpPacketWorker(QObject):
                         self._record_link_event("socket_error", client_id, detail)
                         self.has_log.emit(f"Socket error from {client_id}: {detail}", 'ERROR')
                         disconnected_clients.append(client_id)
+
+            # Application-level idle drop: keepalive may not fire on some stacks / half-open K2.
+            stale_sec = 15.0
+            now = current_time
+            for cid, info in list(self.client_infos.items()):
+                if cid in disconnected_clients:
+                    continue
+                last_active = float(getattr(info, "last_active", 0) or 0)
+                if last_active > 0 and (now - last_active) >= stale_sec:
+                    self._record_link_event("idle_drop", cid, "no RX for %.0fs" % (now - last_active))
+                    self.has_log.emit(
+                        "Dropping stale TCP session %s (no data for %.0fs)" % (cid, now - last_active),
+                        "WARNING",
+                    )
+                    disconnected_clients.append(cid)
             
             # Remove disconnected clients
             for client_id in disconnected_clients:

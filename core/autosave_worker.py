@@ -95,6 +95,7 @@ class AutoSaveWorker(QThread):
     def __init__(self, jobs: List[Dict[str, Any]]):
         super().__init__()
         self.jobs = list(jobs or [])
+        self.result = None
 
     def run(self):
         logs: List[Tuple[str, str]] = []
@@ -145,4 +146,5 @@ class AutoSaveWorker(QThread):
                     saved_cids.append(cid)
             except Exception as e:
                 logs.append(("Auto-save failed for %s: %s" % (cid, e), "ERROR"))
+        self.result = (saved, logs, saved_cids)
         self.finished_ok.emit(saved, logs, saved_cids)

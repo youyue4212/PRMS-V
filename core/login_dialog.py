@@ -308,6 +308,7 @@ class LoginDialog(QDialog):
     
     def load_saved_credentials(self):
         """Load saved credentials from settings"""
+        self.settings.remove("login/password")
         if self.prefer_viewer_autofill:
             viewer_username = self.user_manager.ensure_viewer_user()
             self.username_input.setText(viewer_username)
@@ -318,20 +319,19 @@ class LoginDialog(QDialog):
         remember = self.settings.value("login/remember_password", False, type=bool)
         if remember:
             username = self.settings.value("login/username", "", type=str)
-            password = self.settings.value("login/password", "", type=str)
-            
             if username:
                 self.username_input.setText(username)
-                self.password_input.setText(password)
                 self.remember_checkbox.setChecked(True)
+        self.password_input.setText("")
+        # Never keep a plaintext password on disk
+        self.settings.remove("login/password")
     
     def save_credentials(self, username, password, remember):
         """Save credentials to settings"""
         if remember:
-            # Save credentials
             self.settings.setValue("login/remember_password", True)
             self.settings.setValue("login/username", username)
-            self.settings.setValue("login/password", password)
+            self.settings.remove("login/password")
         else:
             # Clear saved credentials
             self.settings.setValue("login/remember_password", False)

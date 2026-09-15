@@ -6,15 +6,15 @@
     "full_name": "系统管理员",
     "email": "admin@example.com",
     "created_at": "2025-01-01",
-    "last_login": "2026-09-15 11:47:14"
+    "last_login": "2026-09-15 14:26:29"
   },
   "user": {
     "username": "user",
-    "password_hash": "8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92",
+    "password_hash": "pbkdf2_sha256$200000$1d8ca87fdb4366de00b7913f46b45060$289cb3caa8f4d7e67f41e7d86da70c09613b550833e26a74b403f29eb74901b1",
     "role": "admin",
     "full_name": "",
     "email": "",
     "created_at": "2026-09-11 08:56:15",
-    "last_login": "2026-09-14 21:58:56"
+    "last_login": "2026-09-15 13:22:46"
   }
 }

@@ -70,6 +70,9 @@ def main():
         cfg.save_settings()
         print("UI mode set to:", mode)
 
+    if str(os.environ.get("ALLOW_VIEWER_SETTINGS", "0")).strip() == "1":
+        print("WARNING: ALLOW_VIEWER_SETTINGS=1 bypasses operator permissions; production must leave this unset")
+
     is_rpi = os.path.exists("/proc/device-tree/model")
     if not is_rpi and hasattr(os, "uname"):
         try:
