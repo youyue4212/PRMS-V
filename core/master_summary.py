@@ -50,24 +50,38 @@ MASTER_DECISION_SYSTEM_FAULT = 0xFF
 # Master considered offline if no valid summary within this window (1 Hz TX)
 MASTER_OFFLINE_TIMEOUT_SEC = 3.0
 
+# 值班/记录用语（对标门式 RPM：Alarm / Occupied / Over threshold）
 _DECISION_TEXT_ZH = {
-    MASTER_DECISION_NORMAL: "\u6b63\u5e38",
-    MASTER_DECISION_OVER_THRESHOLD: "\u8d85\u9608\u63d0\u793a\uff08\u672a\u8fbeN\u8def\uff0c\u975e\u786c\u62a5\uff09",
-    MASTER_DECISION_WINDOW_MATCHED: "\u6ed1\u52a8\u7a97\u7b26\u5408\uff08\u901a\u9053\u786c\u62a5\uff09",
-    MASTER_DECISION_JOINT_ALARM: "\u5bf9\u5c04\u7a97\u7b26\u5408\uff08\u901a\u9053\u786c\u62a5\uff09",
-    MASTER_DECISION_PASSING_NO_ALARM: "\u4eba\u5458\u7ecf\u8fc7",
-    MASTER_DECISION_MANUAL_RESET: "\u5df2\u4eba\u5de5\u590d\u4f4d",
-    MASTER_DECISION_SYSTEM_FAULT: "\u7cfb\u7edf\u6545\u969c",
+    MASTER_DECISION_NORMAL: "正常",
+    MASTER_DECISION_OVER_THRESHOLD: "超阈值",
+    MASTER_DECISION_WINDOW_MATCHED: "辐射报警",
+    MASTER_DECISION_JOINT_ALARM: "辐射报警",
+    MASTER_DECISION_PASSING_NO_ALARM: "人员经过",
+    MASTER_DECISION_MANUAL_RESET: "已复位",
+    MASTER_DECISION_SYSTEM_FAULT: "系统故障",
 }
 
 _DECISION_TEXT_EN = {
     MASTER_DECISION_NORMAL: "Normal",
-    MASTER_DECISION_OVER_THRESHOLD: "Over threshold (<N probes, not hard alarm)",
-    MASTER_DECISION_WINDOW_MATCHED: "Sliding-window match (channel hard alarm)",
-    MASTER_DECISION_JOINT_ALARM: "IR-window match (channel hard alarm)",
-    MASTER_DECISION_PASSING_NO_ALARM: "Person passing",
-    MASTER_DECISION_MANUAL_RESET: "Manually acknowledged",
+    MASTER_DECISION_OVER_THRESHOLD: "Over threshold",
+    MASTER_DECISION_WINDOW_MATCHED: "Radiation alarm",
+    MASTER_DECISION_JOINT_ALARM: "Radiation alarm",
+    MASTER_DECISION_PASSING_NO_ALARM: "Occupied",
+    MASTER_DECISION_MANUAL_RESET: "Reset",
     MASTER_DECISION_SYSTEM_FAULT: "System fault",
+}
+
+# 诊断页：同一事件补一句判定方式，不给值班记录用
+_DECISION_DETAIL_ZH = {
+    MASTER_DECISION_OVER_THRESHOLD: "超阈值（未达符合路数）",
+    MASTER_DECISION_WINDOW_MATCHED: "辐射报警（多探头符合）",
+    MASTER_DECISION_JOINT_ALARM: "辐射报警（占用符合）",
+}
+
+_DECISION_DETAIL_EN = {
+    MASTER_DECISION_OVER_THRESHOLD: "Over threshold (not enough probes)",
+    MASTER_DECISION_WINDOW_MATCHED: "Radiation alarm (multi-probe match)",
+    MASTER_DECISION_JOINT_ALARM: "Radiation alarm (occupancy match)",
 }
 
 
@@ -238,6 +252,10 @@ class MasterSummaryPacket:
     def decision_text(self, lang: str = "zh") -> str:
         table = _DECISION_TEXT_ZH if lang != "en" else _DECISION_TEXT_EN
         return table.get(self.decision_result, f"0x{self.decision_result:02X}")
+
+    def decision_detail_text(self, lang: str = "zh") -> str:
+        table = _DECISION_DETAIL_ZH if lang != "en" else _DECISION_DETAIL_EN
+        return table.get(self.decision_result, self.decision_text(lang))
 
     def active_probe_count(self) -> int:
         n = int(self.probe_count_cfg or 0)

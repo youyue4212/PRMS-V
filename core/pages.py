@@ -747,7 +747,9 @@ class ClientsPage(QWidget):
             "link_only": link_only,
             "master_id": ip,
             "decision": getattr(pkt, "decision_result", None) if pkt is not None else None,
-            "decision_text": pkt.decision_text(lang) if pkt is not None else None,
+            "decision_text": (
+                pkt.decision_detail_text(lang) if pkt is not None else None
+            ),
             "ir_installed": ir_installed,
             "ir_degraded": bool(getattr(pkt, "ir_degraded", False)) if pkt is not None else False,
             "sensor_brief": sensor_brief,

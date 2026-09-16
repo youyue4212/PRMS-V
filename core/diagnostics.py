@@ -50,8 +50,8 @@ class FaultCode:
         E304: ("温度读数异常", "温度读数极值或恒定异常，可能温度传感器损坏", "WARNING", "通道温度传感器故障 → 无法准确读取温度，请联系维保人员。"),
         E401: ("计数率异常波动", "计数率(CPS)出现非正常的突发性大幅度波动，可能前端受电磁干扰", "WARNING", "探测器信号不稳定！请检查周边是否有强电磁干扰，或重启设备。"),
         E501: ("占用传感器异常(已弃用)", "旧探头占用逻辑已停用；通道占用请检查主控红外/雷达接线", "WARNING", "通道占用已改由主控判定，请检查主控侧传感器。"),
-        M101: ("主控无数据", "主控未连接或启动后长时间未收到主控数据", "ERROR", "主控未连接/无数据 → 无法进行通道硬报警判决，请检查主控供电、网络与固件。"),
-        M102: ("主控通信中断", "主控已连接但超过超时时间未收到数据", "ERROR", "主控通信中断 → 通道硬报警判决暂停，请检查主控网络连接。"),
+        M101: ("主控无数据", "主控未连接或启动后长时间未收到主控数据", "ERROR", "主控未连接/无数据 → 无法进行辐射报警判定，请检查主控供电、网络与固件。"),
+        M102: ("主控通信中断", "主控已连接但超过超时时间未收到数据", "ERROR", "主控通信中断 → 辐射报警判定暂停，请检查主控网络连接。"),
         M103: ("主控L2无效", "主控连接存在，但未收到有效L2（可能CRC错误或协议不匹配）", "ERROR", "主控L2无效 → 收到主控连接但无有效L2，请检查协议版本或CRC。"),
         M104: ("主控系统故障", "主控上报 decision=0xFF 系统故障", "ERROR", "主控系统故障 → 请暂停通行并联系维保人员。"),
     }
@@ -168,6 +168,11 @@ class DiagnosticsManager:
 
     def add_fault(self, client_id: str, code: str):
         self.register_client(client_id)
+        # E101（从未收到包）与 E102（曾经有包后中断）互斥，避免断线叠两条通信记录
+        if code == FaultCode.E102:
+            self.remove_fault(client_id, FaultCode.E101)
+        elif code == FaultCode.E101:
+            self.remove_fault(client_id, FaultCode.E102)
         if code not in self.active_faults[client_id]:
             self.active_faults[client_id][code] = time.time()
 

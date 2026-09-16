@@ -2,9 +2,9 @@
 
 > 适用：daq_tablet 通道机上位机（TCP + 主控）  
 > 对应代码：`core/main_window.py`、`core/alarm_logger.py`、`core/alarm_log_page.py`、`core/control_room_page.py`  
-> 更新日期：2026-08-27
+> 更新日期：2026-09-16
 
-工业原则：**「有没有测到辐射」和「能不能看见主控」分开管。**
+工业原则：**「有没有测到辐射」和「通信/系统能不能看见设备」分开管。**
 
 ---
 
@@ -13,10 +13,10 @@
 | 类别 | 内部 `AlarmType` | 含义 | 界面 |
 |------|------------------|------|------|
 | **通道辐射报警** | `ChannelMatch`（及无主控时的 `Radiation`） | L2 `0x02/0x03` 符合硬报 | 报警日志「通道辐射报警」Tab；主控室辐射列表 |
-| **系统/通信事件** | `MasterFault` | M101～M104 出现/恢复 | 报警日志「系统/通信事件」Tab；主控室下半列表 |
+| **系统/通信事件** | `MasterFault` / `ProbeFault` | 主控 M101～M104；探头通信 E101～E103 | 报警日志「系统/通信事件」Tab；主控室下半列表 |
 
-- **不把** M101/M102 记成带「峰值 CPS」的辐射报警。
-- 探头 E101/E102 等仍走诊断页 / 主控室「系统状态」卡，**不写入**本日志。
+- **不把** M101/M102、E101/E102 记成带「峰值 CPS」的辐射报警。
+- 高压/温度/计数率等 E2xx/E3xx/E4xx 仍走诊断页 / 主控室「系统状态」卡，**不写入**本日志。
 
 Excel 仍保存在：`~/Raysen/AlarmLogs/`（同一文件可含两类 `AlarmType`，报表请按类型过滤）。
 
@@ -36,7 +36,7 @@ Excel 仍保存在：`~/Raysen/AlarmLogs/`（同一文件可含两类 `AlarmType
 
 ---
 
-## 3. 系统/通信事件（监视失效 / 主控故障）
+## 3. 系统/通信事件（监视失效 / 主控与探头通信）
 
 | 码 | 含义 | 记录说明 |
 |----|------|----------|
@@ -44,8 +44,13 @@ Excel 仍保存在：`~/Raysen/AlarmLogs/`（同一文件可含两类 `AlarmType
 | **M102** | 主控通信超时 | 曾经收到过再约 **5 s** 收不到。**中断时长**合理，**无峰值 CPS** |
 | **M103** | L2 无效 | 系统事件 |
 | **M104** | `decision=0xFF` | 系统故障（主控仍可能在线） |
+| **E101** | 探头无数据 | 已连接但约 **8 s** 未收到包。消息带探头编号/位置 |
+| **E102** | 探头通信中断 | 曾经有包，再约 **5 s** 收不到。消息带探头编号/位置 |
+| **E103** | 探头数量不足 | 在线数 < 期望路数。消息带 `在线/期望` |
 
 **M101 / M102 互斥**：断线会清 `master_client_id`，但以「是否曾经收到过包」判定，不会同时亮两个码。详见 [FAULT_CODES.md](FAULT_CODES.md)。
+
+冷启动未接任何设备时，不把待机 E101/E103 写入历史。
 
 字段：时间、故障码、链路状态、中断时长、消息。  
 **禁止**用断线前 `total_cps` 填峰值（已改为写入 `0`）。
@@ -59,7 +64,7 @@ Excel 仍保存在：`~/Raysen/AlarmLogs/`（同一文件可含两类 `AlarmType
 ### 报警日志页
 
 - Tab **通道辐射报警**：仅辐射/通道符合。
-- Tab **系统/通信事件**：仅 `MasterFault`；有活动系统事件时 Tab 标题带数量。空表一行说明：只记主控 M 码，探头 E 码在系统状态/诊断页。
+- Tab **系统/通信事件**：`MasterFault` 与 `ProbeFault`；有活动系统事件时 Tab 标题带数量。空表一行说明：记主控 M 码与探头通信 E101～E103。
 - 顶栏统计卡：**活动辐射报警 / 今日辐射报警 / 最近辐射报警**（不含通信故障）。
 
 ### 主控室
@@ -76,7 +81,7 @@ Excel 仍保存在：`~/Raysen/AlarmLogs/`（同一文件可含两类 `AlarmType
 
 ### 底栏红点
 
-仅活动**辐射/通道硬报**时亮，M101/M102 **不**点红点。
+仅活动**辐射/通道硬报**时亮，M101/M102、E101/E102 **不**点红点。
 
 ---
 
@@ -97,9 +102,9 @@ Excel 仍保存在：`~/Raysen/AlarmLogs/`（同一文件可含两类 `AlarmType
 ## 6. 与故障码文档
 
 - 诊断页仍显示完整 E/M 码：见 [FAULT_CODES.md](FAULT_CODES.md)。
-- **系统状态** = 实时诊断（含探头 E101 等）。
-- **系统/通信事件** = 仅主控 M101–M104 边沿留痕；**不计入辐射报警次数**。
-- 没接设备时上面「系统故障」、下面列表空是故意的：E 码不进 M 列表；约 8 s 无主控才出 M101。
+- **系统状态** = 实时诊断（含探头高压/温度等）。
+- **系统/通信事件** = 主控 M101–M104 与探头通信 E101–E103 边沿留痕；**不计入辐射报警次数**。
+- 没接设备时上面「系统故障」、下面列表空是故意的：冷启动待机不记通信历史；约 8 s 无主控才出 M101。
 
 ---
 
@@ -108,6 +113,7 @@ Excel 仍保存在：`~/Raysen/AlarmLogs/`（同一文件可含两类 `AlarmType
 - 分类辅助：`core/alarm_logger.py` → `is_radiation_alarm_type` / `is_system_event_type` / `get_recent_events(category=…)` / `get_statistics()`
 - 通道硬报：`main_window._sync_channel_hard_alarm_log`
 - 主控故障（CPS=0）：`main_window._sync_master_fault_logs`
+- 探头通信（CPS=0）：`main_window._log_probe_comm_edge`（`update_system_status` 边沿）
 - 主控 M 码互斥：`main_window._update_master_diagnostics`
 - 双 Tab 表格：`alarm_log_page.py`
 - 主控室双列表：`control_room_page.refresh_alarm_sidebar`

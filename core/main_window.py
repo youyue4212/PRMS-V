@@ -53,6 +53,7 @@ from core.control_room_page import ControlRoomPage
 # 故障摘要 / 概览说明：主页显示前 1～3 条，超出部分放 tooltip
 _FAULT_DESC_MAX_LINES = 3
 _MASTER_FAULT_CLIENT_ID = "master"
+_PROBE_COMM_CODES = (FaultCode.E101, FaultCode.E102, FaultCode.E103)
 
 
 def _strip_fault_placeholders(text: str) -> str:
@@ -366,6 +367,7 @@ class MainWindow(QMainWindow, UIBase):
         self.alarm_status_callback = self.update_alarm_status
         self.master_summary_callback = self.on_master_summary_ui
         self.prev_fault_keys = set()
+        self._prev_probe_comm_keys = set()
 
         # 连接超时管理器信号
         self.timeout_manager.timeout_occurred.connect(self.on_admin_timeout)
@@ -1369,6 +1371,144 @@ class MainWindow(QMainWindow, UIBase):
 
         self._prev_master_fault_codes = current
 
+    def _is_probe_comm_fault(self, client_id, code) -> bool:
+        cid = str(client_id or "")
+        if cid == _MASTER_FAULT_CLIENT_ID:
+            return False
+        master_cid = str(getattr(self, "master_client_id", "") or "")
+        if master_cid and cid == master_cid:
+            return False
+        return str(code) in _PROBE_COMM_CODES
+
+    def _probe_comm_entries(self):
+        """当前活动的探头通信码（去重），供主控室「当前」行补全。"""
+        codes = []
+        seen = set()
+        dm = getattr(self, "diagnostics_manager", None)
+        if dm is None or not hasattr(dm, "get_all_active_faults"):
+            return codes
+        try:
+            for client_id, code, *_rest in dm.get_all_active_faults() or []:
+                if not self._is_probe_comm_fault(client_id, code):
+                    continue
+                if code in seen:
+                    continue
+                seen.add(code)
+                codes.append(code)
+        except Exception:
+            return codes
+        return codes
+
+    def _probe_comm_log_label(self, client_id: str, code: str) -> str:
+        from core.translation import _t
+        cid = str(client_id or "")
+        if cid in ("system", "") or str(code) == FaultCode.E103:
+            try:
+                online, expected = self.probe_online_and_target()
+                return _t("health_probe_online", online=online, expected=expected)
+            except Exception:
+                return _t("log_channel_device")
+        parts = []
+        try:
+            lab = str(self.get_probe_label(cid) or "").strip()
+            if lab:
+                parts.append(lab)
+        except Exception:
+            pass
+        try:
+            loc = str(self._export_probe_location(cid) or "").strip()
+            if loc:
+                parts.append(loc)
+        except Exception:
+            pass
+        if parts:
+            return " ".join(parts)
+        try:
+            ip = str(self._extract_client_ip(cid) or "").strip()
+            if ip:
+                return ip
+        except Exception:
+            pass
+        return cid or _t("log_channel_device")
+
+    def _comm_standby(self) -> bool:
+        """未接主控且无 TCP 客户端：开通待机，不算通信恢复。"""
+        try:
+            return bool(self._master_never_seen()) and int(self._tcp_client_count()) == 0
+        except Exception:
+            return False
+
+    def _probe_comm_snapshot(self):
+        keys = set()
+        dm = getattr(self, "diagnostics_manager", None)
+        if dm is None or not hasattr(dm, "get_all_active_faults"):
+            return keys
+        try:
+            for client_id, code, *_rest in dm.get_all_active_faults() or []:
+                if self._is_probe_comm_fault(client_id, code):
+                    keys.add((str(client_id), str(code)))
+        except Exception:
+            return keys
+        return keys
+
+    def _reset_probe_comm_logger(self, client_id, code):
+        try:
+            from core.alarm_logger import get_alarm_logger, probe_fault_log_id
+            get_alarm_logger().reset_client_state(
+                probe_fault_log_id(str(code), str(client_id))
+            )
+        except Exception:
+            pass
+
+    def _log_probe_comm_edge(self, client_id, code, active: bool):
+        """探头 E101/E102/E103 边沿写入系统/通信历史，不进辐射统计。"""
+        try:
+            if not self._is_probe_comm_fault(client_id, code):
+                return
+            name, _, _, _ = FaultCode.get_info(code)
+            label = self._probe_comm_log_label(client_id, code)
+            alarm_message = "%s %s | %s" % (code, name, label)
+            from core.alarm_logger import get_alarm_logger, probe_fault_log_id
+            get_alarm_logger().log_alarm_event(
+                client_id=probe_fault_log_id(str(code), str(client_id)),
+                alarm_status=bool(active),
+                count_rate=0.0,
+                temperature=None,
+                hv=None,
+                product_id=None,
+                sensitivity=None,
+                alarm_type="ProbeFault",
+                message=alarm_message,
+            )
+        except Exception:
+            pass
+
+    def _sync_probe_comm_logs(self):
+        """按诊断表边沿落盘；不跟概览冷启动过滤，避免 E103 误记「已恢复」。"""
+        try:
+            if hasattr(self, "_sync_probe_count_fault"):
+                self._sync_probe_count_fault()
+        except Exception:
+            pass
+        try:
+            current = self._probe_comm_snapshot()
+            previous = set(getattr(self, "_prev_probe_comm_keys", set()) or set())
+            if self._comm_standby():
+                # 待机撤掉 E103：不是修好，不写恢复行
+                e103 = ("system", str(FaultCode.E103))
+                if e103 in previous and e103 not in current:
+                    previous = set(previous)
+                    previous.discard(e103)
+                    self._reset_probe_comm_logger("system", FaultCode.E103)
+            if current != previous:
+                for cid, code in sorted(current - previous):
+                    self._log_probe_comm_edge(cid, code, True)
+                for cid, code in sorted(previous - current):
+                    self._log_probe_comm_edge(cid, code, False)
+            self._prev_probe_comm_keys = current
+        except Exception:
+            pass
+
     def _tcp_client_count(self) -> int:
         w = getattr(self, "worker", None)
         if w is None:
@@ -1810,7 +1950,7 @@ class MainWindow(QMainWindow, UIBase):
                 % (
                     int(prev if prev is not None else 0xFE),
                     cur,
-                    display_pkt.decision_text("zh"),
+                    display_pkt.decision_detail_text("zh"),
                     int(display_pkt.hit_probe_mask),
                     int(getattr(display_pkt, "relay_mask", 0) or 0),
                 ),
@@ -2355,15 +2495,21 @@ class MainWindow(QMainWindow, UIBase):
             return "0x%02X" % d
 
     def _channel_hard_alarm_log_message(self, packet, mask=None, latch_decision=False) -> str:
-        probes = self._format_hit_probes_for_log(packet, mask=mask)
-        if probes:
-            self._channel_hard_alarm_probes_text = probes
-        else:
-            probes = str(getattr(self, "_channel_hard_alarm_probes_text", "") or "").strip()
+        cached_probes = str(getattr(self, "_channel_hard_alarm_probes_text", "") or "").strip()
         if latch_decision:
+            probes = self._format_hit_probes_for_log(packet, mask=mask)
+            if probes:
+                self._channel_hard_alarm_probes_text = probes
+            else:
+                probes = cached_probes
             text = self._hard_alarm_decision_text(packet)
             if text:
                 self._channel_hard_alarm_decision_text = text
+        else:
+            # 恢复行不要用退出包的 CPS/0x01 文案覆盖锁存值
+            probes = cached_probes
+            if not probes:
+                probes = self._format_hit_probes_for_log(packet, mask=mask)
         decision = str(getattr(self, "_channel_hard_alarm_decision_text", "") or "").strip()
         if not decision:
             decision = self._hard_alarm_decision_text(packet)
@@ -2384,10 +2530,10 @@ class MainWindow(QMainWindow, UIBase):
                         client_id="master_channel",
                         alarm_status=True,
                         count_rate=float(getattr(packet, "total_cps", 0) or 0),
-                        temperature=0.0,
-                        hv=0.0,
-                        product_id=int(getattr(packet, "master_id", 0) or 0),
-                        sensitivity=0,
+                        temperature=None,
+                        hv=None,
+                        product_id=None,
+                        sensitivity=None,
                         alarm_type="ChannelMatch",
                         message=msg,
                     )
@@ -2404,10 +2550,10 @@ class MainWindow(QMainWindow, UIBase):
                 client_id="master_channel",
                 alarm_status=bool(active),
                 count_rate=cps,
-                temperature=0.0,
-                hv=0.0,
-                product_id=int(getattr(packet, "master_id", 0) or 0) if packet else 0,
-                sensitivity=0,
+                temperature=None,
+                hv=None,
+                product_id=None,
+                sensitivity=None,
                 alarm_type="ChannelMatch",
                 message=msg,
             )
@@ -3352,6 +3498,7 @@ class MainWindow(QMainWindow, UIBase):
             self.log(f"[FAULT CLEARED] Client: {client_id} | Code: {code} | {name} has been resolved", "INFO")
             
         self.prev_fault_keys = current_fault_keys
+        self._sync_probe_comm_logs()
         # 底栏角标：主控硬报 或 日志器仍有活动辐射边沿
         self._refresh_alarm_log_nav_badge(radiation_alarm=bool(master_hard_alarm))
         

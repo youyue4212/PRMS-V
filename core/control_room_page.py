@@ -1009,18 +1009,28 @@ class ControlRoomPage(QWidget):
             _fill_list(self.alarm_list, rad_lines, rad_events, Qt.red)
 
             if hasattr(self, "system_list"):
+                from core.alarm_logger import is_system_event_client, parse_system_fault_code
                 sys_events = list(logger.get_recent_events(40, category="system") or [])
                 sys_events.reverse()
                 sys_lines = []
-                # 活动主控 M 码：诊断里有、或清屏后仍活动但无历史行 → 补「当前」行
+                # 活动主控 M 码 / 探头通信 E 码：诊断里有、或清屏后仍活动但无历史行 → 补「当前」行
                 live_codes = []
                 for cid, on in (logger.get_active_alarms() or {}).items():
-                    if on and str(cid).startswith("master_fault_"):
-                        live_codes.append(str(cid).replace("master_fault_", "", 1))
+                    if on and is_system_event_client(cid):
+                        code = parse_system_fault_code(cid)
+                        if code and code not in live_codes:
+                            live_codes.append(code)
                 parent = getattr(self, "parent", None)
                 if parent is not None and hasattr(parent, "_master_fault_entries"):
                     try:
                         for code in parent._master_fault_entries() or []:
+                            if code not in live_codes:
+                                live_codes.append(code)
+                    except Exception:
+                        pass
+                if parent is not None and hasattr(parent, "_probe_comm_entries"):
+                    try:
+                        for code in parent._probe_comm_entries() or []:
                             if code not in live_codes:
                                 live_codes.append(code)
                     except Exception:
@@ -1049,10 +1059,16 @@ class ControlRoomPage(QWidget):
                             ts = "--:--:--"
                         code = format_alarm_fault_code(ev)
                         st = format_alarm_event_status(ev)
+                        who = format_alarm_event_client(ev)
+                        who = ("  %s" % who) if who else ""
                         dur = ""
-                        if float(getattr(ev, "duration", 0) or 0) > 0:
-                            dur = "  %.0fs" % float(ev.duration)
-                        sys_lines.append("%s  %s  %s%s" % (ts, code, st, dur))
+                        try:
+                            seconds = float(getattr(ev, "duration", 0) or 0)
+                        except (TypeError, ValueError):
+                            seconds = 0.0
+                        if seconds > 0:
+                            dur = "  %.0fs" % seconds
+                        sys_lines.append("%s  %s  %s%s%s" % (ts, code, st, who, dur))
                     # fake event objects only for coloring live rows
                     class _Live:
                         alarm_status = True

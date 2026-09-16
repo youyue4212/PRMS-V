@@ -22,8 +22,8 @@ from core.singleton import singleton
 
 EXCEL_COLS = [
     'Timestamp', 'DateTime', 'ClientID', 'AlarmType',
-    'AlarmStatus', 'PeakCountRate', 'TriggerCountRate', 'Temperature', 'HV',
-    'ProductID', 'Sensitivity', 'Duration', 'Message'
+    'AlarmStatus', 'PeakCountRate', 'TriggerCountRate',
+    'Duration', 'Message'
 ]
 
 # 有界队列：满则落盘 spool，避免卡 UI / 丢事件
@@ -35,7 +35,9 @@ WRITE_RETRY_SLEEP_S = 0.35
 
 # 工业分层：辐射/通道安全报警 vs 系统·通信事件（不可混进辐射统计）
 RADIATION_ALARM_TYPES = frozenset({"ChannelMatch", "Radiation", "radiation", "Alarm"})
-SYSTEM_EVENT_TYPES = frozenset({"MasterFault"})
+SYSTEM_EVENT_TYPES = frozenset({"MasterFault", "ProbeFault"})
+MASTER_FAULT_PREFIX = "master_fault_"
+PROBE_FAULT_PREFIX = "probe_fault_"
 
 
 def is_radiation_alarm_type(alarm_type: str) -> bool:
@@ -47,7 +49,23 @@ def is_system_event_type(alarm_type: str) -> bool:
 
 
 def is_system_event_client(client_id: str) -> bool:
-    return str(client_id or "").startswith("master_fault_")
+    s = str(client_id or "")
+    return s.startswith(MASTER_FAULT_PREFIX) or s.startswith(PROBE_FAULT_PREFIX)
+
+
+def probe_fault_log_id(code: str, probe_client_id: str) -> str:
+    return "%s%s_%s" % (PROBE_FAULT_PREFIX, code, probe_client_id or "probe")
+
+
+def parse_system_fault_code(client_id: str) -> str:
+    s = str(client_id or "")
+    if s.startswith(MASTER_FAULT_PREFIX):
+        return s[len(MASTER_FAULT_PREFIX):]
+    if s.startswith(PROBE_FAULT_PREFIX):
+        rest = s[len(PROBE_FAULT_PREFIX):]
+        code, _, _ = rest.partition("_")
+        return code
+    return ""
 
 
 @dataclass
@@ -58,10 +76,10 @@ class AlarmEvent:
     alarm_type: str
     alarm_status: bool
     count_rate: float  # ACTIVE=触发瞬时；INACTIVE=报警期间峰值；系统事件应为 0
-    temperature: float
-    hv: float
-    product_id: int
-    sensitivity: int
+    temperature: Optional[float]
+    hv: Optional[float]
+    product_id: Optional[int]
+    sensitivity: Optional[int]
     message: str
     duration: float = 0.0
     trigger_count_rate: float = 0.0
@@ -117,7 +135,7 @@ class AlarmLogger:
         return log_folder
 
     def _excel_alarm_type(self, alarm_type: str) -> str:
-        """Excel 给人看；内存里仍用 ChannelMatch / Radiation / MasterFault。"""
+        """Excel 给人看；内存里仍用 ChannelMatch / Radiation / MasterFault / ProbeFault。"""
         from core.translation import _t
         t = str(alarm_type or "")
         if t == "ChannelMatch":
@@ -125,6 +143,8 @@ class AlarmLogger:
         if t in ("Radiation", "radiation", "Alarm"):
             return _t("log_type_radiation")
         if t == "MasterFault":
+            return _t("log_type_system_comm")
+        if t == "ProbeFault":
             return _t("log_type_system_comm")
         return t
 
@@ -137,10 +157,6 @@ class AlarmLogger:
             'AlarmStatus': 'ACTIVE' if event.alarm_status else 'INACTIVE',
             'PeakCountRate': event.peak_count_rate,
             'TriggerCountRate': event.trigger_count_rate,
-            'Temperature': event.temperature,
-            'HV': event.hv,
-            'ProductID': event.product_id,
-            'Sensitivity': event.sensitivity,
             'Duration': f"{event.duration:.3f}" if event.duration > 0 else "",
             'Message': event.message,
         }
@@ -164,15 +180,15 @@ class AlarmLogger:
                        client_id: str,
                        alarm_status: bool,
                        count_rate: float,
-                       temperature: float,
-                       hv: float,
-                       product_id: int,
-                       sensitivity: int,
+                       temperature: Optional[float],
+                       hv: Optional[float],
+                       product_id: Optional[int],
+                       sensitivity: Optional[int],
                        alarm_type: str = "Radiation",
                        message: str = ""):
         """设备报警位边沿变化时记录；ACTIVE 期间持续更新峰值 CPS。
 
-        MasterFault（系统/通信）不跟踪峰值 CPS，避免把断线前末帧当成「报警峰值」。
+        MasterFault / ProbeFault（系统/通信）不跟踪峰值 CPS，避免把断线前末帧当成「报警峰值」。
         """
         current_time = time.time()
         previous_status = self.active_alarms.get(client_id, False)
@@ -385,6 +401,26 @@ class AlarmLogger:
                 return True
         return file_date != datetime.now().date()
 
+    def _align_excel_df(self, df: pd.DataFrame) -> pd.DataFrame:
+        """只保留通道报警列；当天正在写的表若仍带旧四列，下次落盘时去掉。历史未打开的文件不动。"""
+        if df is None:
+            return pd.DataFrame(columns=EXCEL_COLS)
+        out = df.copy()
+        for col in EXCEL_COLS:
+            if col not in out.columns:
+                out[col] = ""
+        return out.reindex(columns=EXCEL_COLS)
+
+    def _concat_excel_frames(self, existing: pd.DataFrame, incoming: pd.DataFrame) -> pd.DataFrame:
+        """空表不参与 concat，避免首条报警被空帧吞掉。"""
+        left = self._align_excel_df(existing)
+        right = self._align_excel_df(incoming)
+        if left.empty:
+            return right
+        if right.empty:
+            return left
+        return self._align_excel_df(pd.concat([left, right], ignore_index=True))
+
     def _ensure_excel_file(self, force_new: bool = False, create: bool = False):
         """仅写线程调用。启动只复用当天文件；有报警才新建，避免一堆空表。"""
         with self._path_lock:
@@ -454,11 +490,11 @@ class AlarmLogger:
             return
         with self._io_lock:
             if filepath.exists() and filepath.stat().st_size > 0:
-                df = pd.read_excel(filepath)
+                existing = pd.read_excel(filepath)
             else:
-                df = pd.DataFrame(columns=EXCEL_COLS)
+                existing = pd.DataFrame(columns=EXCEL_COLS)
 
-            df = pd.concat([df, pd.DataFrame(rows)], ignore_index=True)
+            df = self._concat_excel_frames(existing, pd.DataFrame(rows))
             from core.excel_io import dataframe_to_excel_atomic
             dataframe_to_excel_atomic(df, filepath)
 
@@ -598,10 +634,12 @@ class AlarmLogger:
 
                 if self.alarm_events:
                     data = [self._event_to_row(event) for event in self.alarm_events]
-                    df = pd.concat([df, pd.DataFrame(data)], ignore_index=True)
+                    df = self._concat_excel_frames(df, pd.DataFrame(data))
                     subset = [c for c in ('Timestamp', 'ClientID', 'AlarmStatus') if c in df.columns]
                     if subset:
                         df = df.drop_duplicates(subset=subset, keep='last')
+
+                df = self._align_excel_df(df)
 
                 if df.empty and not self.alarm_events:
                     print("No alarm events to save")
@@ -677,6 +715,9 @@ class AlarmLogger:
             'last_system_event': None,
         }
         if not self.alarm_events:
+            # 清屏只清列表；活动边沿仍要给 KPI / Tab 角标
+            empty['active_alarms'] = self.get_active_radiation_count()
+            empty['active_system'] = self.get_active_system_count()
             return empty
 
         alarm_types = {}

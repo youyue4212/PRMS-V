@@ -646,7 +646,7 @@
                     <span class="alarm-icon-badge" id="alarmIcon" aria-hidden="true"><svg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'><circle cx='12' cy='12' r='10' fill='#059669'/><path d='M7 12.5l3 3 7-7' stroke='#fff' stroke-width='2.4' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg></span>
                     <div class="banner-text-col">
                         <div class="alarm-title-text" id="alarmTitle">
-                            <span id="alarmText">通道辐射状态正常</span>
+                            <span id="alarmText">系统正常</span>
                         </div>
                         <div class="alarm-sub-text" id="alarmSubText">所有通道探头实时数值均低于安全阈值</div>
                     </div>
@@ -677,7 +677,7 @@
                 </div>
                 <button class="reset-btn normal" id="resetBtn" onclick="handleReset()">
                     <span id="resetIcon">↺</span>
-                    <span id="resetBtnText">通道报警复位</span>
+                    <span id="resetBtnText">复位报警</span>
                 </button>
             </div>
 
@@ -1068,7 +1068,7 @@
             probes[0].cps = 402;
             probes[0].isAlarm = false;
             setAlarmBanner('normal');
-            $('alarmText').innerText = '通道辐射状态正常';
+            $('alarmText').innerText = '系统正常';
             $('alarmSubText').innerText = '所有通道探头实时数值均低于安全阈值';
             $('sideRadStat').innerText = '全组正常';
             $('sideRadStat').className = 'info-value green';

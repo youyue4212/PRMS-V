@@ -16,8 +16,19 @@ from PyQt5.QtWidgets import (
 )
 
 from core.alarm_logger import (
-    get_alarm_logger, AlarmEvent, is_system_event_type,
+    get_alarm_logger, AlarmEvent, is_system_event_type, parse_system_fault_code,
 )
+
+
+def format_count_rate(value, fallback=0.0) -> str:
+    try:
+        raw = fallback if value is None else value
+        return "%.1f" % float(raw)
+    except (TypeError, ValueError):
+        try:
+            return "%.1f" % float(fallback)
+        except (TypeError, ValueError):
+            return "0.0"
 
 
 def format_alarm_event_client(event: AlarmEvent) -> str:
@@ -25,6 +36,13 @@ def format_alarm_event_client(event: AlarmEvent) -> str:
     t = str(getattr(event, "alarm_type", "") or "")
     if t == "MasterFault":
         return _t("log_master_client")
+    if t == "ProbeFault":
+        msg = str(getattr(event, "message", "") or "")
+        if " | " in msg:
+            tail = msg.split(" | ", 1)[1].strip()
+            if tail:
+                return tail
+        return _t("log_channel_device")
     if t == "ChannelMatch":
         msg = str(getattr(event, "message", "") or "")
         probes = ""
@@ -51,7 +69,7 @@ def format_alarm_event_client(event: AlarmEvent) -> str:
 def format_alarm_event_type(event: AlarmEvent) -> str:
     from core.translation import _t
     t = str(getattr(event, "alarm_type", "") or "")
-    if t == "MasterFault":
+    if t in ("MasterFault", "ProbeFault"):
         return _t("log_type_system_comm")
     if t == "ChannelMatch":
         return _t("log_type_channel_match")
@@ -75,23 +93,23 @@ def format_alarm_event_message(event: AlarmEvent) -> str:
         if " | " in msg:
             return msg.split(" | ", 1)[1].strip()
         return msg
-    if t != "MasterFault":
+    if t not in ("MasterFault", "ProbeFault"):
         return msg
     client_id = str(getattr(event, "client_id", "") or "")
-    if client_id.startswith("master_fault_"):
-        code = client_id.replace("master_fault_", "", 1)
-        if code and code not in msg:
-            msg = ("%s %s" % (code, msg)).strip()
+    code = parse_system_fault_code(client_id)
+    if code and code not in msg:
+        msg = ("%s %s" % (code, msg)).strip()
     return msg
 
 
 def format_alarm_fault_code(event: AlarmEvent) -> str:
     client_id = str(getattr(event, "client_id", "") or "")
-    if client_id.startswith("master_fault_"):
-        return client_id.replace("master_fault_", "", 1)
+    code = parse_system_fault_code(client_id)
+    if code:
+        return code
     msg = str(getattr(event, "message", "") or "")
     for tok in msg.split():
-        if tok.startswith("M") and len(tok) == 4 and tok[1:].isdigit():
+        if len(tok) == 4 and tok[0] in ("M", "E") and tok[1:].isdigit():
             return tok
     return "--"
 
@@ -642,8 +660,10 @@ class AlarmLogPage(QWidget):
                         self.table_widget.setItem(row, 3, status_item)
                 
                 # Peak rate (ACTIVE: trigger; INACTIVE: peak during alarm)
-                peak_rate = getattr(event, 'peak_count_rate', event.count_rate)
-                peak_rate_text = f"{peak_rate:.1f}"
+                peak_rate = getattr(event, 'peak_count_rate', None)
+                if peak_rate is None:
+                    peak_rate = event.count_rate
+                peak_rate_text = format_count_rate(peak_rate)
                 if row < self.table_widget.rowCount():
                     if self.table_widget.item(row, 4):
                         self.table_widget.item(row, 4).setText(peak_rate_text)
@@ -651,54 +671,24 @@ class AlarmLogPage(QWidget):
                         peak_rate_item = QTableWidgetItem(peak_rate_text)
                         peak_rate_item.setTextAlignment(Qt.AlignCenter)
                         self.table_widget.setItem(row, 4, peak_rate_item)
-                
-                # Trigger count rate
-                trigger_count_rate_text = f"{event.trigger_count_rate:.1f}"
-                if row < self.table_widget.rowCount():
-                    if self.table_widget.item(row, 5):
-                        self.table_widget.item(row, 5).setText(trigger_count_rate_text)
-                    else:
-                        trigger_count_rate_item = QTableWidgetItem(trigger_count_rate_text)
-                        trigger_count_rate_item.setTextAlignment(Qt.AlignCenter)
-                        self.table_widget.setItem(row, 5, trigger_count_rate_item)
-                
-                # Temperature
-                temp_text = f"{event.temperature:.1f}"
-                if row < self.table_widget.rowCount():
-                    if self.table_widget.item(row, 6):
-                        self.table_widget.item(row, 6).setText(temp_text)
-                    else:
-                        temp_item = QTableWidgetItem(temp_text)
-                        temp_item.setTextAlignment(Qt.AlignCenter)
-                        self.table_widget.setItem(row, 6, temp_item)
-                
-                # High voltage
-                hv_text = f"{event.hv:.1f}"
-                if row < self.table_widget.rowCount():
-                    if self.table_widget.item(row, 7):
-                        self.table_widget.item(row, 7).setText(hv_text)
-                    else:
-                        hv_item = QTableWidgetItem(hv_text)
-                        hv_item.setTextAlignment(Qt.AlignCenter)
-                        self.table_widget.setItem(row, 7, hv_item)
-                
+
                 # Duration
                 duration_text = f"{event.duration:.3f}" if event.duration > 0 else ""
                 if row < self.table_widget.rowCount():
-                    if self.table_widget.item(row, 8):
-                        self.table_widget.item(row, 8).setText(duration_text)
+                    if self.table_widget.item(row, 5):
+                        self.table_widget.item(row, 5).setText(duration_text)
                     else:
                         duration_item = QTableWidgetItem(duration_text)
                         duration_item.setTextAlignment(Qt.AlignCenter)
-                        self.table_widget.setItem(row, 8, duration_item)
-                
+                        self.table_widget.setItem(row, 5, duration_item)
+
                 # Message
                 if row < self.table_widget.rowCount():
-                    if self.table_widget.item(row, 9):
-                        self.table_widget.item(row, 9).setText(display_message)
+                    if self.table_widget.item(row, 6):
+                        self.table_widget.item(row, 6).setText(display_message)
                     else:
                         message_item = QTableWidgetItem(display_message)
-                        self.table_widget.setItem(row, 9, message_item)
+                        self.table_widget.setItem(row, 6, message_item)
                         
         finally:
             # Re-enable visual updates
@@ -869,6 +859,7 @@ class AlarmLogPage(QWidget):
         try:
             table.setRowCount(len(page_events))
             if category == "system":
+                table.clearSpans()
                 if not page_events:
                     table.setRowCount(1)
                     hint = QTableWidgetItem(_t("log_system_empty_hint"))
@@ -876,7 +867,6 @@ class AlarmLogPage(QWidget):
                     table.setItem(0, 0, hint)
                     table.setSpan(0, 0, 1, table.columnCount())
                 else:
-                    table.clearSpans()
                     for row, event in enumerate(page_events):
                         time_str = datetime.fromtimestamp(event.timestamp).strftime('%m-%d %H:%M:%S')
                         time_item = QTableWidgetItem(time_str)
@@ -895,7 +885,11 @@ class AlarmLogPage(QWidget):
                             status_item.setForeground(Qt.green)
                         table.setItem(row, 2, status_item)
 
-                        duration_text = f"{event.duration:.1f}" if event.duration > 0 else ""
+                        try:
+                            dur = float(getattr(event, "duration", 0) or 0)
+                        except (TypeError, ValueError):
+                            dur = 0.0
+                        duration_text = "%.1f" % dur if dur > 0 else ""
                         duration_item = QTableWidgetItem(duration_text)
                         duration_item.setTextAlignment(Qt.AlignCenter)
                         table.setItem(row, 3, duration_item)
@@ -930,8 +924,10 @@ class AlarmLogPage(QWidget):
                         status_item.setForeground(Qt.green)
                     table.setItem(row, 3, status_item)
 
-                    peak_rate = getattr(event, 'peak_count_rate', event.count_rate)
-                    peak_rate_item = QTableWidgetItem(f"{peak_rate:.1f}")
+                    peak_rate = getattr(event, 'peak_count_rate', None)
+                    if peak_rate is None:
+                        peak_rate = event.count_rate
+                    peak_rate_item = QTableWidgetItem(format_count_rate(peak_rate))
                     peak_rate_item.setTextAlignment(Qt.AlignCenter)
                     table.setItem(row, 4, peak_rate_item)
 
