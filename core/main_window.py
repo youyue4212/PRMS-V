@@ -2329,30 +2329,53 @@ class MainWindow(QMainWindow, UIBase):
             self._channel_hard_alarm_hit_mask = latched | cur
         return int(getattr(self, "_channel_hard_alarm_hit_mask", 0) or 0)
 
-    def _channel_hard_alarm_log_message(self, packet, mask=None) -> str:
-        from core.translation import _t
+    def _hard_alarm_decision_text(self, packet) -> str:
+        """只取 0x02/0x03 硬报判决；0x01 超阈等退出态不能当历史原因。"""
+        from core.master_summary import (
+            MASTER_DECISION_WINDOW_MATCHED,
+            MASTER_DECISION_JOINT_ALARM,
+        )
+        if packet is None:
+            return ""
+        try:
+            d = int(getattr(packet, "decision_result", 0) or 0)
+        except (TypeError, ValueError):
+            return ""
+        if d not in (MASTER_DECISION_WINDOW_MATCHED, MASTER_DECISION_JOINT_ALARM):
+            return ""
+        lang = "zh"
+        try:
+            from core.translation import TranslationManager
+            lang = TranslationManager().current_lang
+        except Exception:
+            pass
+        try:
+            return packet.decision_text(lang)
+        except Exception:
+            return "0x%02X" % d
+
+    def _channel_hard_alarm_log_message(self, packet, mask=None, latch_decision=False) -> str:
         probes = self._format_hit_probes_for_log(packet, mask=mask)
         if probes:
             self._channel_hard_alarm_probes_text = probes
-        decision = ""
-        if packet is not None:
-            lang = "zh"
-            try:
-                from core.translation import TranslationManager
-                lang = TranslationManager().current_lang
-            except Exception:
-                pass
-            try:
-                decision = packet.decision_text(lang)
-            except Exception:
-                decision = "0x%02X" % int(getattr(packet, "decision_result", 0) or 0)
+        else:
+            probes = str(getattr(self, "_channel_hard_alarm_probes_text", "") or "").strip()
+        if latch_decision:
+            text = self._hard_alarm_decision_text(packet)
+            if text:
+                self._channel_hard_alarm_decision_text = text
+        decision = str(getattr(self, "_channel_hard_alarm_decision_text", "") or "").strip()
+        if not decision:
+            decision = self._hard_alarm_decision_text(packet)
         return "%s | %s" % (probes, decision)
 
     def _sync_channel_hard_alarm_log(self, active: bool, packet=None):
-        """边沿写入通道符合硬报。设备列用升起时锁存的 mask，不用恢复那一包。"""
+        """边沿写入通道符合硬报。设备列与判决文案用升起时锁存值，不用恢复那一包。"""
         prev = bool(getattr(self, "_channel_hard_alarm_active", False))
         mask = self._latch_hard_alarm_hit_mask(bool(active), packet)
-        msg = self._channel_hard_alarm_log_message(packet, mask=mask)
+        msg = self._channel_hard_alarm_log_message(
+            packet, mask=mask, latch_decision=bool(active)
+        )
         if prev == bool(active):
             if active and packet is not None:
                 try:
@@ -2398,6 +2421,7 @@ class MainWindow(QMainWindow, UIBase):
         if not active:
             self._channel_hard_alarm_hit_mask = 0
             self._channel_hard_alarm_probes_text = ""
+            self._channel_hard_alarm_decision_text = ""
         self._refresh_alarm_log_nav_badge(radiation_alarm=bool(active))
 
     def _apply_home_latch_status(self, page, hard_alarm=False, latch_mode=False, offline=False):

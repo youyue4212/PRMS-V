@@ -116,12 +116,24 @@ class AlarmLogger:
         log_folder = home_dir / "Raysen" / "AlarmLogs"
         return log_folder
 
+    def _excel_alarm_type(self, alarm_type: str) -> str:
+        """Excel 给人看；内存里仍用 ChannelMatch / Radiation / MasterFault。"""
+        from core.translation import _t
+        t = str(alarm_type or "")
+        if t == "ChannelMatch":
+            return _t("log_type_channel_match")
+        if t in ("Radiation", "radiation", "Alarm"):
+            return _t("log_type_radiation")
+        if t == "MasterFault":
+            return _t("log_type_system_comm")
+        return t
+
     def _event_to_row(self, event: AlarmEvent) -> dict:
         return {
             'Timestamp': event.timestamp,
             'DateTime': datetime.fromtimestamp(event.timestamp).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3],
             'ClientID': event.client_id,
-            'AlarmType': event.alarm_type,
+            'AlarmType': self._excel_alarm_type(event.alarm_type),
             'AlarmStatus': 'ACTIVE' if event.alarm_status else 'INACTIVE',
             'PeakCountRate': event.peak_count_rate,
             'TriggerCountRate': event.trigger_count_rate,
