@@ -706,6 +706,8 @@ class UIBase():
         if self.master_summary_callback is not None:
             self.master_summary_callback(packet, client_id)
         self._maybe_log_all_probe_cps()
+        if hasattr(self, "_release_probe_radiation_logs_for_master"):
+            self._release_probe_radiation_logs_for_master()
 
     def _apply_cps_plot_labels(self):
         """Apply localized title/axis labels to count-rate plot."""
@@ -2339,9 +2341,14 @@ class UIBase():
                     save_dir,
                     "data_auto_%s_%s.xlsx" % (stem, self._export_client_tag(client_id)),
                 )
-            spec = self.client_segment_spectrum.get(
-                client_id, np.zeros(self.config.adc_channels)
-            )
+            spec = self.client_segment_spectrum.get(client_id)
+            if spec is None:
+                spec_copy = np.zeros(self.config.adc_channels)
+            else:
+                spec_copy = np.array(spec, copy=True)
+                spec[:] = 0
+            ts_copy = list(self.client_archive_time_series.get(client_id, []))
+            self.client_archive_time_series[client_id] = []
             meta = self._export_probe_meta(client_id)
             ident = " ".join(
                 p for p in (meta.get("label"), meta.get("location")) if p
@@ -2349,8 +2356,8 @@ class UIBase():
             jobs.append({
                 "filename": filename,
                 "client_id": client_id,
-                "spectrum": np.array(spec, copy=True),
-                "time_series": list(self.client_archive_time_series.get(client_id, [])),
+                "spectrum": spec_copy,
+                "time_series": ts_copy,
                 "client_info": dict(self.client_data.get(client_id, {}) or {}),
                 "meta": dict(meta),
                 "ident": ident,
@@ -2360,15 +2367,38 @@ class UIBase():
             })
         return jobs
 
+    def _restore_failed_autosave_segments(self, jobs, saved_cids):
+        """写盘失败的路把快照拼回当前缓冲，避免丢掉保存期间新到的谱。"""
+        saved = set(cid for cid in (saved_cids or []) if cid)
+        for job in jobs or []:
+            cid = job.get("client_id")
+            if not cid or cid in saved:
+                continue
+            spec = np.asarray(job.get("spectrum"), dtype=float)
+            ts = list(job.get("time_series") or [])
+            nchan = int(spec.size) if spec is not None and spec.size else int(self.config.adc_channels)
+            self._ensure_autosave_buffers(cid, nchan)
+            cur = self.client_segment_spectrum.get(cid)
+            if spec is not None and spec.size:
+                if cur is None or getattr(cur, "shape", None) != spec.shape:
+                    self.client_segment_spectrum[cid] = np.array(spec, copy=True)
+                else:
+                    self.client_segment_spectrum[cid] = spec + cur
+            if ts:
+                self.client_archive_time_series[cid] = ts + list(
+                    self.client_archive_time_series.get(cid) or []
+                )
+
     def _on_autosave_worker_done(self, saved: int, logs, saved_cids=None):
         self._autosave_running = False
         self._autosave_worker = None
         for msg, level in list(logs or []):
             self.log(msg, level)
+        jobs = getattr(self, "_autosave_snapshot_jobs", None)
+        self._restore_failed_autosave_segments(jobs, saved_cids)
+        self._autosave_snapshot_jobs = None
+        self._last_autosave_client_ids = []
         if int(saved or 0) > 0:
-            cids = list(saved_cids or []) or list(self._last_autosave_client_ids or [])
-            self._clear_autosave_segments(cids)
-            self._last_autosave_client_ids = []
             self.auto_save_counter += int(saved)
             self.last_auto_save_time = time.time()
             self.update_auto_save_counter_label()
@@ -2392,6 +2422,7 @@ class UIBase():
         if not jobs:
             self.log("Auto-save skipped: no pending segment data", "INFO")
             return 0
+        self._autosave_snapshot_jobs = jobs
         self._last_autosave_client_ids = [j.get("client_id") for j in jobs if j.get("client_id")]
 
         dm = getattr(self, "diagnostics_manager", None)
@@ -2447,8 +2478,10 @@ class UIBase():
                         saved_ids.append(cid)
                 except Exception as e:
                     self.log("Auto-save failed for %s: %s" % (job.get("client_id"), e), "ERROR")
+            self._restore_failed_autosave_segments(jobs, saved_ids)
+            self._autosave_snapshot_jobs = None
+            self._last_autosave_client_ids = []
             if saved:
-                self._clear_autosave_segments(saved_ids)
                 self.last_auto_save_time = time.time()
                 self.update_auto_save_counter_label()
             return saved
@@ -3735,12 +3768,31 @@ class UIBase():
     def closeEvent(self, event):
         try:
             if getattr(self, "auto_save_enabled", False):
+                # 先停读再刷盘，避免写盘期间队列里的谱包进不了最后一次保存
+                try:
+                    self.worker.stop_reading()
+                    self._stop_read_timer()
+                except Exception:
+                    pass
+                try:
+                    QApplication.processEvents()
+                except Exception:
+                    pass
                 self._auto_save_all_clients(force=True, blocking=True)
+                try:
+                    QApplication.processEvents()
+                except Exception:
+                    pass
+                if self._clients_with_saveable_archive():
+                    self._auto_save_all_clients(force=True, blocking=True)
         except Exception as e:
             self.log("Final auto-save on close failed: %s" % e, "WARNING")
         self._wait_autosave_worker(timeout=120.0)
-        self.worker.stop_reading()
-        self._stop_read_timer()
+        try:
+            self.worker.stop_reading()
+            self._stop_read_timer()
+        except Exception:
+            pass
         
         # Disconnect based on worker type
         if isinstance(self.worker, SerialPacketWorker):
@@ -4948,8 +5000,8 @@ class UIBase():
             packet = self.client_latest_packets.get(client_id)
             if packet is not None:
                 self.log_alarm_event(packet, client_id, False)
-            else:
-                # 无最近数据包可用时，直接清理状态，至少保证后续报警能被记录
+            # 主控在线时 log 会被 skip，必须清边沿，否则 ACTIVE 卡死
+            if alarm_logger.get_active_alarms().get(logger_client_id, False):
                 alarm_logger.reset_client_state(logger_client_id)
         except Exception as e:
             self.log(f"断线结算报警状态失败: {e}", 'ERROR')

@@ -767,6 +767,11 @@ class AlarmLogPage(QWidget):
 
         try:
             folder = Path(getattr(self.alarm_logger, "log_folder", "") or "")
+            event_folder = Path(getattr(self.alarm_logger, "event_folder", "") or "")
+            if folder.exists() and event_folder.exists():
+                folder = folder.parent
+            elif event_folder.exists() and not folder.exists():
+                folder = event_folder
             if not folder.exists():
                 folder.mkdir(parents=True, exist_ok=True)
             path = str(folder.resolve())

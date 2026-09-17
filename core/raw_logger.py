@@ -17,9 +17,12 @@ class RawLogger:
         os.makedirs(self.folder_path, exist_ok=True)
         self.is_enabled = True
         self.filepath = None
+        self._error_logged = False
 
     def set_enabled(self, stat):
-        self.is_enabled = stat
+        self.is_enabled = bool(stat)
+        if self.is_enabled:
+            self._error_logged = False
 
     def _get_log_filename(self):
         timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -30,6 +33,25 @@ class RawLogger:
     def stop(self):
         self.close()
 
+    def _log_once(self, message):
+        if self._error_logged:
+            return
+        self._error_logged = True
+        if self.log is not None:
+            self.log(message)
+
+    def _disable_on_error(self, exc):
+        """磁盘满/权限等问题：关掉 raw 落盘，不把异常抛回采集循环。"""
+        try:
+            if self.current_file is not None:
+                self.current_file.close()
+        except Exception:
+            pass
+        self.current_file = None
+        self.current_hour_key = None
+        self.is_enabled = False
+        self._log_once("Raw packet logging disabled after I/O error: %s" % exc)
+
     def _rotate_file_if_needed(self):
         hour_key = datetime.now().strftime("%Y%m%d%H")
         need = (
@@ -39,9 +61,14 @@ class RawLogger:
         )
         if not need:
             return
-        if self.current_file:
-            self.current_file.close()
+        if self.current_file is not None:
+            try:
+                self.current_file.close()
+            except Exception:
+                pass
+            self.current_file = None
         self.filepath = self._get_log_filename()
+        # open 成功后才更新 hour/count，失败则保持 need=True，下次再试
         self.current_file = open(self.filepath, "ab")
         self.current_hour_key = hour_key
         self.write_count = 0
@@ -49,19 +76,31 @@ class RawLogger:
             self.log("Logging raw packets to %s" % self.filepath)
 
     def write(self, data: bytes):
-        if self.is_enabled:
+        if not self.is_enabled:
+            return
+        try:
             self._rotate_file_if_needed()
+            if self.current_file is None:
+                return
             self.current_file.write(data)
             self.write_count += 1
+        except OSError as e:
+            self._disable_on_error(e)
 
     def flush(self):
         if self.current_file:
-            self.current_file.flush()
+            try:
+                self.current_file.flush()
+            except OSError as e:
+                self._disable_on_error(e)
 
     def close(self):
         if self.current_file:
             if self.log:
                 self.log("Raw packets has been written to %s" % self.filepath)
-            self.current_file.close()
+            try:
+                self.current_file.close()
+            except OSError:
+                pass
             self.current_file = None
             self.current_hour_key = None

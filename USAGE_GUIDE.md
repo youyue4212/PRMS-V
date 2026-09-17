@@ -1,56 +1,56 @@
-# Ê¹ÓÃÎÄµµ£¨Ubuntu 20.04£©
+# ä½¿ç”¨æ–‡æ¡£ï¼ˆUbuntu 20.04ï¼‰
 
-## 1. ÊÊÓÃ·¶Î§
-- ÊÊÓÃÓÚ Ubuntu 20.04 ¼°ÆäËû´ø systemd/udev µÄ Linux¡£
-- Windows ²»Ö§³Ö±¾Ì××Ô¶¯µ¼³ö·½Ê½¡£
-
----
-
-## 2. Ä¿Â¼ÓëºËĞÄÎÄ¼ş
-- Ö÷³ÌĞòÈë¿Ú£º[main.py](main.py)
-- ÒÀÀµÇåµ¥£º[requirements.txt](requirements.txt)
-- ºËĞÄ´úÂë£º[core/](core/)
-- Êı¾İÄ¿Â¼£º
-  - ±¨¾¯ÈÕÖ¾Ä¬ÈÏÎ»ÖÃ£º`~/Raysen/AlarmLogs`
-  - µ¼³ö»á°üº¬£º³ÌĞò `logs/`¡¢`data/` ÒÔ¼° `~/Raysen`
-  - ¼ÇÂ¼¹æÔò¼û [ALARM_LOG.md](ALARM_LOG.md)£¨TCP+Ö÷¿ØÊ±Ò»´ÎÍ¨µÀÓ²±¨Ò»Ìõ£¬²»ÓëÌ½Í··øÉäÎ»ÖØ¸´£©
+## 1. é€‚ç”¨èŒƒå›´
+- é€‚ç”¨äº Ubuntu 20.04 åŠå…¶ä»–å¸¦ systemd/udev çš„ Linuxã€‚
+- Windows ä¸æ”¯æŒæœ¬å¥—è‡ªåŠ¨å¯¼å‡ºæ–¹å¼ã€‚
 
 ---
 
-## 3. °²×°£¨ÍÆ¼ö·½Ê½£©
-### 3.1 Ò»¼ü°²×°£¨º¬¿ÉÑ¡ USB ×Ô¶¯µ¼³ö£©
+## 2. ç›®å½•ä¸æ ¸å¿ƒæ–‡ä»¶
+- ä¸»ç¨‹åºå…¥å£ï¼š[main.py](main.py)
+- ä¾èµ–æ¸…å•ï¼š[requirements.txt](requirements.txt)
+- æ ¸å¿ƒä»£ç ï¼š[core/](core/)
+- æ•°æ®ç›®å½•ï¼š
+  - æŠ¥è­¦æ—¥å¿—é»˜è®¤ä½ç½®ï¼š`~/Raysen/AlarmLogs`
+  - å¯¼å‡ºä¼šåŒ…å«ï¼šç¨‹åº `logs/`ã€`data/` ä»¥åŠ `~/Raysen`
+  - è®°å½•è§„åˆ™è§ [ALARM_LOG.md](ALARM_LOG.md)ï¼ˆTCP+ä¸»æ§æ—¶ä¸€æ¬¡é€šé“ç¡¬æŠ¥ä¸€æ¡ï¼Œä¸ä¸æ¢å¤´è¾å°„ä½é‡å¤ï¼‰
+
+---
+
+## 3. å®‰è£…ï¼ˆæ¨èæ–¹å¼ï¼‰
+### 3.1 ä¸€é”®å®‰è£…ï¼ˆå«å¯é€‰ USB è‡ªåŠ¨å¯¼å‡ºï¼‰
 ```bash
 bash /home/<user>/daq_tablet/install_spectrometer.sh
 ```
-½Å±¾»áÒıµ¼Íê³É£º
-- ÏµÍ³ÒÀÀµ°²×°
-- Python ĞéÄâ»·¾³
-- ÒÀÀµ°²×°
-- Æô¶¯½Å±¾Óë×ÀÃæ¿ì½İ·½Ê½
-- ¿ÉÑ¡£ºUSB ×Ô¶¯µ¼³ö
+è„šæœ¬ä¼šå¼•å¯¼å®Œæˆï¼š
+- ç³»ç»Ÿä¾èµ–å®‰è£…
+- Python è™šæ‹Ÿç¯å¢ƒ
+- ä¾èµ–å®‰è£…
+- å¯åŠ¨è„šæœ¬ä¸æ¡Œé¢å¿«æ·æ–¹å¼
+- å¯é€‰ï¼šUSB è‡ªåŠ¨å¯¼å‡º
 
-### 3.2 Ö»°²×° USB ×Ô¶¯µ¼³ö
+### 3.2 åªå®‰è£… USB è‡ªåŠ¨å¯¼å‡º
 ```bash
 bash /home/<user>/daq_tablet/setup_usb_autoexport.sh
 ```
 
 ---
 
-## 4. Æô¶¯³ÌĞò
-### 4.1 Ö±½ÓÆô¶¯
+## 4. å¯åŠ¨ç¨‹åº
+### 4.1 ç›´æ¥å¯åŠ¨
 ```bash
 cd /home/<user>/daq_tablet
 source source ~/myenv/bin/activate
 python3 main.py
 ```
 
-### 4.2 Ê¹ÓÃÆô¶¯½Å±¾£¨ÍÆ¼ö£©
+### 4.2 ä½¿ç”¨å¯åŠ¨è„šæœ¬ï¼ˆæ¨èï¼‰
 ```bash
 cd /home/<user>/daq_tablet
 ./start_spectrometer_absolute.sh
 ```
 
-### 4.3 systemd ×ÔÆô£¨¿ÉÑ¡£©
+### 4.3 systemd è‡ªå¯ï¼ˆå¯é€‰ï¼‰
 ```bash
 sudo cp /home/<user>/daq_tablet/spectrometer.service /etc/systemd/system/
 sudo systemctl daemon-reload
@@ -60,18 +60,18 @@ sudo systemctl start spectrometer.service
 
 ---
 
-## 5. USB ×Ô¶¯µ¼³ö
-### 5.1 ¹¦ÄÜËµÃ÷
-²åÈë U ÅÌºó×Ô¶¯µ¼³öµ½¸ùÄ¿Â¼£¬Éú³É£º
+## 5. USB è‡ªåŠ¨å¯¼å‡º
+### 5.1 åŠŸèƒ½è¯´æ˜
+æ’å…¥ U ç›˜åè‡ªåŠ¨å¯¼å‡ºåˆ°æ ¹ç›®å½•ï¼Œç”Ÿæˆï¼š
 - `EXPORT_DONE_YYYYMMDD_HHMMSS.txt`
 - `spectrometer_data_YYYYMMDD_HHMMSS/`
 
-### 5.2 Ïà¹ØÎÄ¼ş
-- µ¼³ö½Å±¾£º[export_to_usb.sh](export_to_usb.sh)
-- wrapper£º[spectrometer-usb-export-wrapper.sh](spectrometer-usb-export-wrapper.sh)
-- udev ¹æÔò£º[99-usb-export.rules](99-usb-export.rules)
+### 5.2 ç›¸å…³æ–‡ä»¶
+- å¯¼å‡ºè„šæœ¬ï¼š[export_to_usb.sh](export_to_usb.sh)
+- wrapperï¼š[spectrometer-usb-export-wrapper.sh](spectrometer-usb-export-wrapper.sh)
+- udev è§„åˆ™ï¼š[99-usb-export.rules](99-usb-export.rules)
 
-### 5.3 ÊÖ¶¯´¥·¢²âÊÔ
+### 5.3 æ‰‹åŠ¨è§¦å‘æµ‹è¯•
 ```bash
 sudo systemctl start spectrometer-usb-export@sda1.service
 sudo systemctl status spectrometer-usb-export@sda1.service --no-pager -l
@@ -80,15 +80,15 @@ sudo journalctl -u spectrometer-usb-export@sda1.service -n 80 --no-pager
 
 
 
-## 6. ³£¼ûÎÊÌâ
-### 6.1 Windows ¿´²»µ½µ¼³öÎÄ¼ş
-¿ÉÄÜÔ­Òò£º
-- µ¼³öÊ±¼ä½Ï³¤£¨1¨C2 ·ÖÖÓÉõÖÁ¸ü¾Ã£©£¬¹ıÔç°Î³ö¡£
-- Windows »º´æÎ´Ë¢ĞÂ£¬ÖØĞÂ²åÈë²¢µÈ´ı¡£
-- U ÅÌÎÄ¼şÏµÍ³´íÎó£¬½¨ÒéÔÚ Windows ÔËĞĞ´ÅÅÌ¼ì²é¡£
+## 6. å¸¸è§é—®é¢˜
+### 6.1 Windows çœ‹ä¸åˆ°å¯¼å‡ºæ–‡ä»¶
+å¯èƒ½åŸå› ï¼š
+- å¯¼å‡ºæ—¶é—´è¾ƒé•¿ï¼ˆ1â€“2 åˆ†é’Ÿç”šè‡³æ›´ä¹…ï¼‰ï¼Œè¿‡æ—©æ‹”å‡ºã€‚
+- Windows ç¼“å­˜æœªåˆ·æ–°ï¼Œé‡æ–°æ’å…¥å¹¶ç­‰å¾…ã€‚
+- U ç›˜æ–‡ä»¶ç³»ç»Ÿé”™è¯¯ï¼Œå»ºè®®åœ¨ Windows è¿è¡Œç£ç›˜æ£€æŸ¥ã€‚
 
-### 6.2 ×Ô¶¯µ¼³öÎ´´¥·¢
-¼ì²éÈÕÖ¾£º
+### 6.2 è‡ªåŠ¨å¯¼å‡ºæœªè§¦å‘
+æ£€æŸ¥æ—¥å¿—ï¼š
 ```bash
 ls -ltr /tmp/usb_export_*.log /tmp/usb_export_wrapper_*.log
 sudo journalctl -u 'spectrometer-usb-export@*.service' -n 100 --no-pager
@@ -96,19 +96,19 @@ sudo journalctl -u 'spectrometer-usb-export@*.service' -n 100 --no-pager
 
 ---
 
-## 7. ĞèÒª±£ÁôµÄ¹Ø¼üÎÄ¼şÇåµ¥
-**±ØĞë**
+## 7. éœ€è¦ä¿ç•™çš„å…³é”®æ–‡ä»¶æ¸…å•
+**å¿…é¡»**
 - [main.py](main.py)
 - [core/](core/)
 - [requirements.txt](requirements.txt)
 
-**USB ×Ô¶¯µ¼³ö£¨¿ÉÑ¡£©**
+**USB è‡ªåŠ¨å¯¼å‡ºï¼ˆå¯é€‰ï¼‰**
 - [export_to_usb.sh](export_to_usb.sh)
 - [spectrometer-usb-export-wrapper.sh](spectrometer-usb-export-wrapper.sh)
 - [99-usb-export.rules](99-usb-export.rules)
 
 ---
 
-## 8. ±¸×¢
-- Èç¹ûÄãÔÚÆäËû Linux ·¢ĞĞ°æ²¿Êğ£¬ĞèÒª±£Ö¤ systemd + udev ¿ÉÓÃ¡£
-- ÈôÒª¸ü¼ò»¯²¿ÊğÁ÷³Ì£¬¿É½« USB ×Ô¶¯µ¼³öºÏ²¢½ø°²×°½Å±¾£¨ÒÑÍê³É£©¡£
+## 8. å¤‡æ³¨
+- å¦‚æœä½ åœ¨å…¶ä»– Linux å‘è¡Œç‰ˆéƒ¨ç½²ï¼Œéœ€è¦ä¿è¯ systemd + udev å¯ç”¨ã€‚
+- è‹¥è¦æ›´ç®€åŒ–éƒ¨ç½²æµç¨‹ï¼Œå¯å°† USB è‡ªåŠ¨å¯¼å‡ºåˆå¹¶è¿›å®‰è£…è„šæœ¬ï¼ˆå·²å®Œæˆï¼‰ã€‚

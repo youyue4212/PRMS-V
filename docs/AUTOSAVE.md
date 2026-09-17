@@ -1,86 +1,88 @@
-# �Զ�������鵵���˵��
+# 自动保存与归档间隔说明
 
-## �ֶι鵵����ǰʵ�֣�
+## 分段归档（当前实现）
 
-- **��������**���ڴ���ֻ����Լ **15 ����** ʱ��1/5/15 ���Ӵ�����
-- **�Զ�����**��д����**�ϴ��Զ���������**��ʱ�� + **������������**���ļ�֮�䲻�ظ���
-- **�ֶ�����**����Ϊ��ǰ�����õ��ۼ����� + ��� 15 ����ʱ�������Ա��������ǰ��һ�£���
+- **界面曲线**：内存仍只保留约 **15 分钟** 时序（1/5/15 分钟窗）。
+- **自动保存**：写入自**上次自动保存以来**的时序 + **本段增量能谱**，文件之间不重复。
+- **手动保存**：仍为当前界面用的累计能谱 + 最近 15 分钟时序（与操作员「导出当前」一致）。
 
-## ��� 5 ���� vs 1 Сʱ
+## 间隔 5 分钟 vs 1 小时
 
-| ��� | ���� |
+| 间隔 | 适用 |
 | ------ | ------ |
-| **1 Сʱ��Ĭ�ϣ�** | ����ֵ�ء����ļ�����Сʱ׷�� |
-| **15��30 ����** | ���У�����δ���̴��ڸ��� |
-| **5 ����** | ���¶��̡���δ�����ֶι鵵ʱ |
+| **1 小时（默认）** | 长期值守、少文件、按小时追查 |
+| **15～30 分钟** | 折中，崩溃未落盘窗口更短 |
+| **5 分钟** | 极怕丢盘、尚未依赖分段归档时 |
 
-��**�ɰ�**������ 15 ���ӿ����ظ�д�̣��£��Ѽ������ 3600 **����**�õ�����һСʱʱ��ֻ��õ�ÿ�ļ�Լ 15 �������м��пն���  
-**�ֶι鵵���ú�**��1 Сʱ����ű�ʾ��ԼһСʱһ����������������
+在**旧版**（整份 15 分钟快照重复写盘）下，把间隔调到 3600 **不会**得到完整一小时时序，只会得到每文件约 15 分钟且中间有空洞。  
+**分段归档启用后**，1 小时间隔才表示「约一小时一卷、卷内连续」。
 
-## ��֤����ѡ��
+## 验证（可选）
 
-1. ���� �� �Զ���������Ϊ **3600** �롣  
-2. �ɼ� ��1 Сʱ��  
-3. �� `~/Raysen/AutoSave/data_auto_*.xlsx`��Windows��`%USERPROFILE%\Raysen\AutoSave`����  
-4. **TimeSeries** ʱ����Ӧ�ӽ����μ�������ǹ̶� 15 ���ӣ���  
-5. �����ļ�ʱ���Ӧ��β��ӣ������� 45 ���Ӽ��ն���
+1. 设置 → 自动保存间隔设为 **3600** 秒。  
+2. 采集 ≥1 小时。  
+3. 打开 `~/Raysen/AutoSave/data_auto_*.xlsx`（Windows：`%USERPROFILE%\Raysen\AutoSave`）。  
+4. **TimeSeries** 时间跨度应接近本段间隔（而非固定 15 分钟）。  
+5. 相邻文件时间戳应首尾相接，无明显 45 分钟级空洞。
 
-## ��ʷ��������
+## 历史数据清理
 
-���������ڼ�ÿ�챾��ʱ�� **0 ��**ִ��һ�� **Python ��������**��Win/Linux ��ͬ���򣩡�  
-Linux ���ػ��ɶ���ʹ�� [`cleanup_raysen_data.sh`](../cleanup_raysen_data.sh) �� 0 �� cron ���ա�
+程序运行期间每天本地时间 **0 点**执行一次 **Python 留存清理**（Win/Linux 相同规则）。  
+Linux 工控机可额外使用 [`cleanup_raysen_data.sh`](../cleanup_raysen_data.sh) 作 0 点 cron 保险。
 
-�������������̿ռ��Զ����㣬ͬʱ�����аٷֱȺ�ʣ�� GB��
+保留天数按磁盘空间自动计算，同时看空闲百分比和剩余 GB：
 
-- ���� �� 50% ��ʣ�� �� 200GB������ 180 ��
-- ���� �� 35% ��ʣ�� �� 100GB������ 120 ��
-- ���� �� 30%������ 90 ��
-- ���� �� 15%������ 60 ��
-- ���� < 15%������ 30 ��
+- 空闲 ≥ 50% 且剩余 ≥ 200GB：保留 180 天
+- 空闲 ≥ 35% 且剩余 ≥ 100GB：保留 120 天
+- 空闲 ≥ 30%：保留 90 天
+- 空闲 ≥ 15%：保留 60 天
+- 空闲 < 15%：保留 30 天
 
-## �ⲿ�鵵����Ƽ�¼
+## 外部归档与审计记录
 
-ÿ���Զ������ļ�д��󣬳������� **SHA-256** ��׷��һ��������Ƽ�¼��
+每个自动保存文件写完后，程序会计算 **SHA-256** 并追加一条本地审计记录：
 
 - `~/Raysen/archive_manifest.jsonl`
 
-Ĭ��ֻд���� manifest�������ⲿĿ¼���ơ��ֳ���Ҫ NAS/������/����Ŀ¼ʱ�������ã�
+默认只写本地 manifest，不向外部目录复制。现场需要 NAS/共享盘/挂载目录时，可配置：
 
-- �������� `RAYSEN_ARCHIVE_ENABLED=1`
-- �������� `RAYSEN_ARCHIVE_DIR=/path/to/archive`
-- ��ѡ��`RAYSEN_SITE_ID`��`RAYSEN_MACHINE_ID`
+- 环境变量 `RAYSEN_ARCHIVE_ENABLED=1`
+- 环境变量 `RAYSEN_ARCHIVE_DIR=/path/to/archive`
+- 可选：`RAYSEN_SITE_ID`、`RAYSEN_MACHINE_ID`
 
-Ҳ��ͨ�� Qt `QSettings` д��ͬ�����ü���
+也可通过 Qt `QSettings` 写入同名配置键：
 
 - `ARCHIVE_ENABLED`
 - `ARCHIVE_PATH`
 - `ARCHIVE_SITE_ID`
 - `ARCHIVE_MACHINE_ID`
 
-�����ⲿ�鵵���ļ��Ḵ�Ƶ���
+启用外部归档后，文件会复制到：
 
 - `<ARCHIVE_PATH>/AutoSave/YYYY/MM/DD/<filename>`
+- 报警日切后：`<ARCHIVE_PATH>/AlarmLogs/YYYY/MM/DD/alarm_log_*.xlsx`
+- 通信日切后：`<ARCHIVE_PATH>/EventLogs/YYYY/MM/DD/event_log_*.xlsx`
 
-���ƺ�����¼��� hash У�顣�鵵ʧ��ֻд WARNING �� manifest����Ӱ�챾���Զ�����ɹ���Ҳ�����������ɼ��̡߳�
+自动保存的审计格式不变（仍写 `~/Raysen/archive_manifest.jsonl`）。报警/通信在**当天文件写完并日切**时补一条同样格式的记录；跨日关机后再开机也会把磁盘上已过期的表补归档。同一文件同一 hash 不重复记账。正在写的当日文件不反复归档，避免 hash 变来变去。归档失败只写 WARNING，不影响本地 Excel，也不阻塞采集。
 
-## �ⲿ�鵵���ò����ֲ�
+## 外部归档配置操作手册
 
-### Linux ���ػ�
+### Linux 工控机
 
-��ǰ Linux �������ű��ǣ�
+当前 Linux 主启动脚本是：
 
 - `start_spectrometer_absolute.sh`
 
-������������������ `spectrometer.service` ���ն����������ű������Ҫͳһ�����ⲿ�鵵�������޸�����
+桌面启动、自启动和 `spectrometer.service` 最终都会调用这个脚本。因此要统一配置外部归档，优先修改它。
 
-1. �򿪽ű���
+1. 打开脚本：
 
    ```bash
    cd /home/raysen/user/daq_tablet
    nano start_spectrometer_absolute.sh
    ```
 
-2. �ҵ����л��������������磺
+2. 找到现有环境变量区域，例如：
 
    ```bash
    export USE_SOFTWARE_KEYBOARD=1
@@ -88,7 +90,7 @@ Linux ���ػ��ɶ���ʹ�� [`cleanup_raysen_data.sh`](../cleanup_raysen_data.sh) �� 
    export ALLOW_VIEWER_SETTINGS=0
    ```
 
-3. ������׷���ⲿ�鵵���ã�
+3. 在下面追加外部归档配置：
 
    ```bash
    export RAYSEN_ARCHIVE_ENABLED=1
@@ -97,15 +99,15 @@ Linux ���ػ��ɶ���ʹ�� [`cleanup_raysen_data.sh`](../cleanup_raysen_data.sh) �� 
    export RAYSEN_MACHINE_ID=gate-01
    ```
 
-4. ����������������ʹ�� systemd��
+4. 保存后重启程序。如果使用 systemd：
 
    ```bash
    sudo systemctl restart spectrometer.service
    ```
 
-   ���ʹ���������������˳���������´�����ͼ��������������ϵͳ��
+   如果使用桌面自启动，退出程序后重新从桌面图标启动，或重启系统。
 
-5. ��֤����������
+5. 验证环境变量：
 
    ```bash
    cd /home/raysen/user/daq_tablet
@@ -113,30 +115,30 @@ Linux ���ػ��ɶ���ʹ�� [`cleanup_raysen_data.sh`](../cleanup_raysen_data.sh) �� 
    grep '^export RAYSEN_.*ID' start_spectrometer_absolute.sh
    ```
 
-6. ��֤�鵵�����
+6. 验证归档结果：
 
    ```bash
    ls -la /mnt/raysen_archive/AutoSave/
    tail -n 5 ~/Raysen/archive_manifest.jsonl
    ```
 
-### Windows ����
+### Windows 电脑
 
-Windows ֱ������ `python main.py` ʱͨ��û�������ű����Ƽ���ϵͳ����������
+Windows 直接运行 `python main.py` 时通常没有启动脚本，推荐用系统环境变量。
 
-1. ��׼���ⲿĿ¼�����������̣�
+1. 先准备外部目录，例如网络盘：
 
    ```text
    Z:\RaysenArchive
    ```
 
-   �� UNC ����·����
+   或 UNC 共享路径：
 
    ```text
    \\server\share\RaysenArchive
    ```
 
-2. �� PowerShell��д�뻷��������
+2. 打开 PowerShell，写入环境变量：
 
    ```powershell
    setx RAYSEN_ARCHIVE_ENABLED "1"
@@ -145,15 +147,15 @@ Windows ֱ������ `python main.py` ʱͨ��û�������ű����Ƽ���ϵͳ����������
    setx RAYSEN_MACHINE_ID "pc-01"
    ```
 
-   ���ʹ�� UNC ·����
+   如果使用 UNC 路径：
 
    ```powershell
    setx RAYSEN_ARCHIVE_DIR "\\server\share\RaysenArchive"
    ```
 
-3. �رյ�ǰ PowerShell��Cursor �ͳ��������´򿪡�`setx` ֻ���������Ľ�����Ч��
+3. 关闭当前 PowerShell、Cursor 和程序，再重新打开。`setx` 只对新启动的进程生效。
 
-4. ��֤����������
+4. 验证环境变量：
 
    ```powershell
    echo $env:RAYSEN_ARCHIVE_ENABLED
@@ -162,16 +164,16 @@ Windows ֱ������ `python main.py` ʱͨ��û�������ű����Ƽ���ϵͳ����������
    echo $env:RAYSEN_MACHINE_ID
    ```
 
-5. ��֤�鵵�����
+5. 验证归档结果：
 
    ```powershell
    dir "Z:\RaysenArchive\AutoSave"
    Get-Content "$env:USERPROFILE\Raysen\archive_manifest.jsonl" -Tail 5
    ```
 
-### ע������
+### 注意事项
 
-- �ⲿĿ¼������ǰ���ػ�ɷ��ʣ����򲻻��Զ���¼ NAS��
-- �ⲿ�鵵ʧ�ܲ���Ӱ�챾���Զ����棬��������־�� manifest �м�¼ʧ�ܡ�
-- �����Զ��������� `~/Raysen/AutoSave` �� `%USERPROFILE%\Raysen\AutoSave`��
-- ��ʽ�˵�/������Ŀ������ⲿĿ¼������Ȩ�޿��ơ����ݡ����ջ� WORM �����Ĵ洢�ϡ�
+- 外部目录必须提前挂载或可访问；程序不会自动登录 NAS。
+- 外部归档失败不会影响本地自动保存，但会在日志和 manifest 中记录失败。
+- 本地自动保存仍在 `~/Raysen/AutoSave` 或 `%USERPROFILE%\Raysen\AutoSave`。
+- 正式核电/海关项目建议把外部目录放在有权限控制、备份、快照或 WORM 能力的存储上。

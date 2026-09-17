@@ -14,6 +14,7 @@ from typing import Dict, List, Optional, Tuple
 _ALLOWED_GLOBS = (
     "data_auto_*.xlsx",
     "alarm_log_*.xlsx",
+    "event_log_*.xlsx",
     "gspc_*.bin",
     "daq_log_*.txt",
 )
@@ -115,7 +116,7 @@ def run_retention_cleanup(
     extra_raw_dir: Optional[Path] = None,
     dry_run: bool = False,
 ) -> Dict[str, object]:
-    """Delete old AutoSave / AlarmLogs / raw logs under Raysen. Returns summary dict."""
+    """Delete old AutoSave / AlarmLogs / EventLogs / raw logs under Raysen. Returns summary dict."""
     base = Path(root) if root else raysen_root()
     keep = keep_days_from_disk(base if base.exists() else Path.home())
     keep = max(_MIN_KEEP_DAYS, int(keep))
@@ -123,7 +124,7 @@ def run_retention_cleanup(
     cutoff = now - keep * 86400
     total = 0
     log_lines: List[str] = []
-    for sub in (base / "AutoSave", base / "AlarmLogs", base):
+    for sub in (base / "AutoSave", base / "AlarmLogs", base / "EventLogs", base):
         n, lines = _scan_dir(sub, cutoff, now, dry_run)
         total += n
         log_lines.extend(lines)

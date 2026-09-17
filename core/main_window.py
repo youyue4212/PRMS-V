@@ -1509,6 +1509,63 @@ class MainWindow(QMainWindow, UIBase):
         except Exception:
             pass
 
+    def _reset_fault_log_edges_on_start(self):
+        """开采集会清空诊断表；边沿快照也要清，否则会把「表被清空」误记成链路已恢复。"""
+        self._prev_master_fault_codes = set()
+        self._prev_probe_comm_keys = set()
+        try:
+            from core.alarm_logger import get_alarm_logger, is_system_event_client
+            logger = get_alarm_logger()
+            for cid, active in list(logger.get_active_alarms().items()):
+                if not active:
+                    continue
+                if is_system_event_client(cid):
+                    logger.reset_client_state(cid)
+        except Exception:
+            pass
+
+    def _settle_channel_hard_alarm_on_stop(self):
+        """停采后不再有 L2，须结束通道硬报边沿，避免 KPI/角标长期假活动。"""
+        if not bool(getattr(self, "_channel_hard_alarm_active", False)):
+            return
+        packet = getattr(self, "latest_master_summary", None)
+        try:
+            self._sync_channel_hard_alarm_log(False, packet)
+        except Exception as e:
+            self.log("Settle channel hard-alarm on stop failed: %s" % e, "WARNING")
+            try:
+                from core.alarm_logger import get_alarm_logger
+                get_alarm_logger().reset_client_state("master_channel")
+            except Exception:
+                pass
+            self._channel_hard_alarm_active = False
+
+    def _release_probe_radiation_logs_for_master(self):
+        """主控接管后不再写探头辐射位；清掉接管前卡住的探头 ACTIVE。"""
+        try:
+            if not self._skip_probe_radiation_log("probe"):
+                return
+            from core.alarm_logger import get_alarm_logger, is_system_event_client
+            logger = get_alarm_logger()
+            for cid, active in list(logger.get_active_alarms().items()):
+                if not active:
+                    continue
+                if is_system_event_client(cid) or cid == "master_channel":
+                    continue
+                logger.reset_client_state(cid)
+        except Exception:
+            pass
+
+    def start_acquisition(self, from_auto=False):
+        ok = super().start_acquisition(from_auto=from_auto)
+        if ok:
+            self._reset_fault_log_edges_on_start()
+        return ok
+
+    def stop_acquisition(self, hold=False, clear_memory=None):
+        self._settle_channel_hard_alarm_on_stop()
+        return super().stop_acquisition(hold=hold, clear_memory=clear_memory)
+
     def _tcp_client_count(self) -> int:
         w = getattr(self, "worker", None)
         if w is None:
@@ -1529,10 +1586,22 @@ class MainWindow(QMainWindow, UIBase):
         last_sane = float(getattr(self, "_last_sane_master_at", 0) or 0)
         latest = getattr(self, "latest_master_summary", None)
         never_seen = last_any <= 0
-        link_timeout = (not never_seen) and ((now - last_any) > dm.COMM_TIMEOUT_SEC)
+        master_timeout_sec = float(
+            getattr(dm, "MASTER_COMM_TIMEOUT_SEC", None) or dm.COMM_TIMEOUT_SEC
+        )
+        master_debounce_sec = float(
+            getattr(dm, "MASTER_COMM_TIMEOUT_DEBOUNCE_SEC", None)
+            or dm.COMM_TIMEOUT_DEBOUNCE_SEC
+        )
+        master_startup_grace_sec = float(
+            getattr(dm, "MASTER_COMM_STARTUP_GRACE_SEC", 20.0) or 0.0
+        )
+        link_timeout = (not never_seen) and ((now - last_any) > master_timeout_sec)
         timeout_pending_since = float(getattr(self, "_master_timeout_pending_since", 0.0) or 0.0)
         # 仅监听、零客户端：不算 M101（避免开软件即「主控无数据」）
         expect_master = self._tcp_client_count() > 0 or bool(getattr(self, "master_client_id", None))
+        # 开采集初期（防火墙确认等）不报 M102，避免首连空窗误报
+        master_startup_grace = startup_age < master_startup_grace_sec
 
         # M101/M102 互斥：从未收到过 → 只 M101；曾经有过再超时 → 只 M102
         if never_seen and expect_master and startup_age > dm.NO_DATA_STARTUP_SEC:
@@ -1540,11 +1609,15 @@ class MainWindow(QMainWindow, UIBase):
         else:
             dm.remove_fault(_MASTER_FAULT_CLIENT_ID, FaultCode.M101)
 
-        if link_timeout and not dm.comm_timeouts_suppressed(now):
+        if (
+            link_timeout
+            and not master_startup_grace
+            and not dm.comm_timeouts_suppressed(now)
+        ):
             if timeout_pending_since <= 0:
                 self._master_timeout_pending_since = now
                 dm.remove_fault(_MASTER_FAULT_CLIENT_ID, FaultCode.M102)
-            elif (now - timeout_pending_since) >= dm.COMM_TIMEOUT_DEBOUNCE_SEC:
+            elif (now - timeout_pending_since) >= master_debounce_sec:
                 dm.add_fault(_MASTER_FAULT_CLIENT_ID, FaultCode.M102)
             else:
                 dm.remove_fault(_MASTER_FAULT_CLIENT_ID, FaultCode.M102)
@@ -1552,8 +1625,8 @@ class MainWindow(QMainWindow, UIBase):
             self._master_timeout_pending_since = 0.0
             dm.remove_fault(_MASTER_FAULT_CLIENT_ID, FaultCode.M102)
 
-        if last_any > 0 and (now - last_any) <= dm.COMM_TIMEOUT_SEC:
-            if last_sane <= 0 or (now - last_sane) > dm.COMM_TIMEOUT_SEC:
+        if last_any > 0 and (now - last_any) <= master_timeout_sec:
+            if last_sane <= 0 or (now - last_sane) > master_timeout_sec:
                 dm.add_fault(_MASTER_FAULT_CLIENT_ID, FaultCode.M103)
             else:
                 dm.remove_fault(_MASTER_FAULT_CLIENT_ID, FaultCode.M103)
@@ -4650,7 +4723,9 @@ class MainWindow(QMainWindow, UIBase):
         if timer is not None:
             timer.stop()
 
-        # 刷盘并停止报警 Excel 后台写线程，避免退出丢末尾事件
+        # 先停读/落盘（父类），再停报警写线程，避免关窗过程中的末包进不了 Excel
+        super().closeEvent(event)
+
         try:
             from core.alarm_logger import get_alarm_logger
             get_alarm_logger().shutdown(timeout=10.0)
@@ -4662,9 +4737,6 @@ class MainWindow(QMainWindow, UIBase):
         if not hasattr(self, '_logout_called') or not self._logout_called:
             # 用户登出
             self.user_manager.logout()
-        
-        # 调用父类方法
-        super().closeEvent(event)
     
     def eventFilter(self, obj, event):
         """事件过滤器：超时计时 + 左上角隐藏入口长按（兼容树莓派触摸）。"""

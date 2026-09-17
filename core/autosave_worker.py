@@ -60,7 +60,7 @@ def write_autosave_job(job: Dict[str, Any]) -> Tuple[int, float, int]:
     else:
         df_time_series = pd.DataFrame(columns=ts_cols)
 
-    spec_kind = job.get("spectrum_kind") or "cumulative"
+    spec_kind = job.get("spectrum_kind") or "segment"
     df_client_info = pd.DataFrame({
         "Probe": [probe],
         "Location": [loc or "--"],

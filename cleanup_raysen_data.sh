@@ -1,5 +1,5 @@
 #!/bin/bash
-# 每天扫 ~/Raysen 下自动保存/报警/原始包/运行日志。
+# 每天扫 ~/Raysen 下自动保存/报警/通信事件/原始包/运行日志。
 # 以 mtime 过期为主，文件名里的 YYYYMMDD 仅作核对；正在写的 .writing. 和近期文件不删。
 #
 # 保留天数随磁盘余量：
@@ -112,6 +112,7 @@ scan_dir() {
     local f name ymd epoch mtime diff
     find "$dir" -maxdepth 2 -type f \
         \( -name 'data_auto_*.xlsx' -o -name 'alarm_log_*.xlsx' \
+           -o -name 'event_log_*.xlsx' \
            -o -name 'gspc_*.bin' -o -name 'daq_log_*.txt' \) \
         ! -name '*.writing.*' -print0 2>/dev/null |
     while IFS= read -r -d '' f; do
@@ -160,6 +161,7 @@ mkdir -p "$ROOT"
 log "cleanup start root=$ROOT dry_run=$DRY_RUN"
 scan_dir "$ROOT/AutoSave"
 scan_dir "$ROOT/AlarmLogs"
+scan_dir "$ROOT/EventLogs"
 scan_dir "$ROOT"
 # 原始包若选在 Raysen 外，可 export RAW_LOG_DIR=/path
 if [ -n "${RAW_LOG_DIR:-}" ]; then

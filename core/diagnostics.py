@@ -66,6 +66,11 @@ class DiagnosticsManager:
     COMM_TIMEOUT_SEC = 5.0
     # 去抖：超过超时阈值后还需再持续一小段时间，避免 1 次调度抖动就报码
     COMM_TIMEOUT_DEBOUNCE_SEC = 1.2
+    # 主控 L2 心跳（M102/M103）：比探头更宽，挡住 K2/TCP 偶发数秒空窗误报
+    MASTER_COMM_TIMEOUT_SEC = 10.0
+    MASTER_COMM_TIMEOUT_DEBOUNCE_SEC = 2.0
+    # 开采集后暂缓 M102：给防火墙弹窗确认、首连建立留时间
+    MASTER_COMM_STARTUP_GRACE_SEC = 20.0
     # 开机后长时间完全无数据报 E101
     NO_DATA_STARTUP_SEC = 8.0
 
