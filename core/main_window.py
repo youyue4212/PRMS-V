@@ -651,30 +651,45 @@ class MainWindow(QMainWindow, UIBase):
         last_ip = str(getattr(self, "_last_master_ip", "") or "")
         return bool(ip and last_ip and ip == last_ip)
 
+    def _master_drop_client_id(self, worker, meta: dict) -> str:
+        """主控断开单独保存。不跟 2.5 秒链路窗口，也不跟探头的最后一条。"""
+        drop_kinds = ("socket_error", "peer_closed", "client_removed")
+        saved = dict(getattr(worker, "_last_master_drop", None) or {})
+        cid = str(saved.get("client_id") or "")
+        if saved.get("kind") in drop_kinds and cid and self._client_is_master_endpoint(cid):
+            try:
+                at = float(saved.get("at", 0.0) or 0.0)
+            except (TypeError, ValueError):
+                at = 0.0
+            last_rx = float(getattr(worker, "_last_master_rx_at", 0.0) or 0.0)
+            if last_rx <= 0:
+                last_rx = float(getattr(self, "_last_any_master_at", 0) or 0)
+            now = time.time()
+            # 断开早于最后一帧 L2：中间恢复过，这次只是停发。
+            # 超时快照里可能还留着上一次的主控 id，不能再拿来用。
+            if at > 0 and at < last_rx:
+                return ""
+            if at > 0 and (last_rx <= 0 or at >= last_rx) and at <= now + 1.0:
+                return cid
+        cited = str((meta or {}).get("master_drop_client_id") or "")
+        if cited and self._client_is_master_endpoint(cited):
+            return cited
+        return ""
+
     def _describe_last_tcp_timeout(self) -> str:
         """M102 附言只引用主控 socket。探头断连留在 E101/E102，不写进主控故障。"""
         worker = getattr(self, "worker", None)
         meta = dict(getattr(worker, "last_timeout_meta", None) or {})
-        if not meta and worker is not None:
-            recent = dict(getattr(worker, "_last_link_event", None) or {})
-            cid = str(recent.get("client_id") or "")
-            if (
-                recent.get("kind") in ("socket_error", "peer_closed", "client_removed")
-                and self._client_is_master_endpoint(cid)
-            ):
-                return "链路断开/Socket异常：%s" % cid
-            return ""
+        master_cid = self._master_drop_client_id(worker, meta)
         if not meta:
-            return ""
-        recent_cid = str(meta.get("recent_client_id") or "")
-        recent_is_master = self._client_is_master_endpoint(recent_cid)
+            return ("链路断开/Socket异常：%s" % master_cid) if master_cid else ""
         kind = str(meta.get("kind") or "")
-        if kind == "link_drop" and recent_is_master:
+        if master_cid:
             prefix = "链路断开/Socket异常后超时"
-        elif kind == "rx_stall":
-            prefix = "连接未断开，仅接收空窗超时"
+        elif kind == "link_drop":
+            prefix = "主控 L2 空窗（未记录到主控 socket 断开）"
         else:
-            prefix = "通信超时"
+            prefix = "连接未断开，仅接收空窗超时"
         extras = []
         try:
             age = float(meta.get("age_sec", 0.0) or 0.0)
@@ -688,12 +703,8 @@ class MainWindow(QMainWindow, UIBase):
                 extras.append("在线连接%d" % clients)
         except (TypeError, ValueError):
             pass
-        recent_kind = str(meta.get("recent_kind") or "")
-        if recent_kind and recent_is_master:
-            tail = recent_kind
-            if recent_cid:
-                tail += ":" + recent_cid
-            extras.append(tail)
+        if master_cid:
+            extras.append("主控:" + master_cid)
         return prefix + ("（%s）" % "，".join(extras) if extras else "")
 
     def _product_id_is_unique(self, product_id: int, current_client_id: str = None) -> bool:
@@ -2099,12 +2110,11 @@ class MainWindow(QMainWindow, UIBase):
         r1 = int(bool(display_pkt.relay1))
         r2 = int(bool(display_pkt.relay2))
         page.master_relay_label.setText(
-            "%s: 0=%s 1=%s 2=%s"
-            % (
-                _t("card_status_relay"),
-                _t("master_relay_on") if r0 else _t("master_relay_off"),
-                _t("master_relay_on") if r1 else _t("master_relay_off"),
-                _t("master_relay_on") if r2 else _t("master_relay_off"),
+            _t(
+                "master_relay_home_line",
+                r0=_t("master_relay_on") if r0 else _t("master_relay_off"),
+                r1=_t("master_relay_on") if r1 else _t("master_relay_off"),
+                r2=_t("master_relay_on") if r2 else _t("master_relay_off"),
             )
         )
         self._sync_master_relay_ui_from_l2(display_pkt)
@@ -3242,7 +3252,7 @@ class MainWindow(QMainWindow, UIBase):
         show_warn(self, _t("msg_channel_reset_title"), _t("msg_channel_reset_timeout"))
 
     def _channel_reset_l2_timeout_check(self):
-        """CmdFeedback 成功后若长时间等不到 L2=0x05，释放复位按钮避免卡死。"""
+        """CmdFeedback 成功后若长时间等不到 L2 消硬报，释放复位按钮避免卡死。"""
         import time as _time
         from core.translation import _t
 
@@ -3303,7 +3313,7 @@ class MainWindow(QMainWindow, UIBase):
             show_warn(self, _t("msg_channel_reset_title"), _t("msg_channel_reset_cmd_fail"))
             return
 
-        # 成功：value 期望 0xA55A；硬报 UI 等下一拍 L2=0x05 再清
+        # 成功：value 期望 0xA55A；硬报 UI 等下一拍 L2 离开 0x02/0x03（0x05 或故障时 0xFF）
         val = int(packet.value) & 0xFFFF
         self._pending_channel_reset_at = 0.0
         self._awaiting_l2_acked = True
@@ -4218,7 +4228,7 @@ class MainWindow(QMainWindow, UIBase):
         if hasattr(self, 'master_relay0_checkbox'):
             self.master_relay0_checkbox.setEnabled(can_maintain)
         if hasattr(self, 'master_relay1_checkbox'):
-            self.master_relay1_checkbox.setEnabled(can_maintain)
+            self.master_relay1_checkbox.setEnabled(False)
         if hasattr(self, 'master_relay2_checkbox'):
             self.master_relay2_checkbox.setEnabled(can_maintain)
         if getattr(self, 'master_relay_r1_btn', None) is not None:
@@ -4521,7 +4531,7 @@ class MainWindow(QMainWindow, UIBase):
         super().control_single_relay(relay_num, state)
 
     def control_master_relay(self, relay_num, state):
-        """主控单路继电器 - 权限检查；关路0=复位全清；报警中关1/2=强行开闸。"""
+        """主控单路继电器 - 权限检查；关 R0=通道消警；R1 故障自动；R2 备用。"""
         from core.translation import _t
 
         if not self.check_permission_before_action("Control master relay", Permission.MODIFY_DEVICE_CONTROL):
@@ -4549,7 +4559,12 @@ class MainWindow(QMainWindow, UIBase):
                 cb.setChecked(not bool(state))
                 cb.blockSignals(False)
 
-        # 关继电器 0 ≡ 通道复位全清（三路清 + decision→0x05）
+        if int(relay_num) == 1:
+            self.log(_t("log_master_relay1_ignore"), "WARNING")
+            _revert()
+            return False
+
+        # 关继电器 0 ≡ 通道消警（仅断 R0 + decision→0x05）
         if int(relay_num) == 0 and not bool(state):
             if not ask_confirm(
                 self,
@@ -4560,38 +4575,17 @@ class MainWindow(QMainWindow, UIBase):
                 _revert()
                 return False
 
-        # 报警中关 1/2：强行开闸（≠ 复位，decision 可能仍为 0x02/0x03）
-        if int(relay_num) in (1, 2) and not bool(state):
-            pkt = getattr(self, "latest_master_summary", None) or getattr(
-                self, "_last_any_master_packet", None
-            )
-            if pkt is not None and pkt.is_channel_alarm():
-                self.log(
-                    "Force-open gate: closing master relay %d while decision=0x%02X"
-                    % (int(relay_num), int(pkt.decision_result)),
-                    "INFO",
-                )
-
         return super().control_master_relay(relay_num, state)
 
     def force_open_master_gate(self):
-        """强行开闸：报警中关继电器 1+2（不发 0x15，硬报可不解除）。"""
+        """新固件无强行开闸；提示使用 R2 备用。"""
         from core.translation import _t
 
         if not self.check_permission_before_action(
             "Force open master gate", Permission.MODIFY_DEVICE_CONTROL
         ):
             return False
-        if not ask_confirm(
-            self,
-            _t("msg_force_gate_title"),
-            _t("msg_force_gate_text"),
-            danger=True,
-        ):
-            return False
-        ok1 = super().control_master_relay(1, False)
-        ok2 = super().control_master_relay(2, False)
-        return bool(ok1 or ok2)
+        return super().force_open_master_gate()
 
     def apply_master_relay_mask(self):
         """主控批量继电器 - 权限检查"""
@@ -5350,9 +5344,10 @@ class MainWindow(QMainWindow, UIBase):
             self.master_relay_group.setTitle(_t("set_master_relay"))
             if hasattr(self, 'master_relay_control_title'):
                 self.master_relay_control_title.setText(_t("set_master_relay_control"))
-            self.master_relay0_checkbox.setText("Relay 0")
-            self.master_relay1_checkbox.setText("Relay 1")
-            self.master_relay2_checkbox.setText("Relay 2")
+            self.master_relay0_checkbox.setText(_t("master_relay_cb0"))
+            self.master_relay1_checkbox.setText(_t("master_relay_cb1"))
+            self.master_relay1_checkbox.setToolTip(_t("tip_master_relay1_auto"))
+            self.master_relay2_checkbox.setText(_t("master_relay_cb2"))
             if getattr(self, 'master_relay_r1_btn', None) is not None:
                 self.master_relay_r1_btn.setText(_t("btn_master_relay_r1"))
                 self.master_relay_r1_btn.setToolTip(_t("tip_master_relay_single"))

@@ -22,9 +22,9 @@ MASTER_IO_IR_ENTRY = 1 << 0  # PG14
 MASTER_IO_IR_EXIT = 1 << 1   # PG15
 MASTER_IO_RADAR_GATE = 1 << 2
 MASTER_IO_CABINET_DOOR = 1 << 3
-MASTER_IO_RELAY0 = 1 << 4  # 总声光实际输出
-MASTER_IO_RELAY1 = 1 << 5  # 道闸等
-MASTER_IO_RELAY2 = 1 << 6  # 道闸/辅路
+MASTER_IO_RELAY0 = 1 << 4  # 通道硬报声光（0x02/0x03）
+MASTER_IO_RELAY1 = 1 << 5  # 系统故障 0xFF 黄灯（固件自动，PC 不可写）
+MASTER_IO_RELAY2 = 1 << 6  # 备用：仅 PC 0x06/0x11 手动
 MASTER_IO_RELAY_OUTPUT = MASTER_IO_RELAY0  # 兼容旧名 = 继电器 0
 
 # sys_mode bits
@@ -205,7 +205,7 @@ class MasterSummaryPacket:
         0x02=滑动窗 ≥N 路超阈（未配置降级窗，以及雷达占用期间的滑动符合）；
         0x03=对射窗内符合（只对射模式）；
         0x01 超阈但不够 N 路、0x04 经过、0x05 已复位、0xFF 故障 均不算硬报。
-        未配置没有 0x04。继电器 bit4/5/6 仅作辅助显示，不单独拉起硬报 UI。
+        io bit4/5/6 跟 RELAY0/1/2 实际输出；硬报 UI 仍以 decision 为准，不以继电器单独拉起。
         """
         return self.decision_result in (
             MASTER_DECISION_WINDOW_MATCHED,
@@ -233,10 +233,12 @@ class MasterSummaryPacket:
         """
         首页报警区状态机（跟主控 L2 decision）:
           channel_alarm | acked | passing | over_threshold | fault | normal
-        硬报：0x02（滑动窗：未配置或雷达占用符合）/ 0x03（对射窗，只对射）进入；
-        0x05/0x00/0x04 退出。未配置没有 0x04，也不会出 0x03。
+        硬报：0x02/0x03 进入；0x05/0x00/0x04 等退出。
+        0xFF 系统故障优先于 0x05（消警不掩盖故障）；与固件 decision 优先级一致。
         """
         d = self.decision_result
+        if d == MASTER_DECISION_SYSTEM_FAULT:
+            return "fault"
         if d in (MASTER_DECISION_WINDOW_MATCHED, MASTER_DECISION_JOINT_ALARM):
             return "channel_alarm"
         if d == MASTER_DECISION_MANUAL_RESET:
@@ -245,8 +247,6 @@ class MasterSummaryPacket:
             return "passing"
         if d == MASTER_DECISION_OVER_THRESHOLD:
             return "over_threshold"
-        if d == MASTER_DECISION_SYSTEM_FAULT:
-            return "fault"
         return "normal"
 
     def decision_text(self, lang: str = "zh") -> str:

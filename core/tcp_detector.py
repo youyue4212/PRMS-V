@@ -153,6 +153,11 @@ class TcpPacketWorker(QObject):
         self.timeout_debounce_sec = 1.2
         self.last_timeout_meta = {}
         self._last_link_event = {}
+        self._recent_link_events = []
+        self._last_master_drop = {}
+        self._last_master_rx_at = 0.0
+        self._remembered_master_id = ""
+        self._remembered_master_ip = ""
         
         # TCP socket settings
         self.receive_buffer_size = 4096  # Size of receive buffer
@@ -201,13 +206,64 @@ class TcpPacketWorker(QObject):
             or winerror in (10035,)
         )
 
+    @staticmethod
+    def _ip_from_client_id(client_id: str) -> str:
+        cid = str(client_id or "")
+        if "_" not in cid:
+            return ""
+        tail = cid.split("_")[-1]
+        host = tail.split(":")[0] if ":" in tail else tail
+        parts = host.split(".")
+        if len(parts) == 4 and all(p.isdigit() for p in parts):
+            return host
+        return ""
+
+    def _remember_master_client(self, client_id: str):
+        cid = str(client_id or "")
+        if not cid:
+            return
+        self._remembered_master_id = cid
+        ip = ""
+        info = (getattr(self, "client_infos", None) or {}).get(cid)
+        if info is not None:
+            ip = str(getattr(info, "ip_address", "") or "")
+        if not ip:
+            ip = self._ip_from_client_id(cid)
+        if ip:
+            self._remembered_master_ip = ip
+
+    def _event_is_master(self, client_id: str) -> bool:
+        cid = str(client_id or "")
+        if not cid:
+            return False
+        live = str(getattr(self, "master_client_id", "") or "")
+        remembered = str(getattr(self, "_remembered_master_id", "") or "")
+        if cid == live or (remembered and cid == remembered):
+            return True
+        ip = self._ip_from_client_id(cid)
+        last_ip = str(getattr(self, "_remembered_master_ip", "") or "")
+        return bool(ip and last_ip and ip == last_ip)
+
     def _record_link_event(self, kind: str, client_id: str = "", detail: str = ""):
-        self._last_link_event = {
+        event = {
             "kind": str(kind or ""),
             "client_id": str(client_id or ""),
             "detail": str(detail or ""),
             "at": time.time(),
         }
+        self._last_link_event = event
+        hist = getattr(self, "_recent_link_events", None)
+        if hist is None:
+            self._recent_link_events = hist = []
+        hist.append(dict(event))
+        if len(hist) > 8:
+            del hist[:-8]
+        # 探头事件会冲掉「最后一条」。主控断开单独留下，供数秒后的 M102 使用。
+        if (
+            event["kind"] in ("socket_error", "peer_closed", "client_removed")
+            and self._event_is_master(event["client_id"])
+        ):
+            self._last_master_drop = dict(event)
 
     def _remove_duplicate_ip_sessions(self, ip_address: str, keep_client_id: str):
         ip = str(ip_address or "").strip()
@@ -232,19 +288,58 @@ class TcpPacketWorker(QObject):
 
     def _classify_timeout(self, current_time: float) -> dict:
         age = max(0.0, float(current_time) - float(self.last_packet_time or current_time))
-        recent = dict(self._last_link_event or {})
-        recent_age = current_time - float(recent.get("at", 0.0) or 0.0)
-        if recent and recent_age <= 2.5 and recent.get("kind") in ("socket_error", "peer_closed", "client_removed"):
+        drop_kinds = ("socket_error", "peer_closed", "client_removed")
+        drops = []
+        for ev in list(getattr(self, "_recent_link_events", None) or []):
+            try:
+                ev_age = float(current_time) - float(ev.get("at", 0.0) or 0.0)
+            except (TypeError, ValueError):
+                continue
+            if ev_age <= 2.5 and ev.get("kind") in drop_kinds:
+                drops.append(dict(ev))
+        master_ev = None
+        for ev in drops:
+            if self._event_is_master(ev.get("client_id")):
+                master_ev = ev
+        # 正在收数时突然复位：socket 错误立刻记下，超时判定却要等 6.2 秒。
+        # 2.5 秒窗口当时已经过期，改认本次静默期间的主控断开。
+        if master_ev is None:
+            saved = dict(getattr(self, "_last_master_drop", None) or {})
+            try:
+                saved_at = float(saved.get("at", 0.0) or 0.0)
+            except (TypeError, ValueError):
+                saved_at = 0.0
+            silence_start = float(self.last_packet_time or current_time)
+            last_rx = float(getattr(self, "_last_master_rx_at", 0.0) or 0.0)
+            # 断开必须在最后一帧已解析的 L2 之后。中间又收到 L2 说明链路恢复过，不算这次静默的原因。
+            if last_rx > 0:
+                in_this_outage = saved_at >= last_rx
+            else:
+                in_this_outage = saved_at >= silence_start - 1.0
+            if (
+                saved.get("kind") in drop_kinds
+                and in_this_outage
+                and saved_at <= float(current_time) + 0.05
+                and self._event_is_master(saved.get("client_id"))
+            ):
+                master_ev = saved
+        if master_ev is not None:
             kind = "link_drop"
+            cited = master_ev
+        elif drops:
+            kind = "link_drop"
+            cited = {}
         else:
             kind = "rx_stall"
+            cited = {}
         meta = {
             "kind": kind,
             "age_sec": age,
             "clients": len(self.client_sockets),
-            "recent_kind": recent.get("kind", ""),
-            "recent_client_id": recent.get("client_id", ""),
-            "recent_detail": recent.get("detail", ""),
+            "recent_kind": cited.get("kind", ""),
+            "recent_client_id": cited.get("client_id", ""),
+            "recent_detail": cited.get("detail", ""),
+            "master_drop_client_id": cited.get("client_id", "") if master_ev is not None else "",
             "at": float(current_time),
         }
         self.last_timeout_meta = meta
@@ -275,17 +370,14 @@ class TcpPacketWorker(QObject):
         except (TypeError, ValueError):
             pass
         recent_kind = str((meta or {}).get("recent_kind") or "")
-        recent_client = str((meta or {}).get("recent_client_id") or "")
-        if recent_kind:
+        recent_client = str((meta or {}).get("master_drop_client_id") or "")
+        if recent_client:
             recent_label = {
-                "socket_error": "最近Socket异常",
-                "peer_closed": "最近对端关闭",
-                "client_removed": "最近连接移除",
-            }.get(recent_kind, recent_kind)
-            if recent_client:
-                parts.append(f"；{recent_label}={recent_client}")
-            else:
-                parts.append(f"；{recent_label}")
+                "socket_error": "主控Socket异常",
+                "peer_closed": "主控对端关闭",
+                "client_removed": "主控连接移除",
+            }.get(recent_kind, "主控链路事件")
+            parts.append(f"；{recent_label}={recent_client}")
         parts.append("）")
         kind = str((meta or {}).get("kind") or "")
         if kind:
@@ -583,6 +675,7 @@ class TcpPacketWorker(QObject):
     def _remove_client(self, client_id, reason: str = "", emit_signal: bool = True):
         """Remove disconnected client"""
         if client_id == self.master_client_id:
+            self._remember_master_client(client_id)
             self.master_client_id = None
         if client_id in self.client_sockets:
             try:
@@ -1109,6 +1202,7 @@ class TcpPacketWorker(QObject):
                     if is_master_frame_candidate(packet_data):
                         if self.master_client_id != client_id:
                             self.master_client_id = client_id
+                            self._remember_master_client(client_id)
                             self.has_log.emit(
                                 "Master L2 header seen from %s (awaiting CRC)" % client_id, 'INFO'
                             )
@@ -1183,6 +1277,8 @@ class TcpPacketWorker(QObject):
                         self.stats.setdefault('master_packets', 0)
                         self.stats['master_packets'] += 1
                         self.master_client_id = client_id
+                        self._remember_master_client(client_id)
+                        self._last_master_rx_at = time.time()
                         if client_id in self.client_infos:
                             self.client_infos[client_id].packets_received += 1
                             self.client_infos[client_id].last_active = time.time()

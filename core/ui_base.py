@@ -676,12 +676,8 @@ class UIBase():
                 self.worker.master_client_id = client_id
             except Exception:
                 pass
-        # 主控不是探头：从诊断表移除，避免 E101/E102 误报
-        if getattr(self, "diagnostics_manager", None) is not None:
-            try:
-                self.diagnostics_manager.remove_client(client_id)
-            except Exception:
-                pass
+        # 主控不是探头：清掉本会话，以及同一主控 IP 上未识别阶段留下的 E101/E102
+        self._clear_master_sessions_from_probe_faults(client_id)
         if self.master_summary_callback is not None and not self.is_master_online():
             # Refresh home status to "TCP connected / waiting L2"
             self.master_summary_callback(None, client_id)
@@ -698,11 +694,7 @@ class UIBase():
                     self.worker.master_client_id = client_id
                 except Exception:
                     pass
-            if getattr(self, "diagnostics_manager", None) is not None:
-                try:
-                    self.diagnostics_manager.remove_client(client_id)
-                except Exception:
-                    pass
+            self._clear_master_sessions_from_probe_faults(client_id)
         if self.master_summary_callback is not None:
             self.master_summary_callback(packet, client_id)
         self._maybe_log_all_probe_cps()
@@ -1500,15 +1492,14 @@ class UIBase():
         self.master_relay_group = QGroupBox(_t("set_master_relay"))
         master_relay_layout = QGridLayout(self.master_relay_group)
 
-        self.master_relay0_checkbox = QCheckBox("Relay 0")
+        self.master_relay0_checkbox = QCheckBox(_t("master_relay_cb0"))
         self.master_relay0_checkbox.stateChanged.connect(
             lambda state: self.control_master_relay(0, state == Qt.Checked)
         )
-        self.master_relay1_checkbox = QCheckBox("Relay 1")
-        self.master_relay1_checkbox.stateChanged.connect(
-            lambda state: self.control_master_relay(1, state == Qt.Checked)
-        )
-        self.master_relay2_checkbox = QCheckBox("Relay 2")
+        self.master_relay1_checkbox = QCheckBox(_t("master_relay_cb1"))
+        self.master_relay1_checkbox.setEnabled(False)
+        self.master_relay1_checkbox.setToolTip(_t("tip_master_relay1_auto"))
+        self.master_relay2_checkbox = QCheckBox(_t("master_relay_cb2"))
         self.master_relay2_checkbox.stateChanged.connect(
             lambda state: self.control_master_relay(2, state == Qt.Checked)
         )
@@ -1540,6 +1531,7 @@ class UIBase():
         self.master_force_gate_btn = QPushButton(_t("btn_force_open_gate"))
         self.master_force_gate_btn.setToolTip(_t("tip_force_open_gate"))
         self.master_force_gate_btn.clicked.connect(self.force_open_master_gate)
+        self.master_force_gate_btn.setVisible(False)
         master_relay_layout.addWidget(self.master_force_gate_btn, 0, 5)
         master_relay_layout.addWidget(self.master_relay_status_label, 1, 0, 1, 6)
         self.master_relay_hint_label = QLabel(_t("tip_master_relay_hint"))
@@ -3082,7 +3074,33 @@ class UIBase():
         self.log(f"TCP client disconnected: {client_id}", 'INFO')
 
         # 主控 TCP 断开：首页立即切离线（硬报警不再由 PC 拼）
-        if client_id and client_id == self.master_client_id:
+        # 端口变了、id 还没写上时，用已记住的主控 IP 识别，避免记成探头 E102
+        master_ip = str(getattr(self, "_last_master_ip", "") or "")
+        cid_ip = self._extract_client_ip(client_id) if client_id else ""
+        live_master = str(self.master_client_id or "")
+        same_master_ip = bool(master_ip and cid_ip == master_ip)
+        if client_id and (client_id == live_master or same_master_ip):
+            worker = getattr(self, "worker", None)
+            live_still_up = False
+            if live_master and client_id != live_master and worker is not None:
+                infos = getattr(worker, "client_infos", None) or {}
+                sockets = getattr(worker, "client_sockets", None) or {}
+                live_still_up = live_master in infos or live_master in sockets
+            if live_still_up:
+                # 旧端口的断开晚到：新会话已经是主控，不能把首页打成离线
+                dm = getattr(self, "diagnostics_manager", None)
+                if dm is not None and hasattr(dm, "remove_client"):
+                    try:
+                        dm.remove_client(client_id)
+                    except Exception:
+                        pass
+                self.remove_client_display_data(client_id)
+                if hasattr(self, "update_system_status"):
+                    try:
+                        self.update_system_status()
+                    except Exception:
+                        pass
+                return
             self._remember_master_endpoint(client_id)
             self.master_client_id = None
             if hasattr(self, "worker") and self.worker is not None:
@@ -3094,7 +3112,8 @@ class UIBase():
             self._master_was_online = False
             if self.master_summary_callback is not None:
                 self.master_summary_callback(None, client_id)
-            # 主控不是探头，不记 E102
+            # 主控不是探头，不记 E102；同一 IP 上旧会话的粘滞故障一并清掉
+            self._clear_master_sessions_from_probe_faults(client_id)
             self.remove_client_display_data(client_id)
             return
 
@@ -4079,6 +4098,51 @@ class UIBase():
             cid = getattr(self.worker, "master_client_id", None)
         return cid
 
+    def _clear_master_sessions_from_probe_faults(self, client_id: str = None):
+        """Drop probe E101/E102 on the master IP.
+
+        A master socket that disconnects before the L2 header is seen is labeled
+        as a probe. A later session from the same IP (new port) must clear that
+        sticky fault, not only the current client id.
+        """
+        if client_id:
+            self._remember_master_endpoint(client_id)
+        ip = str(getattr(self, "_last_master_ip", "") or "")
+        if client_id and not ip and hasattr(self, "_extract_client_ip"):
+            parsed = str(self._extract_client_ip(client_id) or "")
+            if parsed and parsed not in ("serial", client_id):
+                ip = parsed
+        dm = getattr(self, "diagnostics_manager", None)
+        if dm is None or not hasattr(dm, "remove_client"):
+            return
+        ids = set()
+        if client_id:
+            ids.add(client_id)
+        if ip:
+            known = set(getattr(dm, "active_faults", {}) or {}) | set(
+                getattr(dm, "last_packet_time", {}) or {}
+            )
+            for cid in known:
+                if cid in ("system", "master"):
+                    continue
+                other = ""
+                if hasattr(self, "_extract_client_ip"):
+                    other = str(self._extract_client_ip(cid) or "")
+                if other == ip:
+                    ids.add(cid)
+        for cid in ids:
+            try:
+                dm.remove_client(cid)
+            except Exception:
+                pass
+        if ip and hasattr(self, "forget_probe_ip"):
+            self.forget_probe_ip(ip)
+        if hasattr(self, "update_system_status"):
+            try:
+                self.update_system_status()
+            except Exception:
+                pass
+
     def _remember_master_endpoint(self, client_id: str):
         """Keep last master peer IP from the TCP socket / client_id."""
         if not client_id:
@@ -4121,6 +4185,11 @@ class UIBase():
 
         if int(relay_num) not in (0, 1, 2):
             self.log("Master relay number must be 0-2", "ERROR")
+            _revert()
+            return False
+        if int(relay_num) == 1:
+            from core.translation import _t
+            self.log(_t("log_master_relay1_ignore"), "WARNING")
             _revert()
             return False
         if not self.config.tcp_enabled:
@@ -4170,7 +4239,7 @@ class UIBase():
     def apply_master_relay_mask(self):
         """Optional batch 0x11 from current checkbox states (same mask bits as protocol).
 
-        注意：mask bit0=0 会触发主控复位全清（与关路0 / 0x15 等价）。
+        注意：mask bit0=0 会触发通道消警（仅断 R0）；不向固件写 R1（故障自动）。
         """
         from core.translation import _t
         from PyQt5.QtWidgets import QMessageBox
@@ -4184,7 +4253,7 @@ class UIBase():
         if not master_cid:
             self.log("Master not connected — cannot control relay mask", "ERROR")
             return False
-        mask = self._master_relay_draft_mask()
+        mask = self._master_relay_draft_mask() & ~0x02  # R1 故障独占，不下发 bit1
         if (mask & 0x01) == 0:
             reply = QMessageBox.question(
                 self if isinstance(self, QWidget) else None,
@@ -4210,22 +4279,16 @@ class UIBase():
         return ok
 
     def force_open_master_gate(self):
-        """强行开闸：关继电器 1+2（≠ 复位）。子类可覆盖加权限/确认。"""
+        """新固件无报警开闸 override；保留接口以免旧 UI 调用崩溃。"""
         from core.translation import _t
         from PyQt5.QtWidgets import QMessageBox
 
-        reply = QMessageBox.question(
+        QMessageBox.information(
             self if isinstance(self, QWidget) else None,
             _t("msg_force_gate_title"),
             _t("msg_force_gate_text"),
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No,
         )
-        if reply != QMessageBox.Yes:
-            return False
-        ok1 = self.control_master_relay(1, False)
-        ok2 = self.control_master_relay(2, False)
-        return bool(ok1 or ok2)
+        return False
 
     def read_master_relay_status(self):
         """Read master multi-relay status via TCP 0x12."""
