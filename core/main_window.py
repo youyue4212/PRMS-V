@@ -633,20 +633,43 @@ class MainWindow(QMainWindow, UIBase):
             return _t("role_maintainer")
         return _t("role_viewer")
 
+    def _client_is_master_endpoint(self, client_id: str) -> bool:
+        """True when this TCP session is the master, not a probe."""
+        cid = str(client_id or "")
+        if not cid:
+            return False
+        master = ""
+        if hasattr(self, "_get_master_client_id"):
+            master = str(self._get_master_client_id() or "")
+        else:
+            master = str(getattr(self, "master_client_id", "") or "")
+        if master and cid == master:
+            return True
+        ip = ""
+        if hasattr(self, "_extract_client_ip"):
+            ip = str(self._extract_client_ip(cid) or "")
+        last_ip = str(getattr(self, "_last_master_ip", "") or "")
+        return bool(ip and last_ip and ip == last_ip)
+
     def _describe_last_tcp_timeout(self) -> str:
+        """M102 附言只引用主控 socket。探头断连留在 E101/E102，不写进主控故障。"""
         worker = getattr(self, "worker", None)
         meta = dict(getattr(worker, "last_timeout_meta", None) or {})
         if not meta and worker is not None:
             recent = dict(getattr(worker, "_last_link_event", None) or {})
-            if recent.get("kind") in ("socket_error", "peer_closed", "client_removed"):
-                cid = str(recent.get("client_id") or "")
-                tail = ("：" + cid) if cid else ""
-                return "链路断开/Socket异常%s" % tail
+            cid = str(recent.get("client_id") or "")
+            if (
+                recent.get("kind") in ("socket_error", "peer_closed", "client_removed")
+                and self._client_is_master_endpoint(cid)
+            ):
+                return "链路断开/Socket异常：%s" % cid
             return ""
         if not meta:
             return ""
+        recent_cid = str(meta.get("recent_client_id") or "")
+        recent_is_master = self._client_is_master_endpoint(recent_cid)
         kind = str(meta.get("kind") or "")
-        if kind == "link_drop":
+        if kind == "link_drop" and recent_is_master:
             prefix = "链路断开/Socket异常后超时"
         elif kind == "rx_stall":
             prefix = "连接未断开，仅接收空窗超时"
@@ -666,8 +689,7 @@ class MainWindow(QMainWindow, UIBase):
         except (TypeError, ValueError):
             pass
         recent_kind = str(meta.get("recent_kind") or "")
-        recent_cid = str(meta.get("recent_client_id") or "")
-        if recent_kind:
+        if recent_kind and recent_is_master:
             tail = recent_kind
             if recent_cid:
                 tail += ":" + recent_cid
@@ -1619,13 +1641,34 @@ class MainWindow(QMainWindow, UIBase):
         )
         link_timeout = (not never_seen) and ((now - last_any) > master_timeout_sec)
         timeout_pending_since = float(getattr(self, "_master_timeout_pending_since", 0.0) or 0.0)
-        # 仅监听、零客户端：不算 M101（避免开软件即「主控无数据」）
-        expect_master = self._tcp_client_count() > 0 or bool(getattr(self, "master_client_id", None))
-        # 开采集初期（防火墙确认等）不报 M102，避免首连空窗误报
+        # 只有认出主控（或同一主控 IP 重连）才算「应有 L2」。探头先连上不算。
+        master_cid = None
+        if hasattr(self, "_get_master_client_id"):
+            master_cid = self._get_master_client_id()
+        else:
+            master_cid = getattr(self, "master_client_id", None)
+        expect_master = bool(master_cid)
+        if not expect_master:
+            last_ip = str(getattr(self, "_last_master_ip", "") or "")
+            infos = {}
+            worker = getattr(self, "worker", None)
+            if worker is not None:
+                infos = getattr(worker, "client_infos", None) or {}
+            if last_ip:
+                for info in infos.values():
+                    if str(getattr(info, "ip_address", "") or "") == last_ip:
+                        expect_master = True
+                        break
+        # 开采集前 20s 不报 M101/M102，给主控上电和首包 L2 留时间
         master_startup_grace = startup_age < master_startup_grace_sec
 
         # M101/M102 互斥：从未收到过 → 只 M101；曾经有过再超时 → 只 M102
-        if never_seen and expect_master and startup_age > dm.NO_DATA_STARTUP_SEC:
+        if (
+            never_seen
+            and expect_master
+            and not master_startup_grace
+            and startup_age > dm.NO_DATA_STARTUP_SEC
+        ):
             dm.add_fault(_MASTER_FAULT_CLIENT_ID, FaultCode.M101)
         else:
             dm.remove_fault(_MASTER_FAULT_CLIENT_ID, FaultCode.M101)
