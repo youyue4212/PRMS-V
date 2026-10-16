@@ -2734,7 +2734,7 @@ class UIBase():
         elif from_master and packet.control_code == 0x19:
             if hasattr(self, "on_sensor_mode_feedback"):
                 self.on_sensor_mode_feedback(packet)
-        elif packet.control_code == 0x0E:
+        elif packet.control_code in (0x0D, 0x0E):
             if hasattr(self, "on_product_id_feedback"):
                 self.on_product_id_feedback(packet)
         elif from_master and packet.control_code in (0x06, 0x11, 0x12) and hasattr(self, "master_relay_status_label"):
@@ -3149,6 +3149,8 @@ class UIBase():
                 self._remember_probe(client_id, old_pid)
                 self.diagnostics_manager.add_fault(client_id, FaultCode.E102)
 
+        if hasattr(self, "_freeze_probe_display_num"):
+            self._freeze_probe_display_num(client_id)
         self.remove_client_display_data(client_id)
 
         if self.primary_client_id == client_id:
@@ -4703,6 +4705,50 @@ class UIBase():
         self._probe_registry[ip] = entry
         return ip
 
+    def _probe_client_is_live(self, client_id: str) -> bool:
+        return (
+            client_id in (getattr(self, "client_data", None) or {})
+            or client_id in (getattr(self, "client_latest_packets", None) or {})
+        )
+
+    def _resolve_probe_display_num(self, client_id: str) -> Optional[int]:
+        """
+        值班显示编号：在线时 product_id(唯一) 或 IP 序；离线沿用冻结的 display_num，
+        不再单独用 product_id 造成「在线 1 号 / 离线 4 号」。
+        """
+        ip = self._extract_client_ip(client_id)
+        live = self._probe_client_is_live(client_id)
+        registry = getattr(self, "_probe_registry", None) or {}
+
+        if ip and not live:
+            try:
+                frozen = registry.get(ip, {}).get("display_num")
+                if frozen is not None:
+                    return int(frozen)
+            except (TypeError, ValueError):
+                pass
+
+        pid = self._resolve_product_id(client_id)
+        num = None
+        if pid is not None and 1 <= pid <= 99 and self._product_id_is_unique(pid):
+            num = int(pid)
+        elif ip and ip in (getattr(self, "_probe_ip_index", None) or {}):
+            num = int(self._probe_ip_index[ip])
+
+        if num is not None and ip:
+            entry = dict(registry.get(ip, {}))
+            entry["display_num"] = num
+            if client_id:
+                entry["client_id"] = client_id
+            self._probe_registry[ip] = entry
+        return num
+
+    def _freeze_probe_display_num(self, client_id: str) -> None:
+        """断线前冻结与本机一致的显示号，供 E102 等故障文案使用。"""
+        if not client_id:
+            return
+        self._resolve_probe_display_num(client_id)
+
     def _resolve_product_id(self, client_id: str):
         data = self.client_data.get(client_id) or {}
         try:
@@ -4763,29 +4809,15 @@ class UIBase():
         Human label for a detector: '1号' / 'Probe 1' / ...
         - Prefer product_id only when it uniquely identifies one online probe.
         - Otherwise use stable IP order among online probes.
-        - Do NOT re-register offline clients into the IP index (avoids ghost 3号).
+        - Offline faults reuse frozen display_num (same as when online).
         """
         if not client_id or client_id == "system":
             return ""
 
-        ip = self._extract_client_ip(client_id)
-        live = (
-            client_id in (getattr(self, "client_data", None) or {})
-            or client_id in (getattr(self, "client_latest_packets", None) or {})
-        )
-        if live:
+        if self._probe_client_is_live(client_id):
             self._remember_probe(client_id, self._resolve_product_id(client_id))
 
-        num = None
-        pid = self._resolve_product_id(client_id)
-        if pid is not None and 1 <= pid <= 99 and self._product_id_is_unique(pid):
-            num = pid
-        elif ip and ip in (getattr(self, "_probe_ip_index", None) or {}):
-            num = self._probe_ip_index[ip]
-        elif not live and pid is not None and 1 <= pid <= 99:
-            # 离线故障文案：仍可用历史产品 ID，但不写入在线编号表
-            num = pid
-
+        num = self._resolve_probe_display_num(client_id)
         if num is not None:
             from core.translation import _t
             return _t("probe_num", n=num)

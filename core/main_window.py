@@ -4464,15 +4464,37 @@ class MainWindow(QMainWindow, UIBase):
     def on_product_id_feedback(self, packet):
         from core.translation import _t
 
+        cid = getattr(packet, "source_client_id", None) or getattr(self, "primary_client_id", None)
+        code = int(getattr(packet, "control_code", 0) or 0)
         if int(getattr(packet, "status", 0) or 0) != 1:
             self._pending_product_id_write = None
-            self._refresh_product_id_lock_ui(getattr(packet, "source_client_id", None))
-            show_warn(self, _t("msg_product_id_title"), _t("msg_product_id_set_fail"))
+            self._refresh_product_id_lock_ui(cid)
+            show_warn(
+                self,
+                _t("msg_product_id_title"),
+                _t("msg_product_id_set_fail") if code == 0x0E else _t("msg_product_id_read_fail"),
+            )
             return
-        self.log(
-            "Product ID ack accepted (value=%d)" % (int(getattr(packet, "value", 0) or 0)),
-            "INFO",
-        )
+
+        val = int(getattr(packet, "value", 0) or 0) & 0xFFFF
+        if code == 0x0D:
+            if cid:
+                data = (getattr(self, "client_data", None) or {}).get(cid)
+                if data is not None:
+                    data["product_id"] = val
+                self._remember_probe(cid, val)
+            if hasattr(self, "product_id_spin"):
+                self.product_id_spin.blockSignals(True)
+                self.product_id_spin.setValue(val)
+                self.product_id_spin.blockSignals(False)
+            self._refresh_product_id_lock_ui(cid)
+            self.log("Product ID read → %d (0x0D ack)" % val, "INFO")
+            show_info(self, _t("msg_product_id_title"), _t("msg_product_id_read_ok", pid=val))
+            return
+
+        self.log("Product ID write ack accepted (value=%d)" % val, "INFO")
+        if hasattr(self, "_apply_product_id_readback"):
+            self._apply_product_id_readback(cid, val)
     
     def set_high_voltage(self):
         """Set high voltage - with permission check"""

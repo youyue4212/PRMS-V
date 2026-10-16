@@ -340,6 +340,8 @@ class TranslationManager:
             "msg_product_id_readback_wait": "产品 ID 写入命令已发送，等待设备回读确认…",
             "msg_product_id_set_ok": "产品 ID 已确认写入为 {pid}",
             "msg_product_id_set_fail": "产品 ID 写入失败或设备拒绝。",
+            "msg_product_id_read_ok": "产品 ID 读取成功：{pid}",
+            "msg_product_id_read_fail": "产品 ID 读取失败或设备无应答。",
             
             # AlarmLogPage
             "log_title": "报警日志记录",
@@ -984,6 +986,8 @@ class TranslationManager:
             "msg_product_id_readback_wait": "Write command sent; waiting for device readback...",
             "msg_product_id_set_ok": "Product ID confirmed as {pid}",
             "msg_product_id_set_fail": "Product ID write failed or was rejected.",
+            "msg_product_id_read_ok": "Product ID read OK: {pid}",
+            "msg_product_id_read_fail": "Product ID read failed or no response.",
             
             # AlarmLogPage
             "log_title": "Alarm Log Records",
