@@ -712,7 +712,9 @@ class MainWindow(QMainWindow, UIBase):
             self._apply_public_chrome(index)
         if index == 0:
             home = getattr(self, "home_page", None)
-            if home is not None and hasattr(home, "schedule_web_flush"):
+            if home is not None and hasattr(home, "force_web_flush"):
+                home.force_web_flush()
+            elif home is not None and hasattr(home, "schedule_web_flush"):
                 home.schedule_web_flush(immediate=True)
         elif index in (1, 2):
             self._plot_dirty = True
@@ -1086,16 +1088,35 @@ class MainWindow(QMainWindow, UIBase):
             return
         page = getattr(self, "home_page", None)
         if page is not None:
-            # master link text + level
-            text = page.master_link_label.text() if hasattr(page, "master_link_label") else "--"
+            # master link：按 level 用当前语种生成，避免拷贝 home 旧中文
             level = "ok"
             try:
                 level = page._link_level()
             except Exception:
-                if "离线" in text or "Offline" in text or "未接入" in text or "No Master" in text:
+                text0 = page.master_link_label.text() if hasattr(page, "master_link_label") else ""
+                if "离线" in text0 or "Offline" in text0 or "未接入" in text0 or "No Master" in text0:
                     level = "offline"
-                elif "等待数据" in text or "awaiting" in text.lower() or "无L2" in text or "Linked" in text:
+                elif "等待数据" in text0 or "awaiting" in text0.lower() or "无L2" in text0 or "Linked" in text0:
                     level = "warn"
+            try:
+                from core.translation import TranslationManager
+                lang = TranslationManager().get_language()
+            except Exception:
+                lang = "zh"
+            if level == "ok":
+                text = "Master Online" if lang == "en" else "主控在线"
+            elif level == "warn":
+                text = "Master Linked (awaiting data)" if lang == "en" else "主控已连接(等待数据)"
+            else:
+                never = False
+                try:
+                    never = self._master_never_seen()
+                except Exception:
+                    never = False
+                if never:
+                    text = "No Master Link" if lang == "en" else "未接入主控"
+                else:
+                    text = "Master Offline" if lang == "en" else "主控离线"
             cr.set_master_link(text, level)
             # channel alarm
             active = bool(getattr(page, "_reset_alarm_active", False))
@@ -5417,12 +5438,112 @@ class MainWindow(QMainWindow, UIBase):
                 self.on_master_summary_ui(self.latest_master_summary, self.master_client_id)
             else:
                 self._refresh_home_from_probes(self.client_data)
-            if hasattr(self, "update_system_status"):
-                self.update_system_status()
-            if getattr(self, "control_room_mode", False):
-                self._refresh_control_room_snapshot()
         except Exception:
             pass
+        try:
+            if hasattr(self, "update_system_status"):
+                self.update_system_status()
+        except Exception:
+            pass
+
+        # 状态栏角色/公共模式文案跟语种（含维护用户 Maintainer）
+        self._refresh_status_bar_user_language()
+
+        # 主控室：snapshot 会从 home 拷贝动态文案；必须先 snapshot 再 retranslate，
+        # 且延迟一拍（与「进日志再返回」同效果），避免同栈里被旧中文盖掉。
+        if getattr(self, "control_room_mode", False):
+            self._schedule_control_room_language_refresh()
+        else:
+            home = getattr(self, "home_page", None)
+            if home is not None:
+                if hasattr(home, "schedule_language_web_flush"):
+                    home.schedule_language_web_flush()
+                elif hasattr(home, "schedule_web_flush"):
+                    if hasattr(home, "_last_web_payload"):
+                        home._last_web_payload = None
+                    home.schedule_web_flush(immediate=True)
                 
         # Force a UI update
         self.update()
+
+    def _refresh_status_bar_user_language(self):
+        """换语后刷新状态栏角色文案（公共模式 / 管理员 / 维护用户 / 查看者）。"""
+        if not hasattr(self, "status_bar"):
+            return
+        from core.translation import _t
+        try:
+            if self.is_logged_in() and isinstance(getattr(self, "current_user", None), dict):
+                user = self.current_user
+                self.status_bar.update_user_info(user.get("username"), user.get("role"))
+                return
+            idx = int(self.stacked_widget.currentIndex()) if hasattr(self, "stacked_widget") else 0
+            if idx == 4:
+                self.status_bar.update_user_info(_t("status_public_readonly_log"), None)
+            else:
+                self.status_bar.update_user_info(_t("status_public_mode"), None)
+        except Exception:
+            pass
+
+    def _refresh_window_title_language(self):
+        from core.translation import _t
+        try:
+            if self.current_user and "username" in self.current_user:
+                username = self.current_user["username"]
+                role_name = self._window_role_name(self.current_user.get("role"))
+                self.setWindowTitle(f"Gamma-ray Spectrometer - {username} ({role_name})")
+            else:
+                self.setWindowTitle(
+                    _t("control_room_title")
+                    if getattr(self, "control_room_mode", False)
+                    else _t("sys_title")
+                )
+        except Exception:
+            pass
+
+    def _schedule_control_room_language_refresh(self):
+        """主控室总览换语：立即一次 + 事件循环后再两次（对齐切页返回）。"""
+        self._refresh_control_room_language_now()
+        QTimer.singleShot(0, self._refresh_control_room_language_now)
+        QTimer.singleShot(80, self._refresh_control_room_language_now)
+
+    def _refresh_control_room_language_now(self):
+        if not getattr(self, "control_room_mode", False):
+            return
+        from core.translation import TranslationManager, _t
+        # 防止中途被别的逻辑改回
+        try:
+            want = str(getattr(self.config, "language", "") or "")
+            if want in ("zh", "en"):
+                TranslationManager().set_language(want)
+        except Exception:
+            pass
+        try:
+            if self.is_master_online() and getattr(self, "latest_master_summary", None) is not None:
+                self.on_master_summary_ui(self.latest_master_summary, self.master_client_id)
+            else:
+                self._refresh_home_from_probes(self.client_data)
+        except Exception:
+            pass
+        try:
+            # 健康/故障行也按新语种重算后再拷到主控室
+            self._update_home_health_and_faults()
+        except Exception:
+            pass
+        try:
+            self._refresh_control_room_snapshot()
+        except Exception:
+            pass
+        cr = getattr(self, "control_room_page", None)
+        if cr is not None and hasattr(cr, "retranslate_ui"):
+            try:
+                # 必须在 snapshot 之后：用 _t/kind 压过拷贝来的旧语种
+                cr.retranslate_ui()
+            except Exception:
+                pass
+            try:
+                cr.update()
+                cr.repaint()
+            except Exception:
+                pass
+        self._refresh_status_bar_user_language()
+        self._refresh_window_title_language()

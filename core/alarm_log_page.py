@@ -527,7 +527,11 @@ class AlarmLogPage(QWidget):
     
     def refresh_display(self):
         """Refresh display with pagination support"""
-        if not self.isVisible():
+        # 非可见页也允许强制刷新（切语言时表头已更，表体需清签名以便下次显示）
+        force = bool(getattr(self, "_force_refresh_once", False))
+        if force:
+            self._force_refresh_once = False
+        if not force and not self.isVisible():
             return
         from core.translation import _t
         stats = self.alarm_logger.get_statistics()
@@ -841,7 +845,13 @@ class AlarmLogPage(QWidget):
             scroll_val = 0
         self._shown_page = page_key
 
+        try:
+            from core.translation import TranslationManager
+            ui_lang = TranslationManager().get_language()
+        except Exception:
+            ui_lang = ""
         sig = (
+            ui_lang,
             category,
             "empty-hint" if (category == "system" and not page_events) else "rows",
             tuple(
@@ -992,7 +1002,9 @@ class AlarmLogPage(QWidget):
                 _t("header_outage_duration"), _t("header_message"),
             ])
 
-        # Refresh display to update pagination info text
+        # 切语言后必须重绘行文案；清掉「数据未变」短路签名
+        self._page_table_sig = None
+        self._force_refresh_once = True
         self.refresh_display()
     
     

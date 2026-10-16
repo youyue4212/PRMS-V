@@ -236,6 +236,9 @@ class HomePage(QWidget):
         """Postpone JS push so a click is not queued behind applyHmiState."""
         if self.headless:
             return
+        # 换语推送窗口内禁止 defer，避免冲掉刚推上的新语种
+        if time.monotonic() < float(getattr(self, "_language_flush_until", 0.0) or 0.0):
+            return
         self._defer_flush_until = time.monotonic() + 0.16
         if self._web_page_visible():
             self._flush_timer.start(180)
@@ -246,7 +249,7 @@ class HomePage(QWidget):
         if immediate:
             self._flush_pending = False
             self._flush_timer.stop()
-            self._flush_to_web()
+            self._flush_to_web(force=False)
             return
         if not self._web_page_visible():
             self._flush_pending = True
@@ -265,7 +268,7 @@ class HomePage(QWidget):
         # 仅补推藏页期间积压的状态；已在当前页时由调用方决定是否 immediate
         if self._flush_pending:
             self._flush_pending = False
-            self.schedule_web_flush(immediate=True)
+            self.force_web_flush()
 
     def _on_page_ready(self):
         self._web_ready = True
@@ -357,13 +360,15 @@ class HomePage(QWidget):
         self.schedule_web_flush(immediate=True)
 
     def _on_js_language(self):
+        # 离开 Web 点击回调再切语言，否则当帧 runJavaScript 常被吃掉
+        QTimer.singleShot(0, self._apply_language_toggle_from_web)
+
+    def _apply_language_toggle_from_web(self):
         if self.parent is not None and hasattr(self.parent, "status_bar"):
             sb = self.parent.status_bar
             if hasattr(sb, "toggle_language"):
                 sb.toggle_language()
-                self.schedule_web_flush(immediate=True)
                 return
-        # fallback
         try:
             from core.translation import TranslationManager
             tm = TranslationManager()
@@ -371,9 +376,10 @@ class HomePage(QWidget):
             tm.set_language(new_lang)
             if self.parent is not None and hasattr(self.parent, "on_language_changed"):
                 self.parent.on_language_changed(new_lang)
+                return
         except Exception:
             pass
-        self.schedule_web_flush(immediate=True)
+        self.schedule_language_web_flush()
 
     # ---- state → JS ----
 
@@ -731,19 +737,80 @@ class HomePage(QWidget):
         self._battery_cache = (text, now)
         return text
 
-    def _flush_to_web(self):
+    def _flush_to_web(self, force=False):
         if self.headless or self.browser is None:
             return
         if not self._web_ready:
             self._flush_pending = True
             return
         state = self.build_hmi_state()
+        # 换语时带 nonce，避免 Web/去重层把「同内容」当成无更新
+        if force:
+            state = dict(state)
+            state["_langNonce"] = time.monotonic()
         payload = json.dumps(state, ensure_ascii=False)
-        if payload == self._last_web_payload:
+        if not force and payload == self._last_web_payload:
             return
         self._last_web_payload = payload
-        js = "if (window.applyHmiState) { applyHmiState(%s); }" % payload
-        self.browser.page().runJavaScript(js)
+        # setTimeout：避开与输入事件同栈时 WebEngine 丢弃脚本的问题
+        js = (
+            "(function(){ var s=%s; "
+            "setTimeout(function(){ if (window.applyHmiState) applyHmiState(s); }, 0); "
+            "})();"
+        ) % payload
+        try:
+            self.browser.page().runJavaScript(js)
+        except Exception:
+            self._flush_pending = True
+
+    def push_web_language_chrome(self):
+        """只推静态 UI 文案+语言按钮，体积小、优先保证顶栏/标题立刻换语。"""
+        if self.headless or self.browser is None or not self._web_ready:
+            return
+        patch = {
+            "ui": self._ui_strings(),
+            "langLabel": self._lang_btn_label(),
+            "modeLabel": self._mode_label(),
+            "lang": self._ui_lang(),
+            "_langNonce": time.monotonic(),
+        }
+        body = json.dumps(patch, ensure_ascii=False)
+        js = (
+            "(function(){ var s=%s; "
+            "setTimeout(function(){ if (window.applyHmiState) applyHmiState(s); }, 0); "
+            "})();"
+        ) % body
+        try:
+            self.browser.page().runJavaScript(js)
+        except Exception:
+            pass
+
+    def force_web_flush(self):
+        """Push HMI state even if payload unchanged (language switch / page return)."""
+        if self.headless or self.browser is None:
+            return
+        self._defer_flush_until = 0.0
+        self._flush_pending = False
+        if hasattr(self, "_flush_timer"):
+            self._flush_timer.stop()
+        self._last_web_payload = None
+        self._flush_to_web(force=True)
+
+    def schedule_language_web_flush(self):
+        """Language click races WebEngine JS; re-push after the click event settles."""
+        if self.headless or self.browser is None:
+            return
+        self._language_flush_until = time.monotonic() + 0.6
+        self.push_web_language_chrome()
+        self.force_web_flush()
+        # 点击当帧/随后几帧的 runJavaScript 常被吃掉；分拍再推
+        QTimer.singleShot(0, self._language_flush_tick)
+        QTimer.singleShot(80, self._language_flush_tick)
+        QTimer.singleShot(200, self._language_flush_tick)
+
+    def _language_flush_tick(self):
+        self.push_web_language_chrome()
+        self.force_web_flush()
 
     def reorder_probes(self, from_index, to_index):
         """Public API for control-room drag reorder (same as Web HMI)."""
@@ -949,11 +1016,10 @@ class HomePage(QWidget):
         from core.translation import _t
         self.title.setText(_t("home_title_full"))
         self.channel_reset_btn.setText(_t("btn_channel_alarm_reset"))
-        # 切语言后立即刷新探头名/位置缓存，再推 Web
+        # 切语言后刷新探头名/位置；Web 推送留给 on_language_changed 重建动态文案后再 force
         for i, e in enumerate(self._probe_entries):
             e["name"] = self._live_probe_name(i, e)
             e["location"] = self._slot_location(i)
-        self.schedule_web_flush(immediate=True)
 
 
 def _install_label_hooks(page: "HomePage"):

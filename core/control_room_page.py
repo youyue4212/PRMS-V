@@ -687,6 +687,35 @@ class ControlRoomPage(QWidget):
         self.open_log_btn.setText(_t("control_room_open_log"))
         self.reset_btn.setText(_t("btn_channel_alarm_reset_active"))
         self.kpi_active._title.setText(_t("control_room_kpi_active"))
+        # 在线摘要 / 登录按钮随语言刷新
+        n = len(getattr(self, "_probe_entries", None) or [])
+        online = sum(1 for e in (getattr(self, "_probe_entries", None) or []) if e.get("online"))
+        if hasattr(self, "online_summary"):
+            self.online_summary.setText(_t("control_room_online_fmt", online=online, total=n))
+        if hasattr(self, "login_btn") and self.login_btn.isVisible():
+            parent = getattr(self, "parent", None)
+            logged_in = bool(parent is not None and hasattr(parent, "is_logged_in") and parent.is_logged_in())
+            self.set_login_visible(not logged_in)
+        # 通道报警 / 占用：按已缓存 kind 用新语种重刷（不依赖旧中文 QLabel）
+        if hasattr(self, "_alarm_kind"):
+            self.set_channel_alarm(
+                bool(getattr(self, "_alarm_active", False)),
+                getattr(self, "_alarm_latch_text", "") or "",
+                getattr(self, "_alarm_kind", "normal") or "normal",
+            )
+        if hasattr(self, "_occ_kind"):
+            kind = getattr(self, "_occ_kind", "vacant") or "vacant"
+            status_key = {
+                "alarm": "status_occupied_alarm",
+                "passing": "status_passing",
+                "vacant": "status_vacant",
+                "offline": "status_occ_master_offline",
+                "noconn": "status_occ_no_master",
+                "ungated": "status_occ_ungated",
+            }.get(kind)
+            status = _t(status_key) if status_key else (getattr(self, "_occ_status_text", None) or "--")
+            # desc 常含动态细节，留给后续 snapshot；这里至少把状态标题切语种
+            self.set_occupancy(kind, status, getattr(self, "_occ_desc_text", "") or "")
         self._refresh_system_card()
         self.refresh_alarm_sidebar()
         parent = getattr(self, "parent", None)
@@ -729,9 +758,21 @@ class ControlRoomPage(QWidget):
 
     def set_channel_alarm(self, active: bool, latch_text: str = "", kind: str = "normal"):
         from core.translation import _t
+        self._alarm_active = bool(active)
+        self._alarm_kind = str(kind or "normal")
+        self._alarm_latch_text = latch_text or ""
         if active:
             self._reset_wanted = True
-            self.alarm_banner.setText(latch_text or _t("side_tag_alarm"))
+            # 换语时 latch 可能仍是旧语种短句；优先用标准侧标
+            banner = latch_text or _t("side_tag_alarm")
+            if banner in (
+                "正常", "报警", "离线", "警告", "硬报暂停",
+                "OK", "ALARM", "OFFLINE", "WARN", "Alarm paused",
+                _t("side_tag_ok"), _t("side_tag_alarm"), _t("side_tag_offline"),
+                _t("side_tag_warn"), _t("control_room_rad_paused"),
+            ):
+                banner = _t("side_tag_alarm")
+            self.alarm_banner.setText(banner)
             self._apply_pill(self.alarm_banner, ALARM, emphasis=True)
             self.reset_btn.setEnabled(getattr(self, "_nav_enabled", False))
         elif kind == "offline":
@@ -755,6 +796,9 @@ class ControlRoomPage(QWidget):
         if isinstance(kind, bool):
             kind = "passing" if kind else "vacant"
         kind = str(kind or "vacant")
+        self._occ_kind = kind
+        self._occ_status_text = status or ""
+        self._occ_desc_text = desc or ""
         self.occ_status.setText(status or "--")
         self.occ_desc.setText(desc or "")
         color = {

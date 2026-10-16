@@ -1232,6 +1232,11 @@
 
 
         function toggleLang() {
+            // 先本地翻转按钮文案，避免等 Python→JS 往返才有反馈
+            var lb = $('langBtn');
+            if (lb) {
+                lb.innerText = (lb.innerText === 'EN') ? '\u4e2d\u6587' : 'EN';
+            }
             if (bridge && bridge.toggleLanguage) bridge.toggleLanguage();
         }
 
