@@ -1907,13 +1907,13 @@ class UIBase():
             return False
         if self.ensure_connection_ready():
             self._acq_hold_lock = False
+            # 先打采集时间戳并清故障表，避免同 tick 内 _sync_probe_count_fault 误报 E103
+            self.diagnostics_manager.start_acquisition()
+            self.is_acquiring = True
             self._start_read_timer()
             
             # 延迟启动数据读取，让UI先响应
             QTimer.singleShot(100, lambda: self._delayed_start_reading())
-            
-            self.is_acquiring = True
-            self.diagnostics_manager.start_acquisition()
             self.last_auto_save_time = time.time()
             self.set_status_label('Starting acquisition...', True)
             
@@ -2840,10 +2840,21 @@ class UIBase():
             # Initialize spectrum data with correct shape from packet
             self.client_spectrum_data[storage_client_id] = np.zeros(packet.adc_channels)
             self._ensure_autosave_buffers(storage_client_id, packet.adc_channels)
-            # Set as primary client if not set yet
+            # Set as primary client if not set yet（手动「显示设备」优先于先来包）
             if self.primary_client_id is None:
-                self.primary_client_id = storage_client_id
-                self.log(f"Set {storage_client_id} as primary client for chart display", 'INFO')
+                chosen = self._resolve_new_primary_client_id(storage_client_id)
+                self.primary_client_id = chosen
+                if chosen != storage_client_id:
+                    self.log(
+                        "Fixed display channel %s (packet from %s)"
+                        % (chosen, storage_client_id),
+                        "INFO",
+                    )
+                else:
+                    self.log(
+                        "Set %s as primary client for chart display" % storage_client_id,
+                        "INFO",
+                    )
         
         # 用主机接收时刻作横轴（本地时间）；设备 tick 不能当挂钟
         host_ts = time.time()
@@ -2953,12 +2964,19 @@ class UIBase():
         time_series_data = []
         if self.primary_client_id and self.primary_client_id in self.client_time_series:
             time_series_data = self.client_time_series[self.primary_client_id]
+        elif not self._client_selection_is_auto():
+            picked = self._client_selection_combo_client_id()
+            if picked and picked in self.client_time_series:
+                if self.primary_client_id != picked:
+                    self.primary_client_id = picked
+                time_series_data = self.client_time_series[picked]
         elif self.client_time_series:
             # If no primary client set but we have data, use the first client
             first_client_id = list(self.client_time_series.keys())[0]
-            self.primary_client_id = first_client_id
+            if self.primary_client_id != first_client_id:
+                self.primary_client_id = first_client_id
+                self.log(f"Auto-selected {first_client_id} as primary client", 'INFO')
             time_series_data = self.client_time_series[first_client_id]
-            self.log(f"Auto-selected {first_client_id} as primary client", 'INFO')
         
         if time_series_data:
             last = time_series_data[-1]
@@ -3046,6 +3064,9 @@ class UIBase():
         if self.primary_client_id is None:
             self.primary_client_id = client_id
             self.apply_primary_client_snapshot()
+        if getattr(self, "_pinned_product_id_client_id", None) is None and self._is_settings_probe_client(client_id):
+            self._pinned_product_id_client_id = client_id
+            self._stable_default_probe_client_id = client_id
         self.update_client_selection_combo()
         # 新探头上线且数量已达标时，立刻清幽灵离线故障/编号
         try:
@@ -3218,12 +3239,169 @@ class UIBase():
             return default_value
 
     def _current_probe_key(self, client_id: str = None) -> str:
-        cid = client_id or self.primary_client_id
+        cid = client_id or self._product_id_panel_client_id() or self.primary_client_id
         if not cid:
             return "serial" if not getattr(self.config, "tcp_enabled", False) else ""
         if cid == "serial_client":
             return "serial"
         return self._extract_client_ip(cid) or cid
+
+    def _client_selection_is_auto(self) -> bool:
+        combo = getattr(self, "client_selection_combo", None)
+        if combo is None:
+            return True
+        try:
+            return int(combo.currentIndex()) <= 0
+        except Exception:
+            return True
+
+    def _fixed_display_client_id(self):
+        """非「自动」时返回固定显示通道（设置下拉或总览点选）。"""
+        if self._client_selection_is_auto():
+            return None
+        cid = self._client_selection_combo_client_id()
+        if cid:
+            return cid
+        stable = getattr(self, "_stable_default_probe_client_id", None)
+        return stable or None
+
+    def pin_display_channel(self, client_id: str):
+        """首页/总览点探头卡：固定该路在计数率、能谱页的显示，并同步「显示设备」。"""
+        if not client_id:
+            return
+        self._stable_default_probe_client_id = client_id
+        if hasattr(self, "_is_settings_probe_client") and self._is_settings_probe_client(client_id):
+            self._pinned_product_id_client_id = client_id
+            self._product_id_lock_ui_sig = None
+        combo = getattr(self, "client_selection_combo", None)
+        if combo is not None:
+            for i in range(combo.count()):
+                if combo.itemData(i) == client_id:
+                    combo.blockSignals(True)
+                    combo.setCurrentIndex(i)
+                    combo.blockSignals(False)
+                    break
+        try:
+            self.set_primary_client(client_id)
+        except Exception as e:
+            self.log("pin_display_channel(%s): %s" % (client_id, e), "WARNING")
+            self.primary_client_id = client_id
+            try:
+                self.apply_primary_client_snapshot()
+            except Exception:
+                pass
+            self._plot_dirty = True
+
+    def _resolve_new_primary_client_id(self, packet_client_id: str) -> str:
+        """首包或 primary 为空时：固定显示通道优先，否则跟当前包。"""
+        fixed = self._fixed_display_client_id()
+        if fixed:
+            return fixed
+        return packet_client_id
+
+    def _bind_display_channel_after_clear(self):
+        """清空累计后恢复设置里固定的显示通道（两路数据仍都会重新累加）。"""
+        cid = self._fixed_display_client_id()
+        if not cid:
+            self.primary_client_id = None
+            return
+        self.primary_client_id = cid
+        if cid not in self.client_spectrum_data:
+            self.client_spectrum_data[cid] = np.zeros(self.config.adc_channels)
+        self.spectrum_data = np.zeros(self.config.adc_channels)
+        if cid not in self.client_time_series:
+            self.client_time_series[cid] = []
+        try:
+            self.apply_primary_client_snapshot()
+        except Exception:
+            pass
+        self._plot_dirty = True
+        self.log("Display channel fixed to %s after clear" % cid, "INFO")
+
+    def _get_master_client_id_resolved(self):
+        master_cid = getattr(self, "master_client_id", None)
+        if not master_cid and getattr(self, "worker", None) is not None:
+            master_cid = getattr(self.worker, "master_client_id", None)
+        return master_cid
+
+    def _is_settings_probe_client(self, client_id: str) -> bool:
+        if not client_id or client_id == "system":
+            return False
+        master_cid = self._get_master_client_id_resolved()
+        return not (master_cid and client_id == master_cid)
+
+    def _stable_probe_client_id_for_panel(self):
+        clients = self.get_available_clients() if hasattr(self, "get_available_clients") else []
+        live = [c for c in clients if self._is_settings_probe_client(c) and self._probe_client_is_live(c)]
+
+        def sort_key(cid):
+            return (self._extract_client_ip(cid) or cid, str(cid))
+
+        live.sort(key=sort_key)
+        return live[0] if live else None
+
+    def _reassign_pinned_product_id_client(self):
+        cid = self._client_selection_combo_client_id() or self._stable_probe_client_id_for_panel()
+        if cid and self._is_settings_probe_client(cid):
+            self._pinned_product_id_client_id = cid
+        else:
+            self._pinned_product_id_client_id = None
+        self._product_id_lock_ui_sig = None
+
+    def _client_selection_combo_client_id(self):
+        combo = getattr(self, "client_selection_combo", None)
+        if combo is None:
+            return None
+        try:
+            idx = int(combo.currentIndex())
+        except Exception:
+            return None
+        if idx <= 0:
+            return None
+        try:
+            return combo.itemData(idx)
+        except Exception:
+            return None
+
+    def _product_id_panel_client_id(self, hint_client_id: str = None):
+        """设置页产品 ID 维护绑定的探头（与谱图 primary 解耦，避免多探头时状态乱跳）。"""
+        pinned = getattr(self, "_pinned_product_id_client_id", None)
+        if pinned and self._is_settings_probe_client(pinned) and self._probe_client_is_live(pinned):
+            return pinned
+        selected = self._client_selection_combo_client_id()
+        if selected and self._is_settings_probe_client(selected) and self._probe_client_is_live(selected):
+            return selected
+        if hint_client_id and self._is_settings_probe_client(hint_client_id) and self._probe_client_is_live(hint_client_id):
+            return hint_client_id
+        stable = getattr(self, "_stable_default_probe_client_id", None)
+        if stable and self._is_settings_probe_client(stable) and self._probe_client_is_live(stable):
+            return stable
+        stable = self._stable_probe_client_id_for_panel()
+        if stable:
+            self._stable_default_probe_client_id = stable
+            return stable
+        if (
+            self.primary_client_id
+            and self._is_settings_probe_client(self.primary_client_id)
+            and self._probe_client_is_live(self.primary_client_id)
+        ):
+            return self.primary_client_id
+        return hint_client_id if hint_client_id and self._is_settings_probe_client(hint_client_id) else None
+
+    def pin_product_id_panel_client(self, client_id: str = None):
+        cid = client_id or self._client_selection_combo_client_id() or self._stable_probe_client_id_for_panel()
+        if cid and not self._is_settings_probe_client(cid):
+            cid = self._stable_probe_client_id_for_panel()
+        if not cid and self.primary_client_id and self._is_settings_probe_client(self.primary_client_id):
+            cid = self.primary_client_id
+        if cid and self._is_settings_probe_client(cid):
+            self._pinned_product_id_client_id = cid
+            self._stable_default_probe_client_id = cid
+            self._product_id_lock_ui_sig = None
+            if hasattr(self, "load_probe_panel_settings"):
+                self.load_probe_panel_settings(cid)
+            else:
+                self._refresh_product_id_lock_ui(cid)
 
     def _save_probe_panel_settings(self, client_id: str = None, hv=None, threshold=None,
                                    sensitivity=None, product_id=None):
@@ -3251,7 +3429,7 @@ class UIBase():
 
     def load_probe_panel_settings(self, client_id: str = None):
         """Fill HV/threshold/sensitivity spinboxes for the selected probe."""
-        cid = client_id or self.primary_client_id
+        cid = client_id or self._product_id_panel_client_id() or self.primary_client_id
         master_cid = self._get_master_client_id() if hasattr(self, "_get_master_client_id") else getattr(self, "master_client_id", None)
         if cid and master_cid and cid == master_cid:
             return
@@ -3305,7 +3483,7 @@ class UIBase():
             self.hv_spin.setValue(float(hv))
             self.threshold_spin.setValue(int(thr))
             self.sensitivity_spin.setValue(int(sens))
-            if hasattr(self, "product_id_spin"):
+            if hasattr(self, "product_id_spin") and self._product_id_spin_device_sync_allowed(cid):
                 try:
                     self.product_id_spin.setValue(int(pid or 0))
                 except Exception:
@@ -3858,6 +4036,30 @@ class UIBase():
                 pass
         return 0
 
+    def _product_id_spin_device_sync_allowed(self, client_id: str = None) -> bool:
+        """维护编辑/等待写回期间，不要用谱包里的 product_id 覆盖 spin。"""
+        pending = getattr(self, "_pending_product_id_write", None)
+        if pending:
+            age = time.time() - float(pending.get("requested_at", 0.0) or 0.0)
+            if age <= 8.0:
+                return False
+        spin = getattr(self, "product_id_spin", None)
+        if spin is not None:
+            try:
+                if spin.hasFocus():
+                    return False
+            except Exception:
+                pass
+        key = self._current_probe_key(client_id)
+        if not key:
+            return True
+        live_pid = self._current_probe_live_product_id(client_id)
+        state = self.config.get_product_id_state(key, live_product_id=live_pid)
+        # 仅「已锁定、不可写」时把 spin 当作设备 ID 的只读镜像；可写期间不覆盖用户输入
+        if state.get("unlocked") or not state.get("locked"):
+            return False
+        return True
+
     def _refresh_product_id_lock_ui(self, client_id: str = None):
         label = getattr(self, "product_id_lock_label", None)
         spin = getattr(self, "product_id_spin", None)
@@ -3865,8 +4067,9 @@ class UIBase():
         unlock_btn = getattr(self, "product_id_unlock_btn", None)
         if label is None:
             return
-        key = self._current_probe_key(client_id)
-        live_pid = self._current_probe_live_product_id(client_id)
+        panel_cid = self._product_id_panel_client_id(client_id)
+        key = self._current_probe_key(panel_cid)
+        live_pid = self._current_probe_live_product_id(panel_cid)
         state = self.config.get_product_id_state(key, live_product_id=live_pid) if key else {"locked": True, "unlocked": False}
         pending_info = getattr(self, "_pending_product_id_write", None)
         if pending_info and (time.time() - float(pending_info.get("requested_at", 0.0) or 0.0)) > 8.0:
@@ -3874,24 +4077,34 @@ class UIBase():
             self._pending_product_id_write = None
         pending = bool(pending_info)
         if pending:
-            label.setText(_t("status_product_id_pending"))
-            label.setStyleSheet("color: #888888; font-size: 11px;")
+            new_text = _t("status_product_id_pending")
+            new_style = "color: #888888; font-size: 11px;"
         elif state["unlocked"]:
-            label.setText(_t("status_product_id_unlocked"))
-            label.setStyleSheet("color: #ffb74d; font-size: 11px;")
+            new_text = _t("status_product_id_unlocked")
+            new_style = "color: #ffb74d; font-size: 11px;"
         elif state["locked"]:
-            label.setText(_t("status_product_id_locked"))
-            label.setStyleSheet("color: #888888; font-size: 11px;")
+            new_text = _t("status_product_id_locked")
+            new_style = "color: #888888; font-size: 11px;"
         else:
-            label.setText(_t("status_product_id_unset"))
-            label.setStyleSheet("color: #4caf50; font-size: 11px;")
+            new_text = _t("status_product_id_unset")
+            new_style = "color: #4caf50; font-size: 11px;"
         can_write = bool(state["unlocked"] or (not state["locked"]))
-        if spin is not None:
-            spin.setEnabled(can_write and not pending and spin.isVisible())
-        if write_btn is not None:
-            write_btn.setEnabled(can_write and not pending and write_btn.isVisible())
-        if unlock_btn is not None:
-            unlock_btn.setEnabled(state["locked"] and not pending and unlock_btn.isVisible())
+        ui_sig = (str(key), bool(pending), bool(state["locked"]), bool(state["unlocked"]), bool(can_write))
+        if ui_sig == getattr(self, "_product_id_lock_ui_sig", None):
+            return
+        self._product_id_lock_ui_sig = ui_sig
+        if label.text() != new_text or label.styleSheet() != new_style:
+            label.setText(new_text)
+            label.setStyleSheet(new_style)
+        spin_enabled = can_write and not pending and (spin.isVisible() if spin is not None else False)
+        write_enabled = can_write and not pending and (write_btn.isVisible() if write_btn is not None else False)
+        unlock_enabled = state["locked"] and not pending and (unlock_btn.isVisible() if unlock_btn is not None else False)
+        if spin is not None and spin.isEnabled() != spin_enabled:
+            spin.setEnabled(spin_enabled)
+        if write_btn is not None and write_btn.isEnabled() != write_enabled:
+            write_btn.setEnabled(write_enabled)
+        if unlock_btn is not None and unlock_btn.isEnabled() != unlock_enabled:
+            unlock_btn.setEnabled(unlock_enabled)
 
     def _apply_product_id_readback(self, client_id: str, product_id: int):
         pending = getattr(self, "_pending_product_id_write", None) or {}
@@ -3910,6 +4123,7 @@ class UIBase():
             self.config.set_product_id_state(key, locked=True, unlocked=False)
             self.config.save_settings()
         self._pending_product_id_write = None
+        self._product_id_lock_ui_sig = None
         if hasattr(self, "product_id_spin"):
             self.product_id_spin.blockSignals(True)
             self.product_id_spin.setValue(int(product_id))
@@ -3918,12 +4132,16 @@ class UIBase():
         self.log(_t("msg_product_id_set_ok", pid=int(product_id)), "INFO")
 
     def unlock_product_id_edit(self):
-        key = self._current_probe_key()
+        panel_cid = self._product_id_panel_client_id()
+        key = self._current_probe_key(panel_cid)
         if not key:
             return False
+        if panel_cid:
+            self._pinned_product_id_client_id = panel_cid
+        self._product_id_lock_ui_sig = None
         self.config.set_product_id_state(key, locked=True, unlocked=True)
         self.config.save_settings()
-        self._refresh_product_id_lock_ui()
+        self._refresh_product_id_lock_ui(panel_cid)
         return True
 
     def set_product_id(self):
@@ -4394,11 +4612,12 @@ class UIBase():
         if client_id is None or client_id == self.primary_client_id:
             # 更新产品ID显示
             self.product_id_label.setText(f"{packet.product_id}")
-            if hasattr(self, "product_id_spin"):
-                self.product_id_spin.blockSignals(True)
-                self.product_id_spin.setValue(int(packet.product_id))
-                self.product_id_spin.blockSignals(False)
-            self._refresh_product_id_lock_ui(client_id)
+            panel_cid = self._product_id_panel_client_id(client_id)
+            if panel_cid and client_id == panel_cid and hasattr(self, "product_id_spin"):
+                if self._product_id_spin_device_sync_allowed(panel_cid):
+                    self.product_id_spin.blockSignals(True)
+                    self.product_id_spin.setValue(int(packet.product_id))
+                    self.product_id_spin.blockSignals(False)
             
             # 更新灵敏度系数显示
             self.sensitivity_label.setText(f"{packet.sen_coef}")
@@ -4873,11 +5092,44 @@ class UIBase():
             target = max(online, cfg_n, 1)
         return online, target
 
+    def _probe_count_startup_grace_active(self) -> bool:
+        """开采集后宽限内不报 E103 / 首页「启动自检」（第二路 K2 常晚连）。"""
+        dm = getattr(self, "diagnostics_manager", None)
+        if dm is None or not getattr(dm, "is_acquiring", False):
+            return False
+        start = getattr(dm, "acquisition_start_time", None)
+        if not start:
+            return False
+        grace = float(getattr(dm, "PROBE_COUNT_STARTUP_GRACE_SEC", 45.0) or 0.0)
+        if grace <= 0:
+            return False
+        if (time.time() - float(start)) >= grace:
+            return False
+        try:
+            expected = int(getattr(self.config, "expected_probe_count", 0) or 0)
+        except (TypeError, ValueError):
+            expected = 0
+        if expected > 0 and self._probes_with_spectrum_count() >= expected:
+            return False
+        return True
+
+    def _probes_with_spectrum_count(self) -> int:
+        """E103 只统计已收到能谱的探头，不把「刚连上 TCP」算在线。"""
+        ids = self.get_online_probe_client_ids() if hasattr(self, "get_online_probe_client_ids") else []
+        last_pkt = {}
+        dm = getattr(self, "diagnostics_manager", None)
+        if dm is not None:
+            last_pkt = getattr(dm, "last_packet_time", None) or {}
+        return sum(1 for cid in ids if float(last_pkt.get(cid, 0) or 0) > 0.0)
+
     def _sync_probe_count_fault(self):
         """E103 when online probes < expected (missing one or all)."""
         from core.diagnostics import FaultCode
         dm = getattr(self, "diagnostics_manager", None)
         if dm is None or not hasattr(dm, "add_fault"):
+            return
+        if not getattr(dm, "is_acquiring", False):
+            dm.remove_fault("system", FaultCode.E103)
             return
         # 冷启动从未接设备：不算探头数量不足
         never = False
@@ -4887,10 +5139,16 @@ class UIBase():
             never = False
         n_clients = 0
         try:
-            n_clients = int(self._tcp_client_count())
+            if hasattr(self, "_tcp_client_count"):
+                n_clients = int(self._tcp_client_count())
+            elif hasattr(self, "worker") and self.worker is not None:
+                n_clients = len(getattr(self.worker, "client_sockets", None) or {})
         except Exception:
             n_clients = 0
         if never and n_clients == 0:
+            dm.remove_fault("system", FaultCode.E103)
+            return
+        if self._probe_count_startup_grace_active():
             dm.remove_fault("system", FaultCode.E103)
             return
         try:
@@ -4901,7 +5159,8 @@ class UIBase():
         if expected <= 0:
             dm.remove_fault("system", FaultCode.E103)
             return
-        online, target = self.probe_online_and_target()
+        online = self._probes_with_spectrum_count()
+        target = expected
         if target > 0 and online < target:
             dm.add_fault("system", FaultCode.E103)
         else:
@@ -4911,8 +5170,18 @@ class UIBase():
         """Build operator-facing fault text with correct probe number (no IP, keep short)."""
         from core.translation import _t
         label = self._fault_device_label(client_id)
-        if str(code) == "E103" and hasattr(self, "probe_online_and_target"):
-            online, expected = self.probe_online_and_target()
+        if str(code) == "E103":
+            try:
+                expected = int(getattr(self.config, "expected_probe_count", 0) or 0)
+            except (TypeError, ValueError):
+                expected = 0
+            online = (
+                self._probes_with_spectrum_count()
+                if hasattr(self, "_probes_with_spectrum_count")
+                else 0
+            )
+            if expected <= 0 and hasattr(self, "probe_online_and_target"):
+                online, expected = self.probe_online_and_target()
             body = _t("fault_op_E103", online=online, expected=expected)
         else:
             body = _t("fault_op_" + str(code))
@@ -4943,8 +5212,18 @@ class UIBase():
         from core.diagnostics import FaultCode
         code = str(code)
         label = "" if client_id in ("master", "system") else self._fault_device_label(client_id)
-        if code == "E103" and hasattr(self, "probe_online_and_target"):
-            online, expected = self.probe_online_and_target()
+        if code == "E103":
+            try:
+                expected = int(getattr(self.config, "expected_probe_count", 0) or 0)
+            except (TypeError, ValueError):
+                expected = 0
+            online = (
+                self._probes_with_spectrum_count()
+                if hasattr(self, "_probes_with_spectrum_count")
+                else 0
+            )
+            if expected <= 0 and hasattr(self, "probe_online_and_target"):
+                online, expected = self.probe_online_and_target()
             missing = max(0, int(expected) - int(online))
             if online <= 0:
                 body = _t("fault_home_E103_none", online=online, expected=expected)
@@ -4965,8 +5244,18 @@ class UIBase():
         code = str(code)
         name, _, _, _ = FaultCode.get_info(code)
         extra = ""
-        if code == "E103" and hasattr(self, "probe_online_and_target"):
-            online, expected = self.probe_online_and_target()
+        if code == "E103":
+            try:
+                expected = int(getattr(self.config, "expected_probe_count", 0) or 0)
+            except (TypeError, ValueError):
+                expected = 0
+            online = (
+                self._probes_with_spectrum_count()
+                if hasattr(self, "_probes_with_spectrum_count")
+                else 0
+            )
+            if expected <= 0 and hasattr(self, "probe_online_and_target"):
+                online, expected = self.probe_online_and_target()
             extra = "（%s/%s）" % (online, expected)
         return ("%s %s%s" % (code, name, extra)).strip()
     
@@ -5029,9 +5318,14 @@ class UIBase():
             
             # 启用下拉菜单（如果有客户端）
             self.client_selection_combo.setEnabled(len(available_clients) > 0)
+            pinned = getattr(self, "_pinned_product_id_client_id", None)
+            if pinned and (pinned not in available_clients or not self._is_settings_probe_client(pinned)):
+                self._reassign_pinned_product_id_client()
         finally:
             # 恢复信号
             self.client_selection_combo.blockSignals(False)
+        if hasattr(self, "_refresh_product_id_lock_ui"):
+            self._refresh_product_id_lock_ui()
     
     def _skip_probe_radiation_log(self, client_id: str) -> bool:
         """通道机有主控时，操作员记录以主控硬报为准，不写探头辐射位。"""
@@ -5120,9 +5414,15 @@ class UIBase():
         else:
             # 选择了具体客户端
             client_id = self.client_selection_combo.itemData(current_index)
+            if client_id:
+                self._pinned_product_id_client_id = client_id
+                self._stable_default_probe_client_id = client_id
+                self._product_id_lock_ui_sig = None
             if client_id and client_id != self.primary_client_id:
                 self.set_primary_client(client_id)
                 self.log(f"Manually selected client: {client_id}", 'INFO')
+            elif client_id and hasattr(self, "load_probe_panel_settings"):
+                self.load_probe_panel_settings(client_id)
     
     def manual_reconnect_serial(self):
         """

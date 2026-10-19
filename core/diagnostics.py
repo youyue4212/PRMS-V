@@ -71,6 +71,9 @@ class DiagnosticsManager:
     MASTER_COMM_TIMEOUT_DEBOUNCE_SEC = 2.0
     # 开采集后暂缓 M102：给防火墙弹窗确认、首连建立留时间
     MASTER_COMM_STARTUP_GRACE_SEC = 20.0
+    PROBE_COUNT_STARTUP_GRACE_SEC = 45.0
+    M104_STARTUP_GRACE_SEC = 45.0
+    M104_DEBOUNCE_SEC = 3.0
     # 开机后长时间完全无数据报 E101
     NO_DATA_STARTUP_SEC = 8.0
 

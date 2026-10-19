@@ -757,6 +757,12 @@ class MainWindow(QMainWindow, UIBase):
         if hasattr(self, "alarm_log_page") and hasattr(self.alarm_log_page, "update_auth_controls"):
             self.alarm_log_page.update_auth_controls()
         self._sync_control_room_action_bar()
+        # 设置页：固定产品 ID 维护对象，避免多探头+主控时未选探头就乱跳
+        if index == 5 and hasattr(self, "pin_product_id_panel_client"):
+            try:
+                self.pin_product_id_panel_client()
+            except Exception:
+                pass
 
     def _apply_public_chrome(self, index: int):
         """公共模式 UI：主显示藏底栏；报警日志显示底栏便于返回。主控室模式常显底栏。"""
@@ -893,6 +899,9 @@ class MainWindow(QMainWindow, UIBase):
             self.home_page.total_cps_label.setText("0")
             self.home_page.update_probe_tiles_from_master(None, False)
 
+        if hasattr(self, "_bind_display_channel_after_clear"):
+            self._bind_display_channel_after_clear()
+
         if was_acquiring:
             self.log("Current accumulation cleared; acquisition continues", "INFO")
         else:
@@ -1014,22 +1023,16 @@ class MainWindow(QMainWindow, UIBase):
             self.switch_page(1)
             return
 
-        if hasattr(self, "set_primary_client"):
+        if hasattr(self, "pin_display_channel"):
+            self.pin_display_channel(client_id)
+        elif hasattr(self, "set_primary_client"):
             try:
                 self.set_primary_client(client_id)
             except Exception as e:
                 self.log("Failed to select probe %s: %s" % (client_id, e), "WARNING")
+                self.primary_client_id = client_id
         else:
             self.primary_client_id = client_id
-
-        if hasattr(self, "client_selection_combo"):
-            combo = self.client_selection_combo
-            for i in range(combo.count()):
-                if combo.itemData(i) == client_id:
-                    combo.blockSignals(True)
-                    combo.setCurrentIndex(i)
-                    combo.blockSignals(False)
-                    break
 
         self.log("Home probe tile → overview: %s" % client_id, "INFO")
         self.switch_page(1)
@@ -1554,10 +1557,18 @@ class MainWindow(QMainWindow, UIBase):
                     previous = set(previous)
                     previous.discard(e103)
                     self._reset_probe_comm_logger("system", FaultCode.E103)
+            in_grace = (
+                hasattr(self, "_probe_count_startup_grace_active")
+                and self._probe_count_startup_grace_active()
+            )
             if current != previous:
                 for cid, code in sorted(current - previous):
+                    if in_grace and str(code) == str(FaultCode.E103):
+                        continue
                     self._log_probe_comm_edge(cid, code, True)
                 for cid, code in sorted(previous - current):
+                    if in_grace and str(code) == str(FaultCode.E103):
+                        continue
                     self._log_probe_comm_edge(cid, code, False)
             self._prev_probe_comm_keys = current
         except Exception:
@@ -1567,6 +1578,9 @@ class MainWindow(QMainWindow, UIBase):
         """开采集会清空诊断表；边沿快照也要清，否则会把「表被清空」误记成链路已恢复。"""
         self._prev_master_fault_codes = set()
         self._prev_probe_comm_keys = set()
+        self.prev_fault_keys = set()
+        self._m104_pending_since = 0.0
+        self._master_timeout_pending_since = 0.0
         try:
             from core.alarm_logger import get_alarm_logger, is_system_event_client
             logger = get_alarm_logger()
@@ -1708,9 +1722,25 @@ class MainWindow(QMainWindow, UIBase):
         else:
             dm.remove_fault(_MASTER_FAULT_CLIENT_ID, FaultCode.M103)
 
-        if latest is not None and self.is_master_online() and int(latest.decision_result) == 0xFF:
-            dm.add_fault(_MASTER_FAULT_CLIENT_ID, FaultCode.M104)
+        m104_grace_sec = float(getattr(dm, "M104_STARTUP_GRACE_SEC", 45.0) or 0.0)
+        m104_debounce = float(getattr(dm, "M104_DEBOUNCE_SEC", 3.0) or 0.0)
+        m104_in_grace = startup_age < max(master_startup_grace_sec, m104_grace_sec)
+        ff_active = (
+            latest is not None
+            and self.is_master_online()
+            and int(latest.decision_result) == 0xFF
+        )
+        if ff_active and not m104_in_grace:
+            pending = float(getattr(self, "_m104_pending_since", 0.0) or 0.0)
+            if pending <= 0.0:
+                self._m104_pending_since = now
+                pending = now
+            if (now - pending) >= m104_debounce:
+                dm.add_fault(_MASTER_FAULT_CLIENT_ID, FaultCode.M104)
+            else:
+                dm.remove_fault(_MASTER_FAULT_CLIENT_ID, FaultCode.M104)
         else:
+            self._m104_pending_since = 0.0
             dm.remove_fault(_MASTER_FAULT_CLIENT_ID, FaultCode.M104)
         self._sync_master_fault_logs()
 
@@ -1817,9 +1847,22 @@ class MainWindow(QMainWindow, UIBase):
 
         self._sync_probe_count_fault()
 
+        probe_grace = (
+            bool(self._probe_count_startup_grace_active())
+            if hasattr(self, "_probe_count_startup_grace_active")
+            else False
+        )
+        spectrum_online = (
+            self._probes_with_spectrum_count()
+            if hasattr(self, "_probes_with_spectrum_count")
+            else probe_online
+        )
+
         active_faults = getattr(self.diagnostics_manager, "get_all_active_faults", lambda: [])()
         unique_msgs = []
-        probe_comm_fault = bool(target > 0 and probe_online < target)
+        probe_comm_fault = bool(target > 0 and spectrum_online < target)
+        if probe_grace:
+            probe_comm_fault = False
         # 冷启动零探头：不算探头通信故障
         if never_seen and probe_online == 0:
             probe_comm_fault = False
@@ -1831,24 +1874,31 @@ class MainWindow(QMainWindow, UIBase):
                 or (client_id == "system" and code in _probe_comm_codes)
             ):
                 continue
+            if probe_grace and client_id == "system" and code == FaultCode.E103:
+                continue
             msg = self.format_fault_home_message(client_id, code)
             if msg and msg not in unique_msgs:
                 unique_msgs.append(msg)
             if client_id == _MASTER_FAULT_CLIENT_ID:
                 continue
             if code in _probe_comm_codes:
+                if code == FaultCode.E103 and probe_grace:
+                    continue
                 if not (never_seen and probe_online == 0):
                     probe_comm_fault = True
             elif msg and msg not in probe_hw_msgs:
                 probe_hw_msgs.append(msg)
 
         # --- structured health KV rows for Web HMI ---
-        if never_seen and probe_online == 0:
+        if probe_grace and target > 0:
+            probe_tone = "muted"
+            probe_comm = _t("health_probe_startup", online=spectrum_online, expected=target)
+        elif never_seen and probe_online == 0:
             probe_tone = "muted"
             probe_comm = _t("health_probe_await", online=probe_online, expected=target)
         else:
-            probe_tone = "green" if (not probe_comm_fault and probe_online >= target and target > 0) else "amber"
-            probe_comm = _t("health_probe_online", online=probe_online, expected=target)
+            probe_tone = "green" if (not probe_comm_fault and spectrum_online >= target and target > 0) else "amber"
+            probe_comm = _t("health_probe_online", online=spectrum_online, expected=target)
 
         # 从未接入主控：健康总状态用「待接入」，不要「主控离线 / 探头通信故障」
         if never_seen and not master_online:
@@ -3632,6 +3682,11 @@ class MainWindow(QMainWindow, UIBase):
                     or (row[0] == "system" and row[1] in _probe_comm)
                 )
             ]
+        if hasattr(self, "_probe_count_startup_grace_active") and self._probe_count_startup_grace_active():
+            active_faults = [
+                row for row in active_faults
+                if not (row[0] == "system" and row[1] == FaultCode.E103)
+            ]
         current_fault_keys = set((client_id, code) for client_id, code, _, _, _, _ in active_faults)
         
         # Log newly added faults
@@ -4477,19 +4532,22 @@ class MainWindow(QMainWindow, UIBase):
             return
 
         val = int(getattr(packet, "value", 0) or 0) & 0xFFFF
+        panel_cid = self._product_id_panel_client_id(cid) if hasattr(self, "_product_id_panel_client_id") else cid
         if code == 0x0D:
             if cid:
                 data = (getattr(self, "client_data", None) or {}).get(cid)
                 if data is not None:
                     data["product_id"] = val
                 self._remember_probe(cid, val)
-            if hasattr(self, "product_id_spin"):
-                self.product_id_spin.blockSignals(True)
-                self.product_id_spin.setValue(val)
-                self.product_id_spin.blockSignals(False)
-            self._refresh_product_id_lock_ui(cid)
-            self.log("Product ID read → %d (0x0D ack)" % val, "INFO")
-            show_info(self, _t("msg_product_id_title"), _t("msg_product_id_read_ok", pid=val))
+            if panel_cid and cid == panel_cid:
+                if hasattr(self, "product_id_spin"):
+                    self.product_id_spin.blockSignals(True)
+                    self.product_id_spin.setValue(val)
+                    self.product_id_spin.blockSignals(False)
+                self._product_id_lock_ui_sig = None
+                self._refresh_product_id_lock_ui(cid)
+                self.log("Product ID read → %d (0x0D ack)" % val, "INFO")
+                show_info(self, _t("msg_product_id_title"), _t("msg_product_id_read_ok", pid=val))
             return
 
         self.log("Product ID write ack accepted (value=%d)" % val, "INFO")
