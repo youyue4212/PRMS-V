@@ -1,21 +1,21 @@
 @echo off
-REM ÔÚ Windows ¿ª·¢»úÉÏ´ò°ü£¨Éú³ÉµÄ exe Ö»ÄÜ¸ø Windows ÓÃ£¬²»ÄÜ¸ø Linux µ¥°å»úÓÃ£©
-REM ²úÎïÊÇÄ¿Â¼Ä£Ê½£º±ØĞëÕû¼Ğ¿½±´ daq_tablet\£¨º¬ _internal£©£¬²»ÄÜÖ»¿½ exe¡£
+REM åœ¨ Windows å¼€å‘æœºä¸Šæ‰“åŒ…ï¼ˆç”Ÿæˆçš„ exe åªèƒ½ç»™ Windows ç”¨ï¼Œä¸èƒ½ç»™ Linux å•æ¿æœºç”¨ï¼‰
+REM äº§ç‰©æ˜¯ç›®å½•æ¨¡å¼ï¼šå¿…é¡»æ•´å¤¹æ‹·è´ daq_tablet\ï¼ˆå« _internalï¼‰ï¼Œä¸èƒ½åªæ‹· exeã€‚
 setlocal EnableDelayedExpansion
 cd /d "%~dp0\.."
 
 echo ========================================
-echo  daq_tablet Windows ´ò°ü
+echo  daq_tablet Windows æ‰“åŒ…
 echo ========================================
 
 python -c "import sys; print('Python', sys.version); print('Prefix', sys.base_prefix); v=sys.version_info; raise SystemExit(0 if (v.major, v.minor) >= (3, 10) else 1)"
 if errorlevel 1 (
-    echo [´íÎó] ĞèÒª Python 3.10 ¼°ÒÔÉÏ¡£
+    echo [é”™è¯¯] éœ€è¦ Python 3.10 åŠä»¥ä¸Šã€‚
     pause
     exit /b 1
 )
 
-python -c "import sys; v=sys.version_info; print('[ÌáÊ¾] µ±Ç°ÊÇ Python %d.%d¡£PyQt5 ÔÚ 3.12/3.13 ÉÏ¸üÎÈ£»3.14 ¿ÉÓÃµ«Ä¿±ê»úĞè½ÏĞÂµÄ VC ÔËĞĞ¿â¡£' % (v.major, v.minor))"
+python -c "import sys; v=sys.version_info; print('[æç¤º] å½“å‰æ˜¯ Python %d.%dã€‚PyQt5 åœ¨ 3.12/3.13 ä¸Šæ›´ç¨³ï¼›3.14 å¯ç”¨ä½†ç›®æ ‡æœºéœ€è¾ƒæ–°çš„ VC è¿è¡Œåº“ã€‚' % (v.major, v.minor))"
 
 if not exist .venv_pack (
     python -m venv .venv_pack
@@ -23,59 +23,131 @@ if not exist .venv_pack (
 call .venv_pack\Scripts\activate.bat
 
 python -m pip install -U pip wheel
-REM PyInstaller 6.15 Æğ²ÅÖ§³Ö Python 3.14
+REM PyInstaller 6.15 èµ·æ‰æ”¯æŒ Python 3.14
 pip install "pyinstaller>=6.16" PyQt5 PyQtWebEngine pyqtgraph numpy pandas pyserial openpyxl psutil scipy
 
+echo.
+echo [1/4] ç»“æŸå¯èƒ½å ç”¨ dist çš„è¿›ç¨‹ ...
+taskkill /F /IM daq_tablet.exe >nul 2>&1
+powershell -NoProfile -Command ^
+  "Get-CimInstance Win32_Process -Filter \"Name='python.exe'\" -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -match 'daq_tablet' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }" >nul 2>&1
+timeout /t 2 /nobreak >nul
+
 cd packaging
-if exist dist rmdir /s /q dist
-if exist build rmdir /s /q build
+if not exist dist mkdir dist
 
-pyinstaller --noconfirm --clean daq_tablet.spec
+REM å†™åˆ°æ–°ç›®å½•ï¼Œé¿å… PyInstaller COLLECT å¼ºåˆ è¢«é”å®šçš„ dist\daq_tablet
+set "PI_STAGE=dist\stage_%RANDOM%_%RANDOM%"
+echo [2/4] PyInstaller è¾“å‡ºåˆ° %PI_STAGE% ï¼ˆä¸è¦†ç›–æ—§ dist\daq_tabletï¼‰...
+if exist build rmdir /s /q build 2>nul
+
+pyinstaller --noconfirm --clean --distpath "%PI_STAGE%" daq_tablet.spec
 if errorlevel 1 (
-    echo [´íÎó] PyInstaller ´ò°üÊ§°Ü¡£
+    echo [é”™è¯¯] PyInstaller æ‰“åŒ…å¤±è´¥ã€‚
+    if exist "%PI_STAGE%" rmdir /s /q "%PI_STAGE%" 2>nul
     pause
     exit /b 1
 )
 
-set "DIST_DIR=%cd%\dist\daq_tablet"
-set "INTERNAL=%DIST_DIR%\_internal"
-if not exist "%DIST_DIR%\daq_tablet.exe" (
-    echo [´íÎó] Î´Éú³É dist\daq_tablet\daq_tablet.exe
+set "STAGE_APP=%CD%\%PI_STAGE%\daq_tablet"
+set "DIST_DIR=%CD%\dist\daq_tablet"
+if not exist "%STAGE_APP%\daq_tablet.exe" (
+    echo [é”™è¯¯] æœªç”Ÿæˆ %PI_STAGE%\daq_tablet\daq_tablet.exe
     pause
     exit /b 1
 )
 
-REM ÓÃÎ´Ñ¹ËõµÄ¹Ù·½ DLL ¸²¸Ç£¬±ÜÃâ UPX / ÊÕ¼¯ÒÅÂ©µ¼ÖÂ LoadLibrary Ê§°Ü
+set "INTERNAL=%STAGE_APP%\_internal"
 for /f "delims=" %%I in ('python -c "import sys; print(sys.base_prefix)"') do set "PYDIR=%%I"
 for %%D in (python3.dll python314.dll python313.dll python312.dll VCRUNTIME140.dll VCRUNTIME140_1.dll vcruntime140.dll vcruntime140_1.dll) do (
     if exist "%PYDIR%\%%D" (
         copy /y "%PYDIR%\%%D" "%INTERNAL%\%%D" >nul
     )
 )
+REM python314.dll è¿˜ä¾èµ– python3.dllï¼›äºŒè€…å¿…é¡»åŒåœ¨ _internal
+if exist "%PYDIR%\python3.dll" if not exist "%INTERNAL%\python3.dll" (
+    copy /y "%PYDIR%\python3.dll" "%INTERNAL%\python3.dll" >nul
+)
+if exist build\daq_tablet (
+    echo æœ¬ç›®å½• exe ä¸èƒ½å•ç‹¬è¿è¡Œï¼Œè¯·ç”¨ packaging\dist\daq_tablet\daq_tablet.exe> build\daq_tablet\å‹¿åœ¨æ­¤è¿è¡Œ.txt
+)
+copy /y "%~dp0ä½¿ç”¨è¯´æ˜.txt" "%STAGE_APP%\ä½¿ç”¨è¯´æ˜.txt" >nul
 
-copy /y "%~dp0Ê¹ÓÃËµÃ÷.txt" "%DIST_DIR%\Ê¹ÓÃËµÃ÷.txt" >nul
+REM å‘å¸ƒå¤±è´¥æ—¶ä»ç”¨ stage ç›®å½•æ ¡éªŒä¸æç¤ºï¼Œé¿å…è¯¯æŠ¥ã€Œæ²¡æœ‰ python3xx.dllã€
+set "RELEASE_DIR=%STAGE_APP%"
+set "INTERNAL=%STAGE_APP%\_internal"
 
+echo [3/4] å‘å¸ƒåˆ° packaging\dist\daq_tablet ...
+taskkill /F /IM daq_tablet.exe >nul 2>&1
+timeout /t 1 /nobreak >nul
+
+set "PUBLISH_OK=0"
+if exist "%DIST_DIR%" (
+    set "OLD=dist\daq_tablet_old_%RANDOM%"
+    move /Y "%DIST_DIR%" "!OLD!" >nul 2>&1
+    if exist "%DIST_DIR%" (
+        echo [è­¦å‘Š] æ—§ dist\daq_tablet è¢«å ç”¨ï¼Œè·³è¿‡è¦†ç›–ï¼›è¯·ç›´æ¥ä½¿ç”¨æœ¬æ¬¡ stage ç›®å½•ï¼š
+        echo   %STAGE_APP%
+        goto :done_stage
+    )
+    if exist "!OLD!" rmdir /s /q "!OLD!" 2>nul
+)
+
+move /Y "%STAGE_APP%" "%DIST_DIR%" >nul 2>&1
+if not errorlevel 1 if exist "%DIST_DIR%\daq_tablet.exe" (
+    set "PUBLISH_OK=1"
+    set "RELEASE_DIR=%DIST_DIR%"
+    set "INTERNAL=%DIST_DIR%\_internal"
+    if exist "%PI_STAGE%" rmdir /s /q "%PI_STAGE%" 2>nul
+) else (
+    echo [è­¦å‘Š] æ— æ³• move åˆ° dist\daq_tabletï¼ˆæ‹’ç»è®¿é—®/è¢«å ç”¨ï¼‰ï¼Œæ”¹ç”¨ robocopy ...
+    if not exist "%DIST_DIR%" mkdir "%DIST_DIR%" 2>nul
+    robocopy "%STAGE_APP%" "%DIST_DIR%" /E /NFL /NDL /NJH /NJS /NC /NS /R:2 /W:2 >nul
+    if exist "%DIST_DIR%\daq_tablet.exe" (
+        set "PUBLISH_OK=1"
+        set "RELEASE_DIR=%DIST_DIR%"
+        set "INTERNAL=%DIST_DIR%\_internal"
+        echo [æç¤º] å·²å¤åˆ¶åˆ° dist\daq_tabletï¼›å¯æ‰‹åŠ¨åˆ é™¤ stageï¼š%PI_STAGE%
+    ) else (
+        echo [è­¦å‘Š] robocopy ä¹Ÿæœªå®Œæˆï¼›è¯·å…³é—­å ç”¨ç¨‹åºåï¼Œç›´æ¥æ•´å¤¹æ‹·è´ï¼š
+        echo   %STAGE_APP%
+    )
+)
+
+:done_stage
 set "PYDLL="
 for %%D in (python314.dll python313.dll python312.dll python311.dll python310.dll) do (
     if exist "%INTERNAL%\%%D" set "PYDLL=%%D"
 )
 if not defined PYDLL (
-    echo [´íÎó] _internal ÀïÃ»ÓĞ python3xx.dll£¬Õâ¸ö°üÎŞ·¨ÔÚÆäËüµçÄÔÔËĞĞ¡£
+    echo [é”™è¯¯] åœ¨ä¸‹åˆ—ç›®å½•çš„ _internal ä¸­æœªæ‰¾åˆ° python3xx.dllï¼š
+    echo   %INTERNAL%
+    echo è‹¥ PyInstaller å·²æˆåŠŸï¼Œè¯·æ£€æŸ¥ stage æ˜¯å¦è¢«è¯¯åˆ ï¼›å¯é‡æ–°è¿è¡Œ build_windows.batã€‚
     pause
     exit /b 1
 )
 
 echo.
 echo ========================================
-echo  Íê³É¡£²úÎï£ºpackaging\dist\daq_tablet\
+if "!PUBLISH_OK!"=="1" (
+    echo  å®Œæˆã€‚äº§ç‰©ï¼špackaging\dist\daq_tablet\
+) else (
+    echo  å®Œæˆï¼ˆè¯·æ•´å¤¹æ‹·è´ï¼Œè·¯å¾„å¦‚ä¸‹ï¼‰ï¼š
+    echo  !RELEASE_DIR!
+)
+echo  å¯æ‰§è¡Œæ–‡ä»¶ï¼š!RELEASE_DIR!\daq_tablet.exe
 echo ========================================
-echo  ±ØĞë°ÑÕû¸ö daq_tablet ÎÄ¼ş¼ĞÒ»Æğ¿½×ß£¬½á¹¹ÈçÏÂ£º
+echo  å¿…é¡»æŠŠæ•´ä¸ª daq_tablet æ–‡ä»¶å¤¹ä¸€èµ·æ‹·èµ°ï¼Œç»“æ„å¦‚ä¸‹ï¼š
 echo    daq_tablet\
 echo      daq_tablet.exe
-echo      _internal\          ^(ÒÑ°üº¬ %PYDLL%^)
-echo      Ê¹ÓÃËµÃ÷.txt
+echo      _internal\          ^(å·²åŒ…å« %PYDLL%^)
+echo      ä½¿ç”¨è¯´æ˜.txt
 echo.
-echo  ²»ÒªÖ»°Ñ exe ¿½µ½×ÀÃæ£¬·ñÔò»á±¨£º
+echo  ä¸è¦åªæŠŠ exe æ‹·åˆ°æ¡Œé¢ï¼Œå¦åˆ™ä¼šæŠ¥ï¼š
 echo    Failed to load Python DLL ...\_internal\python3xx.dll
+echo.
+echo  ä¸è¦è¿è¡Œ packaging\build\daq_tablet\daq_tablet.exe ï¼ˆä¸­é—´äº§ç‰©ï¼Œå¿…å¤±è´¥ï¼‰
+echo  ç›®æ ‡æœºä»å¤±è´¥æ—¶ï¼šå®‰è£… VC++ 2015-2022 x64
+echo    https://aka.ms/vs/17/release/vc_redist.x64.exe
 echo ========================================
 pause

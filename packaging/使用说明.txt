@@ -14,8 +14,9 @@ daq_tablet Windows 运行说明
 错误做法（会立刻弹窗失败）：
   - 只把 daq_tablet.exe 拷到桌面
   - 只发 exe，不发 _internal 文件夹
+  - 双击 packaging\build\daq_tablet\daq_tablet.exe（这是打包中间目录，不是成品）
   此时会报：
-    Failed to load Python DLL '...Desktop\_internal\python314.dll'
+    Failed to load Python DLL '...\build\daq_tablet\_internal\python314.dll'
     LoadLibrary: 找不到指定的模块。
 
 正确做法：
