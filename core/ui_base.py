@@ -1419,9 +1419,11 @@ class UIBase():
         
         # Sensitivity Coefficient (报警灵敏度系数)
         self.sensitivity_label = QLabel("--")
-        self.sensitivity_spin = QSpinBox()
-        self.sensitivity_spin.setRange(1, 100)
-        self.sensitivity_spin.setValue(self.config.sensitivity)
+        self.sensitivity_spin = QDoubleSpinBox()
+        self.sensitivity_spin.setDecimals(1)
+        self.sensitivity_spin.setSingleStep(0.1)
+        self.sensitivity_spin.setRange(1.0, 10.0)
+        self.sensitivity_spin.setValue(float(self.config.sensitivity))
         self.sensitivity_spin.editingFinished.connect(self.persist_sensitivity_setting)
         self.sensitivity_set_btn = QPushButton(_t("btn_set"))
         self.sensitivity_set_btn.clicked.connect(self.set_sensitivity_coefficient)
@@ -2734,6 +2736,8 @@ class UIBase():
         elif from_master and packet.control_code == 0x19:
             if hasattr(self, "on_sensor_mode_feedback"):
                 self.on_sensor_mode_feedback(packet)
+        elif packet.control_code in (0x0C, 0x0F) and packet.status == 1:
+            self._apply_sensitivity_from_feedback(packet)
         elif packet.control_code in (0x0D, 0x0E):
             if hasattr(self, "on_product_id_feedback"):
                 self.on_product_id_feedback(packet)
@@ -3403,6 +3407,31 @@ class UIBase():
             else:
                 self._refresh_product_id_lock_ui(cid)
 
+    def _display_sensitivity_m(self, client_id: str = None, packet=None) -> float:
+        """界面显示的 M：优先配置/读回浮点，不用谱包 sen_coef 整数覆盖。"""
+        from core.sensitivity_m import clamp_m
+
+        cid = client_id or getattr(self, "primary_client_id", None)
+        key = self._current_probe_key(cid) if cid else None
+        if key:
+            entry = (getattr(self.config, "client_probe_settings", None) or {}).get(key, {})
+            if "sensitivity" in entry:
+                try:
+                    return clamp_m(float(entry["sensitivity"]))
+                except (TypeError, ValueError):
+                    pass
+        if cid and getattr(self, "client_data", None):
+            prev = self.client_data.get(cid) or {}
+            v = prev.get("sensitivity")
+            if v not in (None, "", "--"):
+                try:
+                    return clamp_m(float(v))
+                except (TypeError, ValueError):
+                    pass
+        if packet is not None and getattr(packet, "sen_coef", None) not in (None, 0):
+            return clamp_m(float(packet.sen_coef))
+        return clamp_m(getattr(self.config, "sensitivity", 3.0))
+
     def _save_probe_panel_settings(self, client_id: str = None, hv=None, threshold=None,
                                    sensitivity=None, product_id=None):
         """Persist panel values for the given/current probe IP."""
@@ -3453,13 +3482,13 @@ class UIBase():
         thr = stored["threshold"]
         sens = stored["sensitivity"]
         if "sensitivity" not in probe_store:
-            if pkt is not None and getattr(pkt, "sen_coef", None) not in (None, 0):
-                sens = int(pkt.sen_coef)
-            elif data and data.get("sensitivity") not in (None, 0, "--"):
+            if data and data.get("sensitivity") not in (None, 0, "--"):
                 try:
-                    sens = int(data["sensitivity"])
+                    sens = float(data["sensitivity"])
                 except (TypeError, ValueError):
                     pass
+            elif pkt is not None and getattr(pkt, "sen_coef", None) not in (None, 0):
+                sens = float(pkt.sen_coef)
 
         pid = stored.get("product_id")
         if pid is None:
@@ -3482,7 +3511,9 @@ class UIBase():
         try:
             self.hv_spin.setValue(float(hv))
             self.threshold_spin.setValue(int(thr))
-            self.sensitivity_spin.setValue(int(sens))
+            from core.sensitivity_m import clamp_m
+
+            self.sensitivity_spin.setValue(clamp_m(sens))
             if hasattr(self, "product_id_spin") and self._product_id_spin_device_sync_allowed(cid):
                 try:
                     self.product_id_spin.setValue(int(pid or 0))
@@ -3509,11 +3540,41 @@ class UIBase():
         except Exception:
             pass
 
+    def _apply_sensitivity_from_feedback(self, packet: CmdFeedback):
+        from core.sensitivity_m import clamp_m, decode_feedback_x10, format_m_display
+
+        m = decode_feedback_x10(packet.value)
+        src = getattr(packet, "source_client_id", None)
+        if src and getattr(self, "client_data", None):
+            data = self.client_data.get(src)
+            if data is not None:
+                data["sensitivity"] = m
+        settings_cid = None
+        if hasattr(self, "_get_probe_client_id_for_settings"):
+            settings_cid = self._get_probe_client_id_for_settings()
+        if not settings_cid and hasattr(self, "_product_id_panel_client_id"):
+            settings_cid = self._product_id_panel_client_id()
+        if not settings_cid:
+            settings_cid = getattr(self, "primary_client_id", None)
+        if settings_cid and src and src != settings_cid:
+            return
+        if hasattr(self, "sensitivity_spin"):
+            self.sensitivity_spin.blockSignals(True)
+            self.sensitivity_spin.setValue(clamp_m(m))
+            self.sensitivity_spin.blockSignals(False)
+        if hasattr(self, "sensitivity_label"):
+            self.sensitivity_label.setText(format_m_display(m))
+        self._save_probe_panel_settings(sensitivity=m)
+        self.log(f"Sensitivity M readback: {format_m_display(m)} (0x{packet.control_code:02X})", "INFO")
+
     def persist_sensitivity_setting(self):
         try:
+            from core.sensitivity_m import clamp_m
+
             coefficient = self._read_spinbox_value(self.sensitivity_spin, self.sensitivity_spin.value())
-            self.sensitivity_spin.setValue(int(coefficient))
-            self._save_probe_panel_settings(sensitivity=int(coefficient))
+            m = clamp_m(coefficient)
+            self.sensitivity_spin.setValue(m)
+            self._save_probe_panel_settings(sensitivity=m)
         except Exception:
             pass
     
@@ -4190,32 +4251,45 @@ class UIBase():
         return False
     
     def set_sensitivity_coefficient(self):
+        from core.sensitivity_m import clamp_m, format_m_display
+
         coefficient = self._read_spinbox_value(self.sensitivity_spin, self.sensitivity_spin.value())
         try:
-            self.sensitivity_spin.setValue(int(coefficient))
-            self._save_probe_panel_settings(sensitivity=int(coefficient))
+            m = clamp_m(coefficient)
+            self.sensitivity_spin.setValue(m)
+            self._save_probe_panel_settings(sensitivity=m)
         except Exception:
-            pass
+            m = clamp_m(self.sensitivity_spin.value())
+        disp = format_m_display(m)
         if self.ensure_serial_ready():
             # 如果TCP模式且有多客户端，发送到当前选中客户端
             if self.config.tcp_enabled and self.primary_client_id:
                 # TCP模式下，需要将命令发送到特定客户端
                 if hasattr(self.worker, 'send_command_to_client'):
-                    success = self.worker.send_command_to_client(self.primary_client_id, 'set_sensitivity_coefficient', coefficient)
+                    probe_cid = (
+                        self._get_probe_client_id_for_settings()
+                        if hasattr(self, "_get_probe_client_id_for_settings")
+                        else self.primary_client_id
+                    ) or self.primary_client_id
+                    success = self.worker.send_command_to_client(
+                        probe_cid, 'set_sensitivity_coefficient', m
+                    )
                     if success:
-                        self.log(f"Set sensitivity coefficient command sent to client {self.primary_client_id}: {coefficient}")
+                        self.log(
+                            f"Set sensitivity M sent to client {probe_cid}: {disp}"
+                        )
                     else:
                         self.log(f"Failed to send sensitivity coefficient command to client {self.primary_client_id}", 'ERROR')
                 else:
-                    success = self.worker.set_sensitivity_coefficient(coefficient)
+                    success = self.worker.set_sensitivity_coefficient(m)
                     if success:
-                        self.log(f"Set sensitivity coefficient command sent: {coefficient}")
+                        self.log(f"Set sensitivity M sent: {disp}")
                     else:
                         self.log("Failed to send set sensitivity coefficient command", "ERROR")
             else:
-                success = self.worker.set_sensitivity_coefficient(coefficient)
+                success = self.worker.set_sensitivity_coefficient(m)
                 if success:
-                    self.log(f"Set sensitivity coefficient command sent: {coefficient}")
+                    self.log(f"Set sensitivity M sent: {disp}")
                 else:
                     self.log("Failed to send set sensitivity coefficient command", "ERROR")
         else:
@@ -4223,7 +4297,19 @@ class UIBase():
     
     def read_sensitivity_coefficient(self):
         if self.ensure_serial_ready():
-            success = self.worker.read_sensitivity_coefficient(True)
+            if self.config.tcp_enabled and self.primary_client_id and hasattr(
+                self.worker, "send_command_to_client"
+            ):
+                probe_cid = self._get_probe_client_id_for_settings() if hasattr(
+                    self, "_get_probe_client_id_for_settings"
+                ) else self.primary_client_id
+                if not probe_cid:
+                    probe_cid = self.primary_client_id
+                success = self.worker.send_command_to_client(
+                    probe_cid, "read_sensitivity_coefficient", True
+                )
+            else:
+                success = self.worker.read_sensitivity_coefficient(True)
             if success:
                 self.log("Read sensitivity coefficient command sent")
             else:
@@ -4619,8 +4705,12 @@ class UIBase():
                     self.product_id_spin.setValue(int(packet.product_id))
                     self.product_id_spin.blockSignals(False)
             
-            # 更新灵敏度系数显示
-            self.sensitivity_label.setText(f"{packet.sen_coef}")
+            from core.sensitivity_m import format_m_display
+
+            panel_cid = self._product_id_panel_client_id(client_id)
+            if panel_cid is None or client_id is None or client_id == panel_cid:
+                m_show = self._display_sensitivity_m(client_id, packet)
+                self.sensitivity_label.setText(format_m_display(m_show))
             
             # 更新继电器状态显示（用户刚操作后短时不覆盖勾选，避免跳变）
             relay0_state = (packet.device_status & 0b00001) != 0
@@ -4684,6 +4774,7 @@ class UIBase():
             packet: 数据包
         """
         current_time = time.time()
+        sens_m = self._display_sensitivity_m(client_id, packet)
         client_data = {
             'hv': packet.HV,
             'rates': packet.counter,  # 计数率（cps）
@@ -4692,7 +4783,8 @@ class UIBase():
             'alarm': (packet.device_status & 0b10000) != 0,  # 报警状态
             'client_id': client_id,
             'product_id': packet.product_id,
-            'sensitivity': packet.sen_coef
+            'sensitivity': sens_m,
+            'sen_coef_round': int(packet.sen_coef),
         }
         
         self.client_data[client_id] = client_data

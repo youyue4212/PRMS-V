@@ -527,16 +527,16 @@ class SerialPacketWorker(QObject):
         data.append(checksum)
         return self.send_command(data, f"Set relay mask to 0x{relay_mask:02X}")
 
-    def set_sensitivity_coefficient(self, coefficient: int):
-        """Set alarm sensitivity coefficient (1-100)"""
-        # Command format: 0x55 0xAA 0x03 0x0C [coefficient] 0x00  [checksum]
-        if coefficient < 1 or coefficient > 100:
-            self.error_occurred.emit(f"Invalid sensitivity coefficient: {coefficient}, must be 1-100")
-            return False
-        data = [0x55, 0xAA, 0x03, 0x0C, coefficient, 0x00]
+    def set_sensitivity_coefficient(self, coefficient):
+        """Set alarm sensitivity M (1.0~10.0); TCP 0x0C 与固件一致（×10 或整数 1~10）。"""
+        from core.sensitivity_m import clamp_m, encode_0x0c_bytes, format_m_display
+
+        m = clamp_m(coefficient)
+        b4, b5 = encode_0x0c_bytes(m)
+        data = [0x55, 0xAA, 0x03, 0x0C, b4, b5]
         checksum = self.calculate_xor_checksum(data)
         data.append(checksum)
-        return self.send_command(data, f"Set sensitivity coefficient to {coefficient}")
+        return self.send_command(data, f"Set sensitivity M to {format_m_display(m)}")
 
     def read_sensitivity_coefficient(self, flag: bool):
         """Read alarm sensitivity coefficient (NOTE: Primary source is SpectrumPacket.sen_coef)"""

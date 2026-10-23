@@ -17,7 +17,14 @@ class ConfigManager:
         # 多探头各自高压设定：{probe_key(IP): voltage}（E202 用）
         self.client_hv_setpoints = self._load_json_dict("CLIENT_HV_SETPOINTS", float)
         self.threshold = self.settings.value("THRESHOLD", 30, int)
-        self.sensitivity = self.settings.value("SENSITIVITY", 3, int)
+        try:
+            self.sensitivity = float(self.settings.value("SENSITIVITY", 3.0))
+        except (TypeError, ValueError):
+            self.sensitivity = 3.0
+        if self.sensitivity < 1.0:
+            self.sensitivity = 1.0
+        elif self.sensitivity > 10.0:
+            self.sensitivity = 10.0
         # 多探头面板参数：{ip: {hv, threshold, sensitivity, product_id}}
         self.client_probe_settings = self._load_probe_settings()
         self.language = self.settings.value("LANGUAGE", "zh", str)  # "zh" or "en"
@@ -180,7 +187,7 @@ class ConfigManager:
         return {
             "hv": float(stored.get("hv", self.hv)),
             "threshold": int(stored.get("threshold", self.threshold)),
-            "sensitivity": int(stored.get("sensitivity", self.sensitivity)),
+            "sensitivity": float(stored.get("sensitivity", self.sensitivity)),
             "product_id": stored.get("product_id", None),
             "product_id_locked": stored.get("product_id_locked", None),
             "product_id_unlocked": bool(stored.get("product_id_unlocked", False)),
@@ -203,8 +210,16 @@ class ConfigManager:
             self.threshold = int(threshold)
             self.settings.setValue("THRESHOLD", self.threshold)
         if sensitivity is not None:
-            entry["sensitivity"] = int(sensitivity)
-            self.sensitivity = int(sensitivity)
+            try:
+                s = float(sensitivity)
+            except (TypeError, ValueError):
+                s = 3.0
+            if s < 1.0:
+                s = 1.0
+            elif s > 10.0:
+                s = 10.0
+            entry["sensitivity"] = s
+            self.sensitivity = s
             self.settings.setValue("SENSITIVITY", self.sensitivity)
         if product_id is not None:
             try:
@@ -291,8 +306,16 @@ class ConfigManager:
             self.threshold = threshold
             self.settings.setValue("THRESHOLD", threshold)
         if sensitivity is not None:
-            self.sensitivity = sensitivity
-            self.settings.setValue("SENSITIVITY", sensitivity)
+            try:
+                s = float(sensitivity)
+            except (TypeError, ValueError):
+                s = 3.0
+            if s < 1.0:
+                s = 1.0
+            elif s > 10.0:
+                s = 10.0
+            self.sensitivity = s
+            self.settings.setValue("SENSITIVITY", self.sensitivity)
         if expected_probe_count is not None:
             try:
                 self.expected_probe_count = max(0, min(16, int(expected_probe_count)))

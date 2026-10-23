@@ -1081,7 +1081,8 @@ class ClientsPage(QWidget):
         sensitivity_label.setStyleSheet(key2_style)
         data_layout.addWidget(sensitivity_label, 1, 2)
         
-        sensitivity_value = QLabel(f"{data.get('sensitivity', 0)}")
+        from core.sensitivity_m import format_m_display
+        sensitivity_value = QLabel(format_m_display(data.get('sensitivity', 0)))
         sensitivity_value.setStyleSheet(val2_style)
         data_layout.addWidget(sensitivity_value, 1, 3)
         
@@ -1113,7 +1114,8 @@ class ClientsPage(QWidget):
         labels['temp'].setText(f"{data.get('temp', 0):.1f} " + chr(176) + "C")
         labels['hv'].setText(f"{data.get('hv', 0):.1f} V")
         labels['product_id'].setText(f"{data.get('product_id', 0)}")
-        labels['sensitivity'].setText(f"{data.get('sensitivity', 0)}")
+        from core.sensitivity_m import format_m_display
+        labels['sensitivity'].setText(format_m_display(data.get('sensitivity', 0)))
         
         # Update status
         last_update = data.get('last_update', 0)
