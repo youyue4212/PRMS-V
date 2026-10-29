@@ -2798,12 +2798,26 @@ class MainWindow(QMainWindow, UIBase):
             page.schedule_web_flush()
 
     def _sync_alarm_clear_mode_ui(self, latch_mode: bool):
-        """Keep settings combo aligned with L2 sys_mode.bit2."""
+        """Keep settings combo aligned with L2 sys_mode.bit2.
+
+        未点「写入主控」前，下拉停留在操作者选的项，不被每帧 L2 拉回去。
+        """
         combo = getattr(self, "alarm_clear_mode_combo", None)
         if combo is None:
             return
         want = 1 if latch_mode else 0
-        if int(combo.currentData()) == want:
+        if getattr(self, "_alarm_clear_mode_dirty", False):
+            try:
+                shown = int(combo.currentData())
+            except (TypeError, ValueError):
+                shown = want
+            if shown != want:
+                return
+            self._alarm_clear_mode_dirty = False
+        pending_age = time.time() - float(getattr(self, "_pending_alarm_clear_mode_at", 0) or 0)
+        if 0 < pending_age <= 5.0:
+            return
+        if combo.currentData() is not None and int(combo.currentData()) == want:
             return
         combo.blockSignals(True)
         idx = combo.findData(want)
@@ -2812,18 +2826,50 @@ class MainWindow(QMainWindow, UIBase):
         combo.blockSignals(False)
 
     def on_alarm_clear_mode_combo_changed(self, _index=None):
-        """Settings: switch master alarm clear mode via 0x16."""
+        """下拉只选型，不发 0x16。"""
         combo = getattr(self, "alarm_clear_mode_combo", None)
         if combo is None:
             return
-        mode = int(combo.currentData())
+        try:
+            mode = int(combo.currentData())
+        except (TypeError, ValueError):
+            return
+        committed = 1 if bool(getattr(self, "_master_alarm_latch_mode", False)) else 0
+        self._alarm_clear_mode_dirty = mode != committed
+
+    def write_master_alarm_clear_mode(self):
+        """确认后把当前下拉的消警模式写入主控 0x16。"""
+        from core.translation import _t
+
+        combo = getattr(self, "alarm_clear_mode_combo", None)
+        if combo is None:
+            return
+        try:
+            mode = int(combo.currentData())
+        except (TypeError, ValueError):
+            mode = 0
+        if mode not in (0, 1):
+            mode = 0
+        latch_now = bool(getattr(self, "_master_alarm_latch_mode", False))
         if not self.check_permission_before_action(
             "Set alarm clear mode", Permission.MODIFY_DETECTOR_SETTINGS
         ):
-            # revert to last known L2 mode
-            self._sync_alarm_clear_mode_ui(
-                bool(getattr(self, "_master_alarm_latch_mode", False))
-            )
+            self._alarm_clear_mode_dirty = False
+            self._sync_alarm_clear_mode_ui(latch_now)
+            return
+        master_cid = self._get_master_client_id() if hasattr(self, "_get_master_client_id") else getattr(self, "master_client_id", None)
+        if not bool(getattr(self.config, "tcp_enabled", False)) or not master_cid:
+            show_warn(self, _t("msg_clear_mode_title"), _t("msg_clear_mode_need_master"))
+            return
+        mode_key = "latch_mode_latch" if mode == 1 else "latch_mode_auto"
+        if not ask_confirm(
+            self,
+            _t("msg_clear_mode_title"),
+            _t("msg_clear_mode_write_text", mode=_t(mode_key)),
+            danger=False,
+        ):
+            self._alarm_clear_mode_dirty = False
+            self._sync_alarm_clear_mode_ui(latch_now)
             return
         self.set_master_alarm_clear_mode(latch=(mode == 1))
 
@@ -2878,11 +2924,16 @@ class MainWindow(QMainWindow, UIBase):
         self._pending_alarm_clear_mode_at = 0.0
         if int(getattr(packet, "status", 0) or 0) != 1:
             self.log("Alarm clear mode 0x16 rejected", "WARNING")
+            self._alarm_clear_mode_dirty = False
+            self._sync_alarm_clear_mode_ui(
+                bool(getattr(self, "_master_alarm_latch_mode", False))
+            )
             show_warn(self, _t("msg_clear_mode_title"), _t("msg_clear_mode_fail"))
             return
         mode = int(getattr(packet, "value", 0) or 0) & 0xFF
         latch = mode == 1
         self._master_alarm_latch_mode = latch
+        self._alarm_clear_mode_dirty = False
         self._sync_alarm_clear_mode_ui(latch)
         page = getattr(self, "home_page", None)
         if page is not None:
@@ -4300,6 +4351,8 @@ class MainWindow(QMainWindow, UIBase):
             self.alarm_clear_mode_combo.setEnabled(can_maintain)
         if getattr(self, 'alarm_clear_mode_read_btn', None) is not None:
             self.alarm_clear_mode_read_btn.setEnabled(can_maintain)
+        if getattr(self, 'alarm_clear_mode_write_btn', None) is not None:
+            self.alarm_clear_mode_write_btn.setEnabled(can_maintain)
         if getattr(self, 'sensor_mode_combo', None) is not None:
             self.sensor_mode_combo.setEnabled(can_maintain)
         if getattr(self, 'sensor_mode_read_btn', None) is not None:
@@ -5474,6 +5527,9 @@ class MainWindow(QMainWindow, UIBase):
                 combo.blockSignals(False)
             if getattr(self, 'alarm_clear_mode_read_btn', None) is not None:
                 self.alarm_clear_mode_read_btn.setText(_t("btn_read_clear_mode"))
+            if getattr(self, 'alarm_clear_mode_write_btn', None) is not None:
+                self.alarm_clear_mode_write_btn.setText(_t("btn_write_clear_mode"))
+                self.alarm_clear_mode_write_btn.setToolTip(_t("tip_write_clear_mode"))
             if getattr(self, 'sensor_mode_label', None) is not None:
                 self.sensor_mode_label.setText(_t("set_sensor_mode"))
             if getattr(self, 'sensor_mode_combo', None) is not None:

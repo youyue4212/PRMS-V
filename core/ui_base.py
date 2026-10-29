@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 import serial
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QFileDialog, QCheckBox,QLineEdit,
                              QComboBox, QDoubleSpinBox, QSpinBox, QPushButton, QLabel, QTextEdit, QFormLayout, QGridLayout,QSizePolicy,QStyle,
-                             QTabWidget, QDockWidget, QAction, QToolBar, QStatusBar, QMessageBox)
+                             QTabWidget, QDockWidget, QAction, QToolBar, QStatusBar, QMessageBox, QScrollArea)
 from PyQt5.QtCore import QThread, QTimer, QMutex, pyqtSignal, Qt, QObject, QEvent, QMetaObject, Q_ARG
 from PyQt5.QtGui import QFont, QIcon
 from dataclasses import dataclass
@@ -516,10 +516,40 @@ class FocusEventFilter(QObject):
             if self.current_focused_obj is obj:
                 self.current_focused_obj = None
 
+class NoWheelEditFilter(QObject):
+    """滚轮只滚动页面，不改数字框和下拉框。下拉列表已打开时仍可滚动列表。"""
+
+    def eventFilter(self, obj, event):
+        if event.type() != QEvent.Wheel:
+            return False
+        target = obj
+        if isinstance(obj, QLineEdit):
+            parent = obj.parent()
+            while parent is not None:
+                if isinstance(parent, (QSpinBox, QDoubleSpinBox, QComboBox)):
+                    target = parent
+                    break
+                parent = parent.parent()
+            else:
+                return False
+        elif not isinstance(obj, (QSpinBox, QDoubleSpinBox, QComboBox)):
+            return False
+        event.ignore()
+        parent = target.parent() if hasattr(target, "parent") else None
+        while parent is not None:
+            if isinstance(parent, QScrollArea):
+                QApplication.sendEvent(parent, event)
+                return True
+            parent = parent.parent()
+        return True
+
+
 class UIBase():
     def __init__(self):
         self.focus_filter = FocusEventFilter()
         QApplication.instance().installEventFilter(self.focus_filter)
+        self._no_wheel_edit_filter = NoWheelEditFilter()
+        QApplication.instance().installEventFilter(self._no_wheel_edit_filter)
 
         self.config = ConfigManager()
         self.diagnostics_manager = DiagnosticsManager(self.config)
@@ -1593,9 +1623,13 @@ class UIBase():
         self.alarm_clear_mode_combo.currentIndexChanged.connect(self.on_alarm_clear_mode_combo_changed)
         self.alarm_clear_mode_read_btn = QPushButton(_t("btn_read_clear_mode"))
         self.alarm_clear_mode_read_btn.clicked.connect(self.read_master_alarm_clear_mode)
+        self.alarm_clear_mode_write_btn = QPushButton(_t("btn_write_clear_mode"))
+        self.alarm_clear_mode_write_btn.setToolTip(_t("tip_write_clear_mode"))
+        self.alarm_clear_mode_write_btn.clicked.connect(self.write_master_alarm_clear_mode)
         gate_layout.addWidget(self.alarm_clear_mode_label, 4, 0)
-        gate_layout.addWidget(self.alarm_clear_mode_combo, 4, 1, 1, 3)
-        gate_layout.addWidget(self.alarm_clear_mode_read_btn, 4, 4)
+        gate_layout.addWidget(self.alarm_clear_mode_combo, 4, 1, 1, 2)
+        gate_layout.addWidget(self.alarm_clear_mode_read_btn, 4, 3)
+        gate_layout.addWidget(self.alarm_clear_mode_write_btn, 4, 4)
 
         self.channel_gate_hint_label = QLabel(_t("tip_channel_gate"))
         self.channel_gate_hint_label.setStyleSheet("color: #888888; font-size: 11px;")

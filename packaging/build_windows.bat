@@ -3,6 +3,11 @@ REM 在 Windows 开发机上打包（生成的 exe 只能给 Windows 用，不�
 REM 产物是目录模式：必须整夹拷贝 daq_tablet\（含 _internal），不能只拷 exe。
 setlocal EnableDelayedExpansion
 cd /d "%~dp0\.."
+if errorlevel 1 (
+    echo [错误] 无法进入项目目录: %~dp0\..
+    pause
+    exit /b 1
+)
 
 echo ========================================
 echo  daq_tablet Windows 打包
@@ -15,7 +20,7 @@ if errorlevel 1 (
     exit /b 1
 )
 
-python -c "import sys; v=sys.version_info; print('[提示] 当前是 Python %d.%d。PyQt5 在 3.12/3.13 上更稳；3.14 可用但目标机需较新的 VC 运行库。' % (v.major, v.minor))"
+python -c "import sys; v=sys.version_info; print('[hint] Python', str(v.major) + '.' + str(v.minor))"
 
 if not exist .venv_pack (
     python -m venv .venv_pack
@@ -29,8 +34,9 @@ pip install "pyinstaller>=6.16" PyQt5 PyQtWebEngine pyqtgraph numpy pandas pyser
 echo.
 echo [1/4] 结束可能占用 dist 的进程 ...
 taskkill /F /IM daq_tablet.exe >nul 2>&1
-powershell -NoProfile -Command ^
-  "Get-CimInstance Win32_Process -Filter \"Name='python.exe'\" -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -match 'daq_tablet' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }" >nul 2>&1
+if exist "%~dp0kill_daq_python.ps1" (
+    powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0kill_daq_python.ps1" >nul 2>&1
+)
 timeout /t 2 /nobreak >nul
 
 cd packaging
@@ -64,7 +70,7 @@ for %%D in (python3.dll python314.dll python313.dll python312.dll VCRUNTIME140.d
         copy /y "%PYDIR%\%%D" "%INTERNAL%\%%D" >nul
     )
 )
-REM python314.dll 还依赖 python3.dll；二者必须同在 _internal
+REM python314.dll also needs python3.dll in _internal
 if exist "%PYDIR%\python3.dll" if not exist "%INTERNAL%\python3.dll" (
     copy /y "%PYDIR%\python3.dll" "%INTERNAL%\python3.dll" >nul
 )
