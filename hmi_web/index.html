@@ -207,17 +207,19 @@
             max-height: 148px;
             background: var(--hmi-panel); border: 1px solid var(--hmi-border); border-radius: 8px;
             padding: 10px 14px; display: flex; flex-direction: row;
-            align-items: center; justify-content: space-between; gap: 14px;
+            align-items: stretch; justify-content: space-between; gap: 14px;
         }
         .master-alarm-banner {
             flex: 1; display: flex; flex-direction: row; justify-content: flex-start; align-items: center;
-            text-align: left; padding: 10px 16px; border-radius: 8px;
+            text-align: left; padding: 12px 22px; border-radius: 8px;
             background: rgba(16, 185, 129, 0.10); border: 2px solid rgba(16, 185, 129, 0.55);
-            transition: all 0.3s ease; min-height: 88px; max-height: 120px; min-width: 0; gap: 14px;
+            transition: all 0.3s ease; min-height: 88px; max-height: 120px; min-width: 0; gap: 0;
         }
+        .master-alarm-banner .alarm-icon-badge { margin-right: 22px; }
         .master-alarm-banner .banner-text-col {
-            display: flex; flex-direction: column; justify-content: center; gap: 4px; min-width: 0; flex: 1;
+            display: flex; flex-direction: column; justify-content: center; gap: 0; min-width: 0; flex: 1;
         }
+        .master-alarm-banner .alarm-sub-text { margin-top: 8px; }
         .master-alarm-banner.alarm { animation: alarmPulse 0.8s infinite; }
         .master-alarm-banner.warn { background: rgba(245, 158, 11, 0.1); border-color: rgba(245, 158, 11, 0.5); }
         .alarm-title-text {
@@ -261,39 +263,68 @@
         .alarm-sub-text { font-size: 13px; color: var(--hmi-muted); margin-top: 0; font-weight: 500; max-width: 100%; line-height: 1.3; }
         .master-alarm-banner.alarm .alarm-sub-text { color: #FFAAAA; font-weight: bold; }
 
-        .gate-visual-box {
-            flex-shrink: 0; display: flex; flex-direction: row; align-items: center;
-            gap: 14px; padding-left: 4px;
+        .gate-status-card {
+            flex: 0 1 auto; display: flex; flex-direction: row; align-items: center;
+            justify-content: flex-start; gap: 0; padding: 12px 24px;
+            border-radius: 8px; border: 2px solid rgba(245, 158, 11, 0.5);
+            background: rgba(245, 158, 11, 0.10);
+            min-height: 88px; max-height: 120px; min-width: 0;
+            box-sizing: border-box; color: var(--hmi-warn);
         }
-        .gate-frame {
-            width: 78px; height: 70px; border: 3px solid var(--hmi-warn); border-bottom: none;
-            border-radius: 8px 8px 0 0; position: relative;
-            display: flex; align-items: flex-end; justify-content: center;
-            background: radial-gradient(circle, rgba(245,158,11,0.12) 0%, transparent 70%);
+        .gate-portal {
+            position: relative; width: 112px; height: 78px; flex: 0 0 112px;
+            margin-right: 22px;
         }
-        .person-avatar {
-            font-size: 34px; font-weight: 800; color: var(--hmi-warn); line-height: 1;
-            font-family: "Segoe UI Symbol", "Segoe UI Emoji", "Microsoft YaHei", sans-serif;
-            position: absolute; bottom: 8px; letter-spacing: 0;
+        .portal-beam {
+            position: absolute; top: 0; left: 0; right: 0; height: 8px;
+            background: currentColor; border-radius: 3px;
         }
-        .person-avatar.passing { animation: walkThrough 1.5s infinite linear; }
-        .passage-state-badge {
-            padding: 10px 18px; border-radius: 22px; font-size: 15px; font-weight: bold;
-            background: #232530; color: #C5C8D4; border: 1px solid #3A3E4C; white-space: nowrap;
-            display: inline-flex; align-items: center; gap: 8px;
-            min-height: var(--touch-min); box-sizing: border-box;
-            font-family: "Segoe UI Emoji", "Segoe UI Symbol", "Microsoft YaHei", sans-serif;
+        .portal-post {
+            position: absolute; top: 0; bottom: 0; width: 8px;
+            background: currentColor; border-radius: 3px;
         }
-        .passage-state-badge.active {
-            background: var(--hmi-warn); color: #000; border-color: var(--hmi-warn);
-            box-shadow: 0 0 12px rgba(245,158,11,0.4);
+        .portal-post.left { left: 0; }
+        .portal-post.right { right: 0; }
+        .gate-walker {
+            position: absolute; left: 14px; bottom: 0; width: 40px; height: 66px;
+            opacity: 0; color: currentColor;
         }
-        .passage-state-badge.alarm {
-            background: #ff4444; color: #fff; border-color: #ff4444;
-            box-shadow: 0 0 12px rgba(255,68,68,0.45);
+        .walk-pose { opacity: 0; }
+        .gate-status-card.walk .gate-walker { animation: walkPortal 1.6s infinite linear; }
+        .gate-status-card.walk .walk-pose.a { animation: stepA 0.42s steps(1, end) infinite; }
+        .gate-status-card.walk .walk-pose.b { animation: stepB 0.42s steps(1, end) infinite; }
+        @keyframes stepA { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0; } }
+        @keyframes stepB { 0%, 49% { opacity: 0; } 50%, 100% { opacity: 1; } }
+        @keyframes walkPortal {
+            0% { transform: translate(-16px, 3px); opacity: 0; }
+            14% { transform: translate(0, 0); opacity: 1; }
+            36% { transform: translate(16px, 4px); opacity: 1; }
+            58% { transform: translate(32px, 0); opacity: 1; }
+            80% { transform: translate(48px, 4px); opacity: 1; }
+            100% { transform: translate(62px, 0); opacity: 0; }
         }
-        .passage-state-badge.offline {
-            background: rgba(255,152,0,0.18); color: #ff9800; border-color: #ff9800;
+        .gate-text-col {
+            display: flex; flex-direction: column; justify-content: center; min-width: 0;
+        }
+        .gate-title {
+            font-size: 20px; font-weight: 900; line-height: 1.25; letter-spacing: 0.3px;
+            color: inherit; white-space: nowrap;
+        }
+        .gate-status-card.ok {
+            background: rgba(16, 185, 129, 0.10); border-color: rgba(16, 185, 129, 0.55);
+            color: var(--hmi-ok);
+        }
+        .gate-status-card.warn {
+            background: rgba(245, 158, 11, 0.10); border-color: rgba(245, 158, 11, 0.5);
+            color: var(--hmi-warn);
+        }
+        .gate-status-card.passing {
+            background: rgba(33, 150, 243, 0.12); border-color: rgba(33, 150, 243, 0.55);
+            color: var(--hmi-info);
+        }
+        .gate-status-card.alarm {
+            background: rgba(255, 68, 68, 0.12); border-color: rgba(255, 68, 68, 0.6);
+            color: #FF4D4D;
         }
 
         .probes-section {
@@ -617,7 +648,7 @@
             .main-container { grid-template-columns: 1fr; }
             .probes-grid { grid-template-columns: 1fr; }
             .channel-master-card { flex-direction: column; }
-            .gate-visual-box { justify-content: space-between; width: 100%; }
+            .gate-status-card { max-width: none; width: 100%; }
         }
     </style>
 </head>
@@ -651,11 +682,25 @@
                         <div class="alarm-sub-text" id="alarmSubText">所有通道探头实时数值均低于安全阈值</div>
                     </div>
                 </div>
-                <div class="gate-visual-box">
-                    <div class="gate-frame">
-                        <div class="person-avatar" id="personIcon">🚪</div>
+                <div class="gate-status-card warn" id="gateCard">
+                    <div class="gate-portal" id="personIcon" aria-hidden="true">
+                        <span class="portal-beam"></span>
+                        <span class="portal-post left"></span>
+                        <span class="portal-post right"></span>
+                        <svg class="gate-walker" viewBox="0 0 48 72" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <g class="walk-pose a">
+                                <circle cx="24" cy="8" r="6" fill="currentColor"/>
+                                <path d="M24 14v16M24 18L13 30M24 18l12 8M24 30L14 54M24 30l12 16" stroke="currentColor" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+                            </g>
+                            <g class="walk-pose b">
+                                <circle cx="24" cy="8" r="6" fill="currentColor"/>
+                                <path d="M24 14v16M24 18L35 30M24 18L12 26M24 30l10 24M24 30L12 46" stroke="currentColor" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+                            </g>
+                        </svg>
                     </div>
-                    <div class="passage-state-badge" id="passageBadge">🚪 未接入主控</div>
+                    <div class="gate-text-col">
+                        <div class="gate-title" id="passageBadge">未接入主控</div>
+                    </div>
                 </div>
             </div>
 
@@ -949,47 +994,34 @@
 
         function triggerPassage() {
             if (isPassing) return;
-            isPassing = true;
-            $('personIcon').classList.add('passing');
-            $('personIcon').innerText = '🚶';
-            const badge = $('passageBadge');
-            badge.className = 'passage-state-badge active';
-            badge.innerText = '🏃 人员正在通行';
+            setPassage(true, '人员正在通行', 'passing', true);
             setTimeout(function () {
-                $('personIcon').classList.remove('passing');
-                $('personIcon').innerText = '🚪';
-                badge.className = 'passage-state-badge';
-                badge.innerText = '🏃 通道空闲';
-                isPassing = false;
+                setPassage(false, '通道空闲', 'vacant');
             }, 3000);
         }
 
-        function setPassage(busy, text, kind) {
+        function setPassage(busy, text, kind, walk) {
             kind = kind || (busy ? 'passing' : 'vacant');
             isPassing = (kind === 'passing' || kind === 'alarm');
-            const badge = $('passageBadge');
-            const icon = $('personIcon');
+            var card = $('gateCard');
+            var badge = $('passageBadge');
+            var tone = 'ok';
+            var fallback = UI.vacant || '';
+            var showWalk = (walk === true);
             if (kind === 'alarm') {
-                icon.classList.add('passing');
-                icon.innerText = '🚶';
-                badge.className = 'passage-state-badge alarm';
-                badge.innerText = text || ('🏃 ' + (UI.occupiedAlarm || UI.passing || ''));
+                tone = 'alarm';
+                fallback = UI.occupiedAlarm || UI.passing || '';
             } else if (kind === 'passing') {
-                icon.classList.add('passing');
-                icon.innerText = '🚶';
-                badge.className = 'passage-state-badge active';
-                badge.innerText = text || ('🏃 ' + (UI.passing || ''));
+                tone = 'passing';
+                fallback = UI.passing || '';
+                if (walk == null) showWalk = true;
             } else if (kind === 'offline' || kind === 'ungated' || kind === 'noconn') {
-                icon.classList.remove('passing');
-                icon.innerText = '🚪';
-                badge.className = 'passage-state-badge offline';
-                badge.innerText = text || ('🚪 ' + (UI.noMaster || UI.vacant || ''));
-            } else {
-                icon.classList.remove('passing');
-                icon.innerText = '🚪';
-                badge.className = 'passage-state-badge';
-                badge.innerText = text || ('🏃 ' + (UI.vacant || ''));
+                tone = 'warn';
+                fallback = UI.noMaster || UI.vacant || '';
+                showWalk = false;
             }
+            if (card) card.className = 'gate-status-card ' + tone + (showWalk ? ' walk' : '');
+            if (badge) badge.innerText = text || fallback;
         }
 
         function setResetStyle(active, enabled) {
@@ -1186,7 +1218,7 @@
                     }
                 }
             }
-            if (state.passage) setPassage(!!state.passage.busy, state.passage.text, state.passage.kind);
+            if (state.passage) setPassage(!!state.passage.busy, state.passage.text, state.passage.kind, !!state.passage.walk);
             if (state.health) {
                 var hs = state.health.status || '';
                 if (state.health.warn && hs && hs.indexOf('\u26a0') < 0) hs = '\u26a0 ' + hs;

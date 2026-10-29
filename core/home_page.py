@@ -676,6 +676,7 @@ class HomePage(QWidget):
                     "passing" if self._passage_busy else "vacant"
                 ),
                 "busy": bool(self._passage_busy),
+                "walk": bool(getattr(self, "_passage_walk", False)),
                 "text": self.occupancy_status_label.text(),
             },
             "health": {

@@ -524,23 +524,23 @@ class NoWheelEditFilter(QObject):
             return False
         target = obj
         if isinstance(obj, QLineEdit):
-            parent = obj.parent()
+            parent = QWidget.parentWidget(obj)
             while parent is not None:
                 if isinstance(parent, (QSpinBox, QDoubleSpinBox, QComboBox)):
                     target = parent
                     break
-                parent = parent.parent()
+                parent = QWidget.parentWidget(parent)
             else:
                 return False
         elif not isinstance(obj, (QSpinBox, QDoubleSpinBox, QComboBox)):
             return False
         event.ignore()
-        parent = target.parent() if hasattr(target, "parent") else None
+        parent = QWidget.parentWidget(target)
         while parent is not None:
             if isinstance(parent, QScrollArea):
                 QApplication.sendEvent(parent, event)
                 return True
-            parent = parent.parent()
+            parent = QWidget.parentWidget(parent)
         return True
 
 

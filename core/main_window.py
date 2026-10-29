@@ -3556,21 +3556,59 @@ class MainWindow(QMainWindow, UIBase):
         """
         if master_offline or packet is None:
             return "offline"
+        # 未配置时 0x02 只是探头符合，不能当成有人过门。
+        if self._occupancy_is_ungated(packet):
+            return "ungated"
+        # 雷达占用（IO 或 0x02）与对射 0x04 一样，门上是人员经过。
+        if self._radar_person_present(packet):
+            return "passing"
         if bool(getattr(packet, "is_channel_alarm", lambda: False)()):
             return "alarm"
-        if self._occupancy_gate_suppressed():
-            return "ungated"
         try:
             code = int(packet.sensor_mode_code())
         except Exception:
             code = 2
-        gate_ok = bool(getattr(packet, "occ_gate_enabled", False))
-        degraded = bool(getattr(packet, "ir_degraded", False))
-        if code == 2 or (not gate_ok) or degraded:
-            return "ungated"
         if int(getattr(packet, "decision_result", 0) or 0) == 0x04 and code == 0:
             return "passing"
         return "vacant"
+
+    def _occupancy_is_ungated(self, packet) -> bool:
+        if self._occupancy_gate_suppressed():
+            return True
+        try:
+            code = int(packet.sensor_mode_code())
+        except Exception:
+            code = 2
+        if code == 1:
+            return False
+        gate_ok = bool(getattr(packet, "occ_gate_enabled", False))
+        degraded = bool(getattr(packet, "ir_degraded", False))
+        return code == 2 or (not gate_ok) or degraded
+
+    def _radar_person_present(self, packet) -> bool:
+        """雷达已开通且被触发：占用位，或占用期间的 0x02。"""
+        try:
+            if int(packet.sensor_mode_code()) != 1:
+                return False
+            decision = int(getattr(packet, "decision_result", 0) or 0)
+        except Exception:
+            return False
+        if bool(getattr(packet, "radar_gate", False)):
+            return True
+        return decision == 0x02
+
+    def _occupancy_should_walk(self, packet, kind: str) -> bool:
+        """对射经过/对射窗内报警，以及雷达触发，才播行人。"""
+        if packet is None or kind not in ("passing", "alarm"):
+            return False
+        if kind == "passing":
+            return True
+        try:
+            decision = int(getattr(packet, "decision_result", 0) or 0)
+            code = int(packet.sensor_mode_code())
+        except Exception:
+            return False
+        return code == 0 and decision == 0x03
 
     def _set_home_occupancy_kind(self, kind: str):
         page = getattr(self, "home_page", None)
@@ -3607,6 +3645,7 @@ class MainWindow(QMainWindow, UIBase):
         page.occupancy_indicator_bar.setStyleSheet(
             "QFrame { background-color: #ff9800; border-radius: 1px; }"
         )
+        page._passage_walk = False
         self._set_home_occupancy_kind(kind)
 
     def _update_home_occupancy(self, packet, lang="zh", master_offline=False):
@@ -3617,6 +3656,7 @@ class MainWindow(QMainWindow, UIBase):
             return
 
         kind = self._occupancy_kind_from_packet(packet, master_offline=False)
+        page._passage_walk = self._occupancy_should_walk(packet, kind)
         brief = self._io_brief(packet, lang)
         desc = self._operator_occupancy_desc(kind, packet, lang)
         if kind == "alarm":
