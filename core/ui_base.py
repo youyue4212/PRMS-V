@@ -1229,7 +1229,23 @@ class UIBase():
     def add_widgets_to_setting_layout(self, settings_layout):
        # Settings placeholder
         
-        from core.translation import _t
+        from core.translation import _t, TranslationManager
+        from core.app_version import software_version_display
+
+        self.version_group = QGroupBox(_t("set_version_info"))
+        version_layout = QGridLayout(self.version_group)
+        self.software_version_title_label = QLabel(_t("set_software_version"))
+        self.software_version_title_label.setToolTip(_t("tip_software_version"))
+        lang = TranslationManager().get_language()
+        self.software_version_value_label = QLabel(software_version_display(lang))
+        self.software_version_value_label.setToolTip(_t("tip_software_version"))
+        self.software_version_value_label.setStyleSheet(
+            "color: #ff9800; font-size: 13px; font-weight: bold;"
+        )
+        version_layout.addWidget(self.software_version_title_label, 0, 0)
+        version_layout.addWidget(self.software_version_value_label, 0, 1, 1, 3)
+        settings_layout.addWidget(self.version_group)
+
         self.comm_group = QGroupBox(_t("set_comm_settings"))
         comm_layout = QGridLayout(self.comm_group)
         
@@ -1296,6 +1312,11 @@ class UIBase():
         
         comm_layout.addWidget(self.client_selection_label, 4, 0, 1, 1)
         comm_layout.addWidget(self.client_selection_combo, 4, 1, 1, 3)
+
+        self.tcp_single_server_hint_label = QLabel(_t("tip_tcp_single_server"))
+        self.tcp_single_server_hint_label.setStyleSheet("color: #888888; font-size: 11px;")
+        self.tcp_single_server_hint_label.setWordWrap(True)
+        comm_layout.addWidget(self.tcp_single_server_hint_label, 5, 0, 1, 4)
         
         # Update visibility based on current settings
         self.update_comm_settings_visibility()
@@ -2713,7 +2734,65 @@ class UIBase():
             self.log(f"Auto-save path set to: {path}", 'INFO')
         
     def show_about(self):
-        QMessageBox.about(self, "About", "Gamma-ray Spectrometer Data Acquisition Software\nVersion 1.0\n© 2025")
+        from core.translation import TranslationManager, _t
+        from core.app_version import software_version_about
+        lang = TranslationManager().get_language()
+        title = _t("sys_title") if hasattr(self, "config") else "DAQ Tablet"
+        QMessageBox.about(self, title, software_version_about(lang) + "\n© Raysen")
+
+    def update_comm_settings_visibility(self):
+        """Show TCP server vs serial controls;主控室单端口部署隐藏「显示设备」。"""
+        tcp_on = bool(getattr(self.config, "tcp_enabled", False))
+        serial_widgets = (
+            getattr(self, "serial_port_label", None),
+            getattr(self, "serial_port_combo", None),
+            getattr(self, "refresh_serial_btn", None),
+            getattr(self, "reconnect_serial_btn", None),
+            getattr(self, "baudrate_label", None),
+            getattr(self, "baudrate_combo", None),
+        )
+        server_widgets = (
+            getattr(self, "server_host_label", None),
+            getattr(self, "tcp_host_input", None),
+            getattr(self, "server_port_label", None),
+            getattr(self, "tcp_port_spin", None),
+        )
+        for w in server_widgets:
+            if w is not None:
+                w.setVisible(tcp_on)
+        for w in serial_widgets:
+            if w is not None:
+                w.setVisible(not tcp_on)
+        hide_display_client = bool(getattr(self, "control_room_mode", False))
+        for w in (
+            getattr(self, "client_selection_label", None),
+            getattr(self, "client_selection_combo", None),
+        ):
+            if w is not None:
+                w.setVisible(tcp_on and not hide_display_client)
+        hint = getattr(self, "tcp_single_server_hint_label", None)
+        if hint is not None:
+            hint.setVisible(tcp_on)
+
+    def refresh_software_version_labels(self):
+        from core.translation import _t, TranslationManager
+        from core.app_version import software_version_display, software_version_short
+        lang = TranslationManager().get_language()
+        if hasattr(self, "version_group"):
+            self.version_group.setTitle(_t("set_version_info"))
+        if hasattr(self, "software_version_title_label"):
+            self.software_version_title_label.setText(_t("set_software_version"))
+            self.software_version_title_label.setToolTip(_t("tip_software_version"))
+        if hasattr(self, "software_version_value_label"):
+            self.software_version_value_label.setText(software_version_display(lang))
+            self.software_version_value_label.setToolTip(_t("tip_software_version"))
+        if hasattr(self, "tcp_single_server_hint_label"):
+            self.tcp_single_server_hint_label.setText(_t("tip_tcp_single_server"))
+        cr = getattr(self, "control_room_page", None)
+        if cr is not None and hasattr(cr, "version_label"):
+            cr.version_label.setText(
+                _t("control_room_version_fmt", version=software_version_short())
+            )
     
     def on_cmd_feedback_received(self, packet: CmdFeedback):
         self.packet_counts['cmd'] += 1

@@ -117,9 +117,13 @@ class MainWindow(QMainWindow, UIBase):
             role_name = self._window_role_name(current_user['role'])
             self.setWindowTitle(f"Gamma-ray Spectrometer - {username} ({role_name})")
         else:
-            self.setWindowTitle(
-                _t("control_room_title") if self.control_room_mode else _t("home_title")
-            )
+            if self.control_room_mode:
+                from core.app_version import software_version_short
+                self.setWindowTitle(
+                    "%s · %s" % (_t("control_room_title"), software_version_short())
+                )
+            else:
+                self.setWindowTitle(_t("home_title"))
         
         # 设置窗口初始大小，但不固定，允许外部控制全屏或调整大小
         if self.control_room_mode:
@@ -2383,7 +2387,7 @@ class MainWindow(QMainWindow, UIBase):
         if hasattr(page, "set_alarm_kind"):
             if kind == "channel_alarm":
                 page.set_alarm_kind("channel_alarm")
-            elif kind in ("over_threshold", "soft_cleared", "fault", "acked"):
+            elif kind in ("passing", "over_threshold", "soft_cleared", "fault", "acked"):
                 page.set_alarm_kind(kind)
             else:
                 page.set_alarm_kind("normal")
@@ -2455,19 +2459,23 @@ class MainWindow(QMainWindow, UIBase):
             self._release_channel_reset_await_if_cleared(packet, source="l2_passing")
             page.alarm_title_icon.load(get_icon_svg('alarm_inactive'))
             page.alarm_indicator.load(get_icon_svg('occupancy_active'))
-            page.alarm_status_label.setText(_t("status_passing"))
+            page.alarm_status_label.setText(_t("status_rad_passage_detect"))
             self._set_home_status_style(
                 page.alarm_status_label, "#2196f3",
                 "rgba(33, 150, 243, 0.15)", "rgba(33, 150, 243, 0.4)"
             )
-            page.alarm_desc_label.setText(desc)
+            rad_desc = _t("desc_rad_passage_detect")
+            blocked = self._blocked_beam_text(packet, lang)
+            if blocked:
+                rad_desc = "%s %s" % (rad_desc, blocked)
+            page.alarm_desc_label.setText(rad_desc)
             self._set_home_alarm_card_border("#2196f3")
             self._sync_channel_hard_alarm_log(False, packet)
         elif kind == "over_threshold":
             self._release_channel_reset_await_if_cleared(packet, source="l2_over_threshold")
             page.alarm_title_icon.load(get_icon_svg('alarm_inactive'))
             page.alarm_indicator.load(get_icon_svg('alarm_inactive'))
-            page.alarm_status_label.setText(_t("status_over_threshold"))
+            page.alarm_status_label.setText(_t("status_count_elevated"))
             self._set_home_status_style(
                 page.alarm_status_label, "#ff9800",
                 "rgba(255, 152, 0, 0.12)", "rgba(255, 152, 0, 0.35)"
@@ -2477,6 +2485,7 @@ class MainWindow(QMainWindow, UIBase):
             except (TypeError, ValueError):
                 need_n = 0
             hit_n = bin(hit_mask & 0xFFFF).count("1")
+            desc = "%s | %s" % (_t("desc_count_elevated_live"), desc)
             if need_n > 0:
                 desc = "%s | %s" % (
                     desc,
@@ -5389,6 +5398,11 @@ class MainWindow(QMainWindow, UIBase):
                 self.settings_logout_btn.setText(_t("btn_logout"))
 
         # Retranslate settings page group boxes dynamically
+        if hasattr(self, "refresh_software_version_labels"):
+            self.refresh_software_version_labels()
+        if hasattr(self, "update_comm_settings_visibility"):
+            self.update_comm_settings_visibility()
+
         if hasattr(self, 'comm_group'):
             self.comm_group.setTitle(_t("set_comm_settings"))
             self.tcp_enable_checkbox.setText(_t("set_tcp_enable"))
@@ -5706,11 +5720,13 @@ class MainWindow(QMainWindow, UIBase):
                 role_name = self._window_role_name(self.current_user.get("role"))
                 self.setWindowTitle(f"Gamma-ray Spectrometer - {username} ({role_name})")
             else:
-                self.setWindowTitle(
-                    _t("control_room_title")
-                    if getattr(self, "control_room_mode", False)
-                    else _t("sys_title")
-                )
+                if getattr(self, "control_room_mode", False):
+                    from core.app_version import software_version_short
+                    self.setWindowTitle(
+                        "%s · %s" % (_t("control_room_title"), software_version_short())
+                    )
+                else:
+                    self.setWindowTitle(_t("sys_title"))
         except Exception:
             pass
 

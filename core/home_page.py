@@ -542,6 +542,8 @@ class HomePage(QWidget):
             return "alarm"
         if self._alarm_kind == "offline":
             return "offline"
+        if self._alarm_kind == "passing":
+            return "warn"
         if self._alarm_kind in ("over_threshold", "soft_cleared", "fault", "acked", "warn"):
             return "warn"
         return "normal"
@@ -553,6 +555,10 @@ class HomePage(QWidget):
         title = self.alarm_status_label.text() or ""
         if kind == "offline":
             return _t("status_rad_offline")
+        if self._alarm_kind == "passing":
+            return _t("status_rad_passage_detect")
+        if self._alarm_kind == "over_threshold":
+            return _t("status_count_elevated")
         if kind == "normal":
             return _t("status_group_ok")
         return title or _t("status_group_ok")

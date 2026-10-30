@@ -373,6 +373,14 @@ class ControlRoomPage(QWidget):
         )
         header.addWidget(self.title_label, 0, Qt.AlignVCenter)
 
+        self.version_label = QLabel()
+        self.version_label.setAlignment(Qt.AlignCenter)
+        self.version_label.setWordWrap(False)
+        self.version_label.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
+        self.version_label.setFixedHeight(CR_CHROME_H)
+        self.version_label.setStyleSheet(self._pill_qss(MUTED))
+        header.addWidget(self.version_label, 0, Qt.AlignVCenter)
+
         self.master_link_label = QLabel("--")
         self.master_link_label.setAlignment(Qt.AlignCenter)
         self.master_link_label.setWordWrap(False)
@@ -676,6 +684,11 @@ class ControlRoomPage(QWidget):
             "offline": _t("probe_tile_offline"),
         }
         self.title_label.setText(_t("control_room_title"))
+        from core.app_version import software_version_short
+        if hasattr(self, "version_label"):
+            self.version_label.setText(
+                _t("control_room_version_fmt", version=software_version_short())
+            )
         self.probe_section_title.setText(_t("control_room_probe_wall"))
         self.occ_title.setText(_t("control_room_occupancy"))
         if hasattr(self, "system_title"):
