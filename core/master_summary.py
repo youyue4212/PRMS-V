@@ -53,7 +53,7 @@ MASTER_OFFLINE_TIMEOUT_SEC = 3.0
 # 值班/记录用语（对标门式 RPM：Alarm / Occupied / Over threshold）
 _DECISION_TEXT_ZH = {
     MASTER_DECISION_NORMAL: "正常",
-    MASTER_DECISION_OVER_THRESHOLD: "超阈值",
+    MASTER_DECISION_OVER_THRESHOLD: "计数偏高",
     MASTER_DECISION_WINDOW_MATCHED: "辐射报警",
     MASTER_DECISION_JOINT_ALARM: "辐射报警",
     MASTER_DECISION_PASSING_NO_ALARM: "人员经过",
@@ -73,7 +73,7 @@ _DECISION_TEXT_EN = {
 
 # 诊断页：同一事件补一句判定方式，不给值班记录用
 _DECISION_DETAIL_ZH = {
-    MASTER_DECISION_OVER_THRESHOLD: "超阈值（未达符合路数）",
+    MASTER_DECISION_OVER_THRESHOLD: "占用窗内计数偏高（预警，非硬报）",
     MASTER_DECISION_WINDOW_MATCHED: "辐射报警（多探头符合）",
     MASTER_DECISION_JOINT_ALARM: "辐射报警（占用符合）",
 }

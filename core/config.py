@@ -1,6 +1,12 @@
 import json
 from PyQt5.QtCore import QSettings
 
+# 厂内缺省（K2 Client → PC Server）：单端口全体 8234；多端口 探头 8234 / 主控 8235
+DEFAULT_TCP_PORT_SINGLE = 8234
+DEFAULT_TCP_PORT_PROBE = 8234
+DEFAULT_TCP_PORT_MASTER = 8235
+
+
 class ConfigManager:
     def __init__(self):
         self.settings = QSettings("Raysen", "Spectrometer")
@@ -36,9 +42,25 @@ class ConfigManager:
         self.tcp_enabled = self.settings.value("TCP_ENABLED", False, bool)
         self.tcp_mode = self.settings.value("TCP_MODE", "server", str)  # "server" or "client"
         self.tcp_host = self.settings.value("TCP_HOST", "0.0.0.0", str)
-        self.tcp_port = self.settings.value("TCP_PORT", 5000, int)
+        self.tcp_port = self.settings.value("TCP_PORT", DEFAULT_TCP_PORT_SINGLE, int)
         self.tcp_client_host = self.settings.value("TCP_CLIENT_HOST", "192.168.0.201", str)
-        self.tcp_client_port = self.settings.value("TCP_CLIENT_PORT", 8234, int)
+        self.tcp_client_port = self.settings.value("TCP_CLIENT_PORT", DEFAULT_TCP_PORT_PROBE, int)
+        # PC 多端口：主控 L2 / 探头能谱 分 listen（方案 B）
+        self.tcp_multi_port = self._to_bool(self.settings.value("TCP_MULTI_PORT", False))
+        try:
+            self.tcp_port_master = int(
+                self.settings.value("TCP_PORT_MASTER", DEFAULT_TCP_PORT_MASTER)
+            )
+        except (TypeError, ValueError):
+            self.tcp_port_master = DEFAULT_TCP_PORT_MASTER
+        try:
+            self.tcp_port_probe = int(
+                self.settings.value("TCP_PORT_PROBE", DEFAULT_TCP_PORT_PROBE)
+            )
+        except (TypeError, ValueError):
+            self.tcp_port_probe = DEFAULT_TCP_PORT_PROBE
+        self.tcp_port_master = max(1, min(65535, int(self.tcp_port_master)))
+        self.tcp_port_probe = max(1, min(65535, int(self.tcp_port_probe)))
         # 期望探头数量：在线数 < 期望则报缺；>= 期望则清除旧离线 E102（支持换 IP）
         # 0 = 未配置，回退为本轮峰值在线数（调试兜底）
         self.expected_probe_count = self.settings.value("EXPECTED_PROBE_COUNT", 2, int)
@@ -257,7 +279,9 @@ class ConfigManager:
 
     def update_settings(self, baudrate=None, device=None, adc_channels=None, hv=None, threshold=None, sensitivity=None,
                        tcp_enabled=None, tcp_mode=None, tcp_host=None, tcp_port=None,
-                       tcp_client_host=None, tcp_client_port=None, language=None,
+                       tcp_client_host=None, tcp_client_port=None,
+                       tcp_multi_port=None, tcp_port_master=None, tcp_port_probe=None,
+                       language=None,
                        hv_user_set=None,
                        expected_probe_count=None, cps_window_minutes=None,
                        ui_mode=None, ir_installed=None,
@@ -351,6 +375,23 @@ class ConfigManager:
         if tcp_client_port is not None:
             self.tcp_client_port = tcp_client_port
             self.settings.setValue("TCP_CLIENT_PORT", tcp_client_port)
+        if tcp_multi_port is not None:
+            self.tcp_multi_port = bool(tcp_multi_port)
+            self.settings.setValue("TCP_MULTI_PORT", self.tcp_multi_port)
+        if tcp_port_master is not None:
+            try:
+                self.tcp_port_master = max(1, min(65535, int(tcp_port_master)))
+            except (TypeError, ValueError):
+                pass
+            else:
+                self.settings.setValue("TCP_PORT_MASTER", self.tcp_port_master)
+        if tcp_port_probe is not None:
+            try:
+                self.tcp_port_probe = max(1, min(65535, int(tcp_port_probe)))
+            except (TypeError, ValueError):
+                pass
+            else:
+                self.settings.setValue("TCP_PORT_PROBE", self.tcp_port_probe)
 
     def save_settings(self):
         self.settings.sync()

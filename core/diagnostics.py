@@ -103,6 +103,8 @@ class DiagnosticsManager:
         self.comm_timeout_grace_until: float = 0.0
         # 超时去抖起点：{client_id: first_seen_timeout_ts}
         self.timeout_pending_since: Dict[str, float] = {}
+        # TCP accept 时刻：晚连上的探头单独给 NO_DATA 宽限，避免重连后立刻 E101
+        self.client_tcp_connect_time: Dict[str, float] = {}
 
         # 分探头高压设定：{probe_key(IP): voltage}；仅对该探头启用 E202
         self.client_hv_setpoints: Dict[str, float] = {}
@@ -147,6 +149,7 @@ class DiagnosticsManager:
         self.peak_connected_count = 0
         self.purged_offline_clients = []
         self.timeout_pending_since.clear()
+        self.client_tcp_connect_time.clear()
         # 保留分探头高压设定（不随开停采集清空）
         self._load_client_hv_setpoints_from_config()
 
@@ -173,6 +176,13 @@ class DiagnosticsManager:
         if client_id in self.last_packet_time:
             del self.last_packet_time[client_id]
         self.timeout_pending_since.pop(client_id, None)
+        self.client_tcp_connect_time.pop(client_id, None)
+
+    def note_client_tcp_connected(self, client_id: str):
+        """New TCP session (incl. after PC reinit): restart E101 startup window for this id."""
+        if not client_id or client_id in ("system", "master"):
+            return
+        self.client_tcp_connect_time[client_id] = time.time()
 
     def add_fault(self, client_id: str, code: str):
         self.register_client(client_id)
@@ -402,9 +412,20 @@ class DiagnosticsManager:
                 last_seen = self.last_packet_time.get(client_id, 0.0)
                 
                 if last_seen == 0.0:
-                    # Connected but never sent a packet
-                    if time_since_start > self.NO_DATA_STARTUP_SEC:
+                    # Connected but never sent a packet（含 reinit 后晚连上的探头）
+                    conn_at = float(
+                        self.client_tcp_connect_time.get(client_id)
+                        or self.acquisition_start_time
+                        or now
+                    )
+                    since_conn = now - conn_at
+                    if (
+                        time_since_start > self.NO_DATA_STARTUP_SEC
+                        and since_conn > self.NO_DATA_STARTUP_SEC
+                    ):
                         self.add_fault(client_id, FaultCode.E101)
+                    else:
+                        self.remove_fault(client_id, FaultCode.E101)
                 else:
                     self.remove_fault(client_id, FaultCode.E101)
                     

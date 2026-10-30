@@ -19,11 +19,16 @@ import pyqtgraph as pg
 pg.setConfigOptions(antialias=False, useOpenGL=False)
 
 
-from core.config import ConfigManager
+from core.config import (
+    ConfigManager,
+    DEFAULT_TCP_PORT_MASTER,
+    DEFAULT_TCP_PORT_PROBE,
+)
 from core import algorithm as alg
 
 from core.detector import CmdFeedback, SpectrumPacket, search_serial_devices, SerialPacketWorker, DevMessage
 from core.tcp_detector import TcpPacketWorker, ClientInfo
+from core.tcp_multi_port import MultiPortTcpPacketWorker, is_tcp_worker
 from core.raw_logger import RawLogger
 from core import logger 
 from core.alarm_logger import get_alarm_logger  # 导入报警记录器
@@ -592,7 +597,7 @@ class UIBase():
             # Connect appropriate read loop based on worker type
             if isinstance(self.worker, SerialPacketWorker):
                 self.read_timer.timeout.connect(self.worker.read_serial_loop)
-            elif isinstance(self.worker, TcpPacketWorker):
+            elif is_tcp_worker(self.worker):
                 self.read_timer.timeout.connect(self.worker.read_tcp_loop)
         self.read_timer.setInterval(10)
 
@@ -610,6 +615,9 @@ class UIBase():
         self.is_acquiring = False
         # 维护人员在概览/能谱点「停止」后置位：连着也不自动开采，直到点开始或退出登录
         self._acq_hold_lock = False
+        # 用户主动「停止采集」后抑制自动开采（切端口/reinit 不断监视）
+        self._acq_user_stopped = False
+        self._tcp_worker_reinit_busy = False
         
         # Multi-client time series data storage
         self.client_time_series = {}  # {client_id: [(timestamp, counter, temperature, HV, spec_sum), ...]}
@@ -651,6 +659,7 @@ class UIBase():
         self._autosave_worker = None
         self._autosave_running = False
         self._read_timer_bound = False
+        self._tcp_reinit_grace_until = 0.0
         self._bind_read_timer_to_worker()
         
         # Setup UI connections
@@ -1130,26 +1139,85 @@ class UIBase():
 
       
         
+    def disconnect_worker_signals(self, worker=None):
+        """Unbind all slots from a worker being retired (avoid PyQt disconnect AttributeError)."""
+        w = worker if worker is not None else getattr(self, "worker", None)
+        if not w or not is_tcp_worker(w):
+            if w is not None and isinstance(w, SerialPacketWorker):
+                for sig in (
+                    w.cmd_feedback_received,
+                    w.spectrum_packet_received,
+                    w.dev_message_received,
+                    w.connection_status_changed,
+                    w.error_occurred,
+                    w.has_log,
+                ):
+                    try:
+                        sig.disconnect()
+                    except (TypeError, RuntimeError):
+                        pass
+            return
+        if hasattr(w, "_unwire_children"):
+            try:
+                w._unwire_children()
+            except (TypeError, RuntimeError, AttributeError):
+                pass
+        signals = [
+            w.cmd_feedback_received,
+            w.dev_message_received,
+            w.spectrum_packet_received,
+            w.connection_status_changed,
+            w.error_occurred,
+            w.has_log,
+            w.command_sent,
+            w.client_connected,
+            w.client_disconnected,
+        ]
+        if hasattr(w, "master_summary_received"):
+            signals.append(w.master_summary_received)
+        if hasattr(w, "master_link_seen"):
+            signals.append(w.master_link_seen)
+        for sig in signals:
+            try:
+                sig.disconnect()
+            except (TypeError, RuntimeError, AttributeError):
+                pass
+
+    def connect_worker_signals(self):
+        """Bind PyQt signals to the current self.worker (after worker replace)."""
+        if not self.worker:
+            self.log("Warning: Worker not initialized for signal connect", "WARNING")
+            return
+        w = self.worker
+        w.cmd_feedback_received.connect(
+            self.on_cmd_feedback_received, Qt.UniqueConnection
+        )
+        w.dev_message_received.connect(
+            self.on_dev_message_received, Qt.UniqueConnection
+        )
+        w.spectrum_packet_received.connect(
+            self.on_spectrum_packet_received, Qt.UniqueConnection
+        )
+        if hasattr(w, "master_summary_received"):
+            w.master_summary_received.connect(
+                self.on_master_summary_received, Qt.UniqueConnection
+            )
+        if hasattr(w, "master_link_seen"):
+            w.master_link_seen.connect(self.on_master_link_seen, Qt.UniqueConnection)
+        w.connection_status_changed.connect(
+            self.on_connection_status_changed, Qt.UniqueConnection
+        )
+        w.error_occurred.connect(self.on_error_occurred, Qt.UniqueConnection)
+        w.has_log.connect(self.on_has_log, Qt.UniqueConnection)
+        w.command_sent.connect(self.on_command_sent, Qt.UniqueConnection)
+        if is_tcp_worker(w):
+            w.client_connected.connect(self.on_tcp_client_connected, Qt.UniqueConnection)
+            w.client_disconnected.connect(
+                self.on_tcp_client_disconnected, Qt.UniqueConnection
+            )
+
     def setup_ui(self):
-        # Connect signals if worker exists
-        if self.worker:
-            self.worker.cmd_feedback_received.connect(self.on_cmd_feedback_received)
-            self.worker.dev_message_received.connect(self.on_dev_message_received)
-            self.worker.spectrum_packet_received.connect(self.on_spectrum_packet_received)
-            if hasattr(self.worker, "master_summary_received"):
-                self.worker.master_summary_received.connect(self.on_master_summary_received)
-            if hasattr(self.worker, "master_link_seen"):
-                self.worker.master_link_seen.connect(self.on_master_link_seen)
-            self.worker.connection_status_changed.connect(self.on_connection_status_changed)
-            self.worker.error_occurred.connect(self.on_error_occurred)
-            self.worker.has_log.connect(self.on_has_log)
-            #self.worker.buffer_status_changed.connect(self.on_buffer_status_changed)
-            self.worker.command_sent.connect(self.on_command_sent)
-            if isinstance(self.worker, TcpPacketWorker):
-                self.worker.client_connected.connect(self.on_tcp_client_connected)
-                self.worker.client_disconnected.connect(self.on_tcp_client_disconnected)
-        else:
-            self.log("Warning: Worker not initialized in setup_ui", 'WARNING')
+        self.connect_worker_signals()
         
 
 
@@ -1254,6 +1322,31 @@ class UIBase():
         self.tcp_port_spin.setValue(self.config.tcp_port)
         self.tcp_port_spin.valueChanged.connect(self.on_tcp_port_changed)
         comm_layout.addWidget(self.tcp_port_spin, 1, 3)
+
+        self.tcp_multi_port_checkbox = QCheckBox(_t("set_tcp_multi_port"))
+        self.tcp_multi_port_checkbox.setChecked(bool(getattr(self.config, "tcp_multi_port", False)))
+        self.tcp_multi_port_checkbox.stateChanged.connect(self.on_tcp_multi_port_changed)
+        comm_layout.addWidget(self.tcp_multi_port_checkbox, 2, 0, 1, 4)
+
+        self.tcp_port_master_label = QLabel(_t("set_tcp_port_master"))
+        comm_layout.addWidget(self.tcp_port_master_label, 3, 0)
+        self.tcp_port_master_spin = QSpinBox()
+        self.tcp_port_master_spin.setRange(1, 65535)
+        self.tcp_port_master_spin.setValue(
+            int(getattr(self.config, "tcp_port_master", DEFAULT_TCP_PORT_MASTER))
+        )
+        self.tcp_port_master_spin.valueChanged.connect(self.on_tcp_port_master_changed)
+        comm_layout.addWidget(self.tcp_port_master_spin, 3, 1)
+
+        self.tcp_port_probe_label = QLabel(_t("set_tcp_port_probe"))
+        comm_layout.addWidget(self.tcp_port_probe_label, 3, 2)
+        self.tcp_port_probe_spin = QSpinBox()
+        self.tcp_port_probe_spin.setRange(1, 65535)
+        self.tcp_port_probe_spin.setValue(
+            int(getattr(self.config, "tcp_port_probe", DEFAULT_TCP_PORT_PROBE))
+        )
+        self.tcp_port_probe_spin.valueChanged.connect(self.on_tcp_port_probe_changed)
+        comm_layout.addWidget(self.tcp_port_probe_spin, 3, 3)
         
         # Serial Settings (only shown when TCP is disabled)
         self.serial_port_label = QLabel(_t("set_serial_port"))
@@ -1274,18 +1367,18 @@ class UIBase():
         self.baudrate_combo.currentTextChanged.connect(self.on_baudrate_changed)
         
         # Add serial settings to layout
-        comm_layout.addWidget(self.serial_port_label, 2, 0)
-        comm_layout.addWidget(self.serial_port_combo, 2, 1)
-        comm_layout.addWidget(self.refresh_serial_btn, 2, 2)
+        comm_layout.addWidget(self.serial_port_label, 4, 0)
+        comm_layout.addWidget(self.serial_port_combo, 4, 1)
+        comm_layout.addWidget(self.refresh_serial_btn, 4, 2)
         
         # Add manual reconnect button
         self.reconnect_serial_btn = QPushButton(_t("btn_reconnect"))
         self.reconnect_serial_btn.setToolTip("Manually reconnect to selected serial port")
         self.reconnect_serial_btn.clicked.connect(self.manual_reconnect_serial)
-        comm_layout.addWidget(self.reconnect_serial_btn, 2, 3)
+        comm_layout.addWidget(self.reconnect_serial_btn, 4, 3)
         
-        comm_layout.addWidget(self.baudrate_label, 3, 0)
-        comm_layout.addWidget(self.baudrate_combo, 3, 1)
+        comm_layout.addWidget(self.baudrate_label, 5, 0)
+        comm_layout.addWidget(self.baudrate_combo, 5, 1)
         
         # Client Selection for multi-client mode - MOVED HERE as requested by user
         self.client_selection_label = QLabel(_t("set_display_client"))
@@ -1294,8 +1387,8 @@ class UIBase():
         self.client_selection_combo.currentTextChanged.connect(self.on_client_selection_changed)
         self.client_selection_combo.setEnabled(False)  # Initially disabled until clients are available
         
-        comm_layout.addWidget(self.client_selection_label, 4, 0, 1, 1)
-        comm_layout.addWidget(self.client_selection_combo, 4, 1, 1, 3)
+        comm_layout.addWidget(self.client_selection_label, 6, 0, 1, 1)
+        comm_layout.addWidget(self.client_selection_combo, 6, 1, 1, 3)
         
         # Update visibility based on current settings
         self.update_comm_settings_visibility()
@@ -1812,9 +1905,12 @@ class UIBase():
     def initialize_worker(self):
         """Initialize the appropriate worker based on configuration"""
         if self.config.tcp_enabled:
-            # Use TCP worker
-            self.worker = TcpPacketWorker()
-            self.log("TCP/IP mode enabled", 'INFO')
+            if getattr(self.config, "tcp_multi_port", False):
+                self.worker = MultiPortTcpPacketWorker()
+                self.log("TCP multi-port mode enabled (master + probe listeners)", "INFO")
+            else:
+                self.worker = TcpPacketWorker()
+                self.log("TCP/IP mode enabled", 'INFO')
         else:
             # Use serial worker
             self.worker = SerialPacketWorker()
@@ -1826,7 +1922,7 @@ class UIBase():
         
         if self.config.tcp_enabled:
             # TCP mode - always server mode
-            if isinstance(self.worker, TcpPacketWorker):
+            if is_tcp_worker(self.worker):
                 if not self.worker.is_tcp_ready():
                     # Always connect as server
                     return self.worker.connect_tcp(
@@ -1868,7 +1964,7 @@ class UIBase():
                 self.read_timer.timeout.disconnect()
             except TypeError:
                 pass
-            if isinstance(self.worker, TcpPacketWorker):
+            if is_tcp_worker(self.worker):
                 self.read_timer.timeout.connect(
                     self.worker.read_tcp_loop, Qt.DirectConnection
                 )
@@ -1899,6 +1995,92 @@ class UIBase():
             QMetaObject.invokeMethod(self.read_timer, "stop", Qt.QueuedConnection)
         else:
             self.read_timer.stop()
+
+    def _detach_read_timer_to_gui_thread(self):
+        """Stop read loop timer and allocate a fresh QTimer (avoid illegal moveToThread)."""
+        old_timer = self.read_timer
+        if self._read_timer_bound:
+            owner = old_timer.thread()
+            gui = QThread.currentThread()
+            if owner is not gui:
+                if old_timer.isActive():
+                    QMetaObject.invokeMethod(old_timer, "stop", Qt.BlockingQueuedConnection)
+                try:
+                    old_timer.timeout.disconnect()
+                except TypeError:
+                    pass
+                QMetaObject.invokeMethod(old_timer, "deleteLater", Qt.BlockingQueuedConnection)
+            else:
+                old_timer.stop()
+                try:
+                    old_timer.timeout.disconnect()
+                except TypeError:
+                    pass
+                old_timer.deleteLater()
+        self.read_timer = QTimer()
+        self._read_timer_bound = False
+
+    def _shutdown_tcp_worker_blocking(self, worker):
+        """Close sockets and stop read loop on worker thread (fixes WinError 10038 / timer races)."""
+        if worker is None:
+            return
+        self._detach_read_timer_to_gui_thread()
+        if not is_tcp_worker(worker):
+            try:
+                worker.stop_reading()
+            except Exception:
+                pass
+            return
+        if QThread.currentThread() is self.worker_thread:
+            worker.shutdown_tcp_io()
+            return
+        if not hasattr(worker, "shutdown_tcp_io"):
+            worker.stop_reading()
+            worker.disconnect_tcp()
+            return
+        ok = QMetaObject.invokeMethod(
+            worker, "shutdown_tcp_io", Qt.BlockingQueuedConnection
+        )
+        if not ok:
+            worker.stop_reading()
+            worker.disconnect_tcp()
+
+    def _reset_master_link_state_for_tcp_reinit(self):
+        """Avoid stale L2 timestamps causing M102 right after port/mode rebind."""
+        self._last_any_master_at = 0.0
+        self._last_sane_master_at = 0.0
+        self._master_timeout_pending_since = 0.0
+        self.master_client_id = None
+        self.latest_master_summary = None
+        worker = getattr(self, "worker", None)
+        if worker is not None:
+            try:
+                worker.master_client_id = None
+            except Exception:
+                pass
+        dm = getattr(self, "diagnostics_manager", None)
+        if dm is None:
+            return
+        from core.diagnostics import FaultCode
+
+        for code in (
+            FaultCode.M101,
+            FaultCode.M102,
+            FaultCode.M103,
+            FaultCode.M104,
+        ):
+            dm.remove_fault("master", code)
+
+    def _queue_worker_delete(self, worker):
+        if worker is None:
+            return
+        try:
+            if QThread.currentThread() is self.worker_thread:
+                worker.deleteLater()
+            else:
+                QMetaObject.invokeMethod(worker, "deleteLater", Qt.QueuedConnection)
+        except (RuntimeError, AttributeError):
+            pass
     
     def ensure_serial_ready(self):
         """Backward compatibility method"""
@@ -1929,7 +2111,7 @@ class UIBase():
 
     def _ensure_tcp_link_layer(self):
         """Keep TCP accept/recv running even when not accumulating (listen or hold)."""
-        if not isinstance(self.worker, TcpPacketWorker):
+        if not is_tcp_worker(self.worker):
             return
         if not self.worker.is_tcp_ready():
             return
@@ -1941,8 +2123,12 @@ class UIBase():
         if from_auto and self.is_acq_hold_locked():
             self.log("Auto-start skipped: maintenance acquisition hold", "DEBUG")
             return False
+        if from_auto and getattr(self, "_acq_user_stopped", False):
+            self.log("Auto-start skipped: user stopped acquisition (monitor only)", "DEBUG")
+            return False
         if self.ensure_connection_ready():
             self._acq_hold_lock = False
+            self._acq_user_stopped = False
             # 先打采集时间戳并清故障表，避免同 tick 内 _sync_probe_count_fault 误报 E103
             self.diagnostics_manager.start_acquisition()
             self.is_acquiring = True
@@ -1994,12 +2180,13 @@ class UIBase():
         if self.data_updated_callback is not None:
             self.data_updated_callback(self.current_stat, 0, {})
 
-    def stop_acquisition(self, hold=False, clear_memory=None):
-        """Stop reading packets. hold=True: 检修停采锁，保留当前谱/曲线便于保存。"""
+    def stop_acquisition(self, hold=False, clear_memory=None, user_initiated=True):
+        """Stop accumulating/saving. TCP 监视链路保持，总览 CPS 继续刷新（除非 clear_memory）。"""
         if hold:
             self._acq_hold_lock = True
         if clear_memory is None:
-            clear_memory = not bool(hold)
+            # 停止采集 ≠ 清空总览；仅「清空数据」或显式传 True 才清内存
+            clear_memory = False
         if self.is_acquiring:
             # 停止前先落盘一次，避免随后清内存导致只能导出空文件
             try:
@@ -2008,23 +2195,36 @@ class UIBase():
             except Exception as e:
                 self.log(f"Final auto-save before stop failed: {e}", 'WARNING')
 
-            if not hold:
+            if self.config.tcp_enabled and is_tcp_worker(getattr(self, "worker", None)):
+                # 与检修停采一致：不断 TCP accept/recv，避免总览探头整片消失
+                self._ensure_tcp_link_layer()
+            elif not hold:
                 self.worker.stop_reading()
                 self._stop_read_timer()
-                if self.raw_logger:
-                    self.raw_logger.stop()
             else:
                 self._ensure_tcp_link_layer()
+
+            if not hold and self.raw_logger:
+                self.raw_logger.stop()
+
             self.is_acquiring = False
             self.diagnostics_manager.stop_acquisition()
+            if user_initiated and not hold:
+                self._acq_user_stopped = True
 
             if clear_memory:
                 self._clear_acquisition_memory()
 
             self.set_status_label('Held.' if hold else 'Stopped.', False)
 
-            if hold:
+            if hold and user_initiated:
+                self._acq_user_stopped = True
                 self.log("Acquisition held by maintenance (auto-start suppressed; link stays up)", "INFO")
+            elif self.config.tcp_enabled:
+                self.log(
+                    "Acquisition stopped; TCP monitor kept (overview CPS still updates)",
+                    "INFO",
+                )
 
 
     
@@ -2866,11 +3066,27 @@ class UIBase():
         storage_client_id = client_id if client_id is not None else "serial_client"
         self.client_latest_packets[storage_client_id] = packet
         if not getattr(self, "is_acquiring", False):
-            # 检修停采/未开采：保活链路与诊断，不改谱/曲线
+            # 停采后仍监视：更新 client_data/总览 CPS，但不累计曲线与自动保存缓冲
+            actual_client_id = client_id if client_id is not None else "serial_client"
             try:
-                self.diagnostics_manager.process_packet(storage_client_id, packet)
+                self.diagnostics_manager.process_packet(actual_client_id, packet)
             except Exception:
                 pass
+            self.update_client_data(actual_client_id, packet)
+            if storage_client_id == self.primary_client_id or self.primary_client_id is None:
+                try:
+                    self.update_device_status_from_packet(packet, client_id)
+                except Exception:
+                    pass
+            if self.data_updated_callback is not None:
+                try:
+                    self.data_updated_callback(
+                        self.current_stat,
+                        getattr(self, "total_count_rate", 0),
+                        dict(getattr(self, "client_data", None) or {}),
+                    )
+                except Exception:
+                    pass
             return
         
         if storage_client_id not in self.client_time_series:
@@ -3099,6 +3315,9 @@ class UIBase():
 
     def on_tcp_client_connected(self, client_id: str):
         self.log(f"TCP client connected: {client_id}", 'INFO')
+        dm = getattr(self, "diagnostics_manager", None)
+        if dm is not None and hasattr(dm, "note_client_tcp_connected"):
+            dm.note_client_tcp_connected(client_id)
         if self.primary_client_id is None:
             self.primary_client_id = client_id
             self.apply_primary_client_snapshot()
@@ -3189,6 +3408,13 @@ class UIBase():
             expected = int(getattr(self.config, "expected_probe_count", 0) or 0)
         except (TypeError, ValueError):
             expected = 0
+
+        reinit_grace = float(getattr(self, "_tcp_reinit_grace_until", 0) or 0)
+        if reinit_grace > time.time():
+            self.remove_client_display_data(client_id)
+            if hasattr(self, "update_system_status"):
+                self.update_system_status()
+            return
 
         if (getattr(self, 'diagnostics_manager', None) is not None
                 and getattr(self, 'is_acquiring', False)):
@@ -3704,18 +3930,18 @@ class UIBase():
         # Reinitialize worker if needed
         if self.worker:
             was_acquiring = bool(self.is_acquiring)
-            # Stop current worker
+            old_worker = self.worker
             if was_acquiring:
                 self.stop_acquisition()
-            else:
-                self.worker.stop_reading()
-                self._stop_read_timer()
-            
-            # Disconnect based on worker type
-            if isinstance(self.worker, SerialPacketWorker):
-                self.worker.disconnect_serial()
-            elif isinstance(self.worker, TcpPacketWorker):
-                self.worker.disconnect_tcp()
+            self.disconnect_worker_signals(old_worker)
+            if isinstance(old_worker, SerialPacketWorker):
+                self._detach_read_timer_to_gui_thread()
+                old_worker.stop_reading()
+                old_worker.disconnect_serial()
+            elif is_tcp_worker(old_worker):
+                self._shutdown_tcp_worker_blocking(old_worker)
+            self._queue_worker_delete(old_worker)
+            self.worker = None
 
             self.reset_plots()
             self.client_data = {}
@@ -3730,16 +3956,18 @@ class UIBase():
             if self.data_updated_callback is not None:
                 self.data_updated_callback(self.current_stat, 0, {})
             
-            # Reinitialize worker
-            self._read_timer_bound = False
             self.initialize_worker()
             if self.worker:
                 self.worker.moveToThread(self.worker_thread)
-                # Reconnect signals
-                self.setup_ui()
+                self.connect_worker_signals()
                 self._bind_read_timer_to_worker()
-                if was_acquiring:
+                if enabled and self.ensure_connection_ready():
+                    self._ensure_tcp_link_layer()
+                if was_acquiring and enabled:
                     self.start_acquisition()
+                elif enabled and is_tcp_worker(self.worker):
+                    self.worker.start_reading()
+                    self._start_read_timer()
         
         self.log(f"TCP/IP server mode {'enabled' if enabled else 'disabled'}", 'INFO')
     
@@ -3748,6 +3976,104 @@ class UIBase():
     
     def on_tcp_port_changed(self, port):
         self.config.update_settings(tcp_port=port)
+        if self.config.tcp_enabled and not getattr(self.config, "tcp_multi_port", False):
+            self._reinit_tcp_worker_after_comm_change("TCP single-port changed to %s" % port)
+
+    def on_tcp_port_master_changed(self, port):
+        self.config.update_settings(tcp_port_master=port)
+        if self.config.tcp_enabled and getattr(self.config, "tcp_multi_port", False):
+            self._reinit_tcp_worker_after_comm_change("TCP master port changed to %s" % port)
+
+    def on_tcp_port_probe_changed(self, port):
+        self.config.update_settings(tcp_port_probe=port)
+        if self.config.tcp_enabled and getattr(self.config, "tcp_multi_port", False):
+            self._reinit_tcp_worker_after_comm_change("TCP probe port changed to %s" % port)
+
+    def on_tcp_multi_port_changed(self, state):
+        enabled = state == Qt.Checked
+        if enabled:
+            self.tcp_port_master_spin.blockSignals(True)
+            self.tcp_port_probe_spin.blockSignals(True)
+            self.tcp_port_master_spin.setValue(DEFAULT_TCP_PORT_MASTER)
+            self.tcp_port_probe_spin.setValue(DEFAULT_TCP_PORT_PROBE)
+            self.tcp_port_master_spin.blockSignals(False)
+            self.tcp_port_probe_spin.blockSignals(False)
+            self.config.update_settings(
+                tcp_multi_port=True,
+                tcp_port_master=DEFAULT_TCP_PORT_MASTER,
+                tcp_port_probe=DEFAULT_TCP_PORT_PROBE,
+            )
+        else:
+            self.config.update_settings(tcp_multi_port=False, tcp_port=self.tcp_port_spin.value())
+        self.update_comm_settings_visibility()
+        if not self.config.tcp_enabled:
+            return
+        self._reinit_tcp_worker_after_comm_change(
+            "TCP multi-port %s" % ("enabled" if enabled else "disabled")
+        )
+
+    def _clear_tcp_reconnect_backoff(self):
+        """MainWindow 定时重连有指数退避；改端口/模式后应立即 bind。"""
+        self._tcp_reconnect_backoff_sec = 0
+        self._tcp_reconnect_last_at = 0
+        self._tcp_reconnect_key = None
+
+    def _reinit_tcp_worker_after_comm_change(self, reason: str):
+        if not self.config.tcp_enabled:
+            return
+        if getattr(self, "_tcp_worker_reinit_busy", False):
+            return
+        self._tcp_worker_reinit_busy = True
+        was_acquiring = bool(self.is_acquiring)
+        old_worker = self.worker
+        grace_sec = 90.0
+        self._tcp_reinit_grace_until = time.time() + grace_sec
+        dm = getattr(self, "diagnostics_manager", None)
+        if dm is not None and hasattr(dm, "defer_comm_timeouts"):
+            dm.defer_comm_timeouts(grace_sec)
+        self._reset_master_link_state_for_tcp_reinit()
+
+        try:
+            if was_acquiring:
+                self.stop_acquisition(user_initiated=False)
+            if old_worker:
+                self.disconnect_worker_signals(old_worker)
+                self._shutdown_tcp_worker_blocking(old_worker)
+                self._queue_worker_delete(old_worker)
+            self.worker = None
+
+            self._clear_tcp_reconnect_backoff()
+            self.initialize_worker()
+            if not self.worker:
+                return
+            self.worker.moveToThread(self.worker_thread)
+            self.connect_worker_signals()
+            if self.raw_logger:
+                try:
+                    self.worker.set_logger(self.raw_logger)
+                except TypeError:
+                    self.worker.set_logger(self.raw_logger, self.log)
+            self._bind_read_timer_to_worker()
+            if self.ensure_connection_ready():
+                self._ensure_tcp_link_layer()
+            if hasattr(self, "prune_disconnected_probe_labels"):
+                try:
+                    online = (
+                        self.get_online_probe_client_ids()
+                        if hasattr(self, "get_online_probe_client_ids")
+                        else []
+                    )
+                    self.prune_disconnected_probe_labels(online)
+                except Exception:
+                    pass
+            if was_acquiring:
+                self.start_acquisition()
+            elif is_tcp_worker(self.worker):
+                self.worker.start_reading()
+                self._start_read_timer()
+            self.log(reason + "; TCP worker reinitialized and listen rebound", "INFO")
+        finally:
+            self._tcp_worker_reinit_busy = False
     
     def on_serial_port_changed(self, port):
         """串口设备改变时的处理"""
@@ -3936,6 +4262,29 @@ class UIBase():
             if lbl is not None:
                 lbl.setText(_t("probe_num", n=i + 1))
 
+    def _master_tcp_client_ids(self):
+        """主控 socket（含尚未打上 master_client_id 的同 IP 会话）不计入探头。"""
+        out = set()
+        worker = getattr(self, "worker", None)
+        if isinstance(worker, MultiPortTcpPacketWorker):
+            master_child = getattr(worker, "_master", None)
+            if master_child is not None:
+                out.update(getattr(master_child, "client_sockets", {}) or {})
+        mc = getattr(self, "master_client_id", None)
+        if not mc and worker is not None:
+            mc = getattr(worker, "master_client_id", None)
+        if mc:
+            out.add(mc)
+        master_ip = str(getattr(self, "_last_master_ip", "") or "")
+        if worker is not None:
+            for cid in (getattr(worker, "client_infos", None) or {}):
+                if mc and cid == mc:
+                    out.add(cid)
+                    continue
+                if master_ip and self._extract_client_ip(cid) == master_ip:
+                    out.add(cid)
+        return list(out)
+
     def get_online_probe_client_ids(self, fresh_sec: float = 12.0):
         """
         当前有效在线探头（按 IP 去重）。
@@ -3972,12 +4321,15 @@ class UIBase():
         elif getattr(self, "worker", None) is not None and getattr(self.worker, "is_running", False):
             return ["serial_client"]
 
-        master_cid = self.master_client_id or getattr(self.worker, "master_client_id", None)
+        master_ignore = set(self._master_tcp_client_ids())
+        master_ip = str(getattr(self, "_last_master_ip", "") or "")
         by_ip = {}
         for cid in candidates:
-            if master_cid and cid == master_cid:
-                continue  # 主控连接不算探头
+            if cid in master_ignore:
+                continue
             ip = self._extract_client_ip(cid) if hasattr(self, "_extract_client_ip") else ""
+            if master_ip and ip == master_ip:
+                continue
             key = ip or cid
             by_ip[key] = cid
         return list(by_ip.values())
@@ -4041,10 +4393,24 @@ class UIBase():
     def update_comm_settings_visibility(self):
         """Update visibility of communication settings based on current configuration"""
         tcp_enabled = self.config.tcp_enabled
+        multi = bool(tcp_enabled and getattr(self.config, "tcp_multi_port", False))
         
         # Show/hide TCP-specific settings
         self.tcp_host_input.setVisible(tcp_enabled)
-        self.tcp_port_spin.setVisible(tcp_enabled)
+        if hasattr(self, "tcp_multi_port_checkbox"):
+            self.tcp_multi_port_checkbox.setVisible(tcp_enabled)
+        single_port = tcp_enabled and not multi
+        self.server_port_label.setVisible(single_port)
+        self.tcp_port_spin.setVisible(single_port)
+        for name in (
+            "tcp_port_master_label",
+            "tcp_port_master_spin",
+            "tcp_port_probe_label",
+            "tcp_port_probe_spin",
+        ):
+            w = getattr(self, name, None)
+            if w is not None:
+                w.setVisible(multi)
         
         # Show/hide serial settings (only visible in serial/USB mode)
         serial_visible = not tcp_enabled
@@ -4064,7 +4430,9 @@ class UIBase():
             if getattr(self, "auto_save_enabled", False):
                 # 先停读再刷盘，避免写盘期间队列里的谱包进不了最后一次保存
                 try:
-                    self.worker.stop_reading()
+                    w = getattr(self, "worker", None)
+                    if w is not None:
+                        w.stop_reading()
                     self._stop_read_timer()
                 except Exception:
                     pass
@@ -4083,19 +4451,27 @@ class UIBase():
             self.log("Final auto-save on close failed: %s" % e, "WARNING")
         self._wait_autosave_worker(timeout=120.0)
         try:
-            self.worker.stop_reading()
-            self._stop_read_timer()
+            if getattr(self, "plot_timer", None) is not None:
+                self.plot_timer.stop()
         except Exception:
             pass
-        
-        # Disconnect based on worker type
-        if isinstance(self.worker, SerialPacketWorker):
-            self.worker.disconnect_serial()
-        elif isinstance(self.worker, TcpPacketWorker):
-            self.worker.disconnect_tcp()
-        
+        w = getattr(self, "worker", None)
+        try:
+            if w is not None:
+                if is_tcp_worker(w):
+                    self._shutdown_tcp_worker_blocking(w)
+                else:
+                    self._detach_read_timer_to_gui_thread()
+                    w.stop_reading()
+                    if isinstance(w, SerialPacketWorker):
+                        w.disconnect_serial()
+            else:
+                self._detach_read_timer_to_gui_thread()
+        except Exception:
+            pass
+
         self.worker_thread.quit()
-        self.worker_thread.wait()
+        self.worker_thread.wait(5000)
         if self.raw_logger:
             self.raw_logger.close()
         event.accept()
@@ -4990,7 +5366,7 @@ class UIBase():
         Returns:
             list: 客户端ID列表
         """
-        if self.config.tcp_enabled and isinstance(self.worker, TcpPacketWorker):
+        if self.config.tcp_enabled and is_tcp_worker(self.worker):
             connected_clients = self.worker.get_client_list()
             historical_clients = [
                 client_id for client_id in self.client_time_series.keys()
@@ -5056,6 +5432,30 @@ class UIBase():
             or client_id in (getattr(self, "client_latest_packets", None) or {})
         )
 
+    def _client_has_spectrum(self, client_id: str) -> bool:
+        """是否已收到至少一帧能谱（E101 瞬间不用配置里的 product_id 当显示号）。"""
+        if client_id in (getattr(self, "client_latest_packets", None) or {}):
+            return True
+        dm = getattr(self, "diagnostics_manager", None)
+        if dm is not None:
+            return float((getattr(dm, "last_packet_time", None) or {}).get(client_id, 0) or 0) > 0
+        return False
+
+    def _display_num_from_connected_probe_ips(self, ip: str) -> Optional[int]:
+        if not ip or ip == "serial":
+            return None
+        if not hasattr(self, "get_online_probe_client_ids"):
+            return None
+        probe_ips = []
+        for cid in self.get_online_probe_client_ids() or []:
+            p_ip = self._extract_client_ip(cid)
+            if p_ip and p_ip != "serial":
+                probe_ips.append(p_ip)
+        probe_ips = sorted(set(probe_ips))
+        if ip in probe_ips:
+            return probe_ips.index(ip) + 1
+        return None
+
     def _resolve_probe_display_num(self, client_id: str) -> Optional[int]:
         """
         值班显示编号：在线时 product_id(唯一) 或 IP 序；离线沿用冻结的 display_num，
@@ -5064,8 +5464,14 @@ class UIBase():
         ip = self._extract_client_ip(client_id)
         live = self._probe_client_is_live(client_id)
         registry = getattr(self, "_probe_registry", None) or {}
+        has_spec = self._client_has_spectrum(client_id)
+        tcp_up_no_spec = (
+            not has_spec
+            and hasattr(self, "get_online_probe_client_ids")
+            and client_id in (self.get_online_probe_client_ids() or [])
+        )
 
-        if ip and not live:
+        if ip and not live and not tcp_up_no_spec:
             try:
                 frozen = registry.get(ip, {}).get("display_num")
                 if frozen is not None:
@@ -5073,11 +5479,18 @@ class UIBase():
             except (TypeError, ValueError):
                 pass
 
-        pid = self._resolve_product_id(client_id)
+        pid = self._resolve_product_id(client_id) if has_spec else None
         num = None
-        if pid is not None and 1 <= pid <= 99 and self._product_id_is_unique(pid):
+        if (
+            has_spec
+            and pid is not None
+            and 1 <= pid <= 99
+            and self._product_id_is_unique(pid)
+        ):
             num = int(pid)
-        elif ip and ip in (getattr(self, "_probe_ip_index", None) or {}):
+        elif ip:
+            num = self._display_num_from_connected_probe_ips(ip)
+        if num is None and ip and ip in (getattr(self, "_probe_ip_index", None) or {}):
             num = int(self._probe_ip_index[ip])
 
         if num is not None and ip:
@@ -5275,6 +5688,9 @@ class UIBase():
             dm.remove_fault("system", FaultCode.E103)
             return
         if self._probe_count_startup_grace_active():
+            dm.remove_fault("system", FaultCode.E103)
+            return
+        if float(getattr(self, "_tcp_reinit_grace_until", 0) or 0) > time.time():
             dm.remove_fault("system", FaultCode.E103)
             return
         try:
@@ -5743,7 +6159,7 @@ class UIBase():
             return False
 
         ok = False
-        if self.config.tcp_enabled and isinstance(self.worker, TcpPacketWorker):
+        if self.config.tcp_enabled and is_tcp_worker(self.worker):
             if all_probes:
                 n = self.worker.reset_factory_defaults_broadcast_probes()
                 ok = n > 0

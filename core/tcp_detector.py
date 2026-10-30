@@ -10,7 +10,7 @@ import sys
 import time
 import socket
 import threading
-from PyQt5.QtCore import QThread, QTimer, QMutex, pyqtSignal, Qt, QObject
+from PyQt5.QtCore import QThread, QTimer, QMutex, pyqtSignal, pyqtSlot, Qt, QObject
 from dataclasses import dataclass
 from typing import Optional, Dict, List, Tuple
 import struct
@@ -125,8 +125,8 @@ class TcpPacketWorker(QObject):
     client_connected = pyqtSignal(str)  # New signal: client connected
     client_disconnected = pyqtSignal(str)  # New signal: client disconnected
     
-    def __init__(self):
-        super().__init__()
+    def __init__(self, parent=None):
+        super().__init__(parent)
         self.server_socket = None  # Listening socket (server mode)
         self.client_sockets = {}  # Client socket dictionary {client_id: socket}
         self.client_buffers = {}  # Buffer for each client {client_id: bytearray}
@@ -143,6 +143,8 @@ class TcpPacketWorker(QObject):
         
         # Initialize is_server_mode attribute
         self.is_server_mode = False
+        # "any" | "master_only" | "probe_only" — PC 多端口分流
+        self.listen_role = "any"
         
         # Buffer size limit - prevent memory overflow
         self.max_buffer_size = 1024 * 1024  # 1MB maximum buffer size
@@ -467,7 +469,8 @@ class TcpPacketWorker(QObject):
                             bind_host = "0.0.0.0"
                         else:
                             raise
-                    self.server_socket.listen(5)  # Listen for up to 5 connections
+                    backlog = 16 if getattr(self, "listen_role", "any") == "probe_only" else 5
+                    self.server_socket.listen(backlog)
                     
                     # Set socket to non-blocking for accepting connections
                     self.server_socket.setblocking(False)
@@ -504,9 +507,13 @@ class TcpPacketWorker(QObject):
         # Close all client sockets
         for client_id, sock in list(self.client_sockets.items()):
             try:
+                try:
+                    sock.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
                 sock.close()
                 self.client_disconnected.emit(client_id)
-            except:
+            except OSError:
                 pass
         self.client_sockets.clear()
         self.client_buffers.clear()
@@ -514,8 +521,12 @@ class TcpPacketWorker(QObject):
         # Close server socket
         if self.server_socket:
             try:
+                try:
+                    self.server_socket.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
                 self.server_socket.close()
-            except:
+            except OSError:
                 pass
             self.server_socket = None
     
@@ -534,6 +545,13 @@ class TcpPacketWorker(QObject):
         """Stop reading from TCP socket"""
         self.is_running = False
         self.has_log.emit("Stop.", 'INFO')
+
+    @pyqtSlot()
+    def shutdown_tcp_io(self):
+        """Stop read loop and close sockets (must run on worker thread)."""
+        self.is_running = False
+        self._cleanup_all_sockets()
+        self.is_server_mode = False
     
     def read_tcp_loop(self):
         """
@@ -1015,10 +1033,22 @@ class TcpPacketWorker(QObject):
             try:
                 packet_id = struct.unpack('<H', buffer[i:i+2])[0]
                 if packet_id in [CMD_FEEDBACK_ID, SPECTRUM_PACKET_ID, DEV_MESSAGE_ID, MASTER_PACKET_HEADER]:
+                    if not self._packet_allowed_for_listen_role(packet_id):
+                        continue
                     return (i, packet_id)
             except struct.error:
                 continue
         return None
+
+    def _packet_allowed_for_listen_role(self, packet_id: int) -> bool:
+        role = getattr(self, "listen_role", "any") or "any"
+        if role == "any":
+            return True
+        if role == "master_only":
+            return packet_id in (MASTER_PACKET_HEADER, CMD_FEEDBACK_ID, DEV_MESSAGE_ID)
+        if role == "probe_only":
+            return packet_id in (SPECTRUM_PACKET_ID, CMD_FEEDBACK_ID, DEV_MESSAGE_ID)
+        return True
 
     def get_expected_packet_size(self, packet_id: int, data: bytes = b'') -> int:
         if packet_id == CMD_FEEDBACK_ID:

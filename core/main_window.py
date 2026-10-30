@@ -37,6 +37,7 @@ from core.detector import (
     SerialPacketWorker, DevMessage
 )
 from core.tcp_detector import TcpPacketWorker
+from core.tcp_multi_port import is_tcp_worker
 
 from core.ui_base import UIBase
 from core.utils import get_battery_percentage
@@ -447,7 +448,7 @@ class MainWindow(QMainWindow, UIBase):
         # Simulation timer
     def check_device_connection(self):
         # 确保TCP连接已建立
-        if isinstance(self.worker, TcpPacketWorker):
+        if is_tcp_worker(self.worker):
             tcp_ready = self.worker.is_tcp_ready()
             self.log(f"TCP ready check: {tcp_ready}", 'DEBUG')
             
@@ -456,8 +457,17 @@ class MainWindow(QMainWindow, UIBase):
                 import time as _time
                 now = _time.time()
                 host = self.config.tcp_host
-                port = self.config.tcp_port
-                key = (str(host), int(port), "server")
+                if getattr(self.config, "tcp_multi_port", False):
+                    key = (
+                        str(host),
+                        int(self.config.tcp_port_master),
+                        int(self.config.tcp_port_probe),
+                        "server-multi",
+                    )
+                    port = int(self.config.tcp_port_master)
+                else:
+                    port = self.config.tcp_port
+                    key = (str(host), int(port), "server")
                 backoff = float(getattr(self, "_tcp_reconnect_backoff_sec", 0) or 0)
                 last_at = float(getattr(self, "_tcp_reconnect_last_at", 0) or 0)
                 if backoff > 0 and (now - last_at) < backoff and getattr(self, "_tcp_reconnect_key", None) == key:
@@ -485,7 +495,7 @@ class MainWindow(QMainWindow, UIBase):
         
         is_connected = self.worker.try_connection()
         self.status_bar.update_connection_status(is_connected)
-        if isinstance(self.worker, TcpPacketWorker) and is_connected:
+        if is_tcp_worker(self.worker) and is_connected:
             self._ensure_tcp_link_layer()
         
         # 如果连接失败且是串口模式，更新串口设备下拉列表
@@ -494,18 +504,25 @@ class MainWindow(QMainWindow, UIBase):
             self.update_serial_port_combo()
 
         n_tcp_clients = 0
-        if isinstance(self.worker, TcpPacketWorker):
+        if is_tcp_worker(self.worker):
             n_tcp_clients = len(getattr(self.worker, "client_sockets", {}) or {})
         # TCP：仅监听不算「有数据通路」，避免无探头空采；有客户端才自动累计。
         data_path_up = bool(is_connected)
-        if isinstance(self.worker, TcpPacketWorker):
+        if is_tcp_worker(self.worker):
             data_path_up = n_tcp_clients > 0
         
-        # 自动开始/停止数据采集。检修停采锁期间连上也不自动再开。
+        # 自动开始/停止数据采集。检修停采锁 / 用户停采 期间连上也不自动再开。
         if data_path_up and not self.is_acquiring:
-            if self.is_acq_hold_locked():
+            if getattr(self, "_tcp_worker_reinit_busy", False):
+                pass
+            elif self.is_acq_hold_locked():
                 self.log(
                     "Connection detected but maintenance hold is active; auto-start suppressed",
+                    "DEBUG",
+                )
+            elif getattr(self, "_acq_user_stopped", False):
+                self.log(
+                    "Connection detected but user stopped acquisition; auto-start suppressed",
                     "DEBUG",
                 )
             else:
@@ -542,6 +559,13 @@ class MainWindow(QMainWindow, UIBase):
             if self.master_summary_callback is None:
                 self.master_summary_callback = self.on_master_summary_ui
 
+        grace_until = float(getattr(self, "_tcp_reinit_grace_until", 0) or 0)
+        if grace_until > time.time():
+            remain = grace_until - time.time()
+            dm_grace = getattr(self, "diagnostics_manager", None)
+            if dm_grace is not None and hasattr(dm_grace, "defer_comm_timeouts"):
+                dm_grace.defer_comm_timeouts(max(5.0, remain))
+
         # 运行周期性诊断检查（按有效在线探头/IP 去重，避免幽灵连接）
         if hasattr(self, "get_online_probe_client_ids"):
             connected_clients = self.get_online_probe_client_ids()
@@ -553,9 +577,16 @@ class MainWindow(QMainWindow, UIBase):
                 if self.worker and self.worker.is_running:
                     connected_clients = ["serial_client"]
 
+        ignore_master = []
+        if hasattr(self, "_master_tcp_client_ids"):
+            ignore_master = list(self._master_tcp_client_ids())
+        else:
+            mc = getattr(self, "master_client_id", None)
+            if mc:
+                ignore_master = [mc]
         self.diagnostics_manager.run_periodic_checks(
             connected_clients,
-            ignore_clients=[cid for cid in [getattr(self, "master_client_id", None)] if cid],
+            ignore_clients=ignore_master,
         )
         self._sync_probe_count_fault()
         self._update_master_diagnostics()
@@ -1630,9 +1661,11 @@ class MainWindow(QMainWindow, UIBase):
             self._reset_fault_log_edges_on_start()
         return ok
 
-    def stop_acquisition(self, hold=False, clear_memory=None):
+    def stop_acquisition(self, hold=False, clear_memory=None, user_initiated=True):
         self._settle_channel_hard_alarm_on_stop()
-        return super().stop_acquisition(hold=hold, clear_memory=clear_memory)
+        return super().stop_acquisition(
+            hold=hold, clear_memory=clear_memory, user_initiated=user_initiated
+        )
 
     def _tcp_client_count(self) -> int:
         w = getattr(self, "worker", None)
@@ -1649,6 +1682,15 @@ class MainWindow(QMainWindow, UIBase):
         if dm is None or not getattr(dm, "is_acquiring", False) or not dm.acquisition_start_time:
             return
         now = time.time()
+        reinit_until = float(getattr(self, "_tcp_reinit_grace_until", 0) or 0)
+        if reinit_until > now:
+            for code in (
+                FaultCode.M101,
+                FaultCode.M102,
+                FaultCode.M103,
+            ):
+                dm.remove_fault("master", code)
+            # M104 仍可在宽限期后判；此处不提前 return
         startup_age = now - float(dm.acquisition_start_time or now)
         last_any = float(getattr(self, "_last_any_master_at", 0) or 0)
         last_sane = float(getattr(self, "_last_sane_master_at", 0) or 0)
@@ -2289,7 +2331,7 @@ class MainWindow(QMainWindow, UIBase):
 
         硬报 UI：0x02（滑动窗：未配置降级符合，或雷达占用期间符合）/
         0x03（对射窗符合，只对射）进入。
-        0x01 仅黄提示（未达 N 路，不是硬报）；未配置没有 0x04。
+        0x04 左栏「占用检测中」、右栏「人员经过」；0x01 左栏「计数偏高」（非硬报）。
         """
         from core.translation import _t
         from core.master_summary import (
@@ -2455,19 +2497,21 @@ class MainWindow(QMainWindow, UIBase):
             self._release_channel_reset_await_if_cleared(packet, source="l2_passing")
             page.alarm_title_icon.load(get_icon_svg('alarm_inactive'))
             page.alarm_indicator.load(get_icon_svg('occupancy_active'))
-            page.alarm_status_label.setText(_t("status_passing"))
+            page.alarm_status_label.setText(_t("status_rad_passage_detect"))
             self._set_home_status_style(
                 page.alarm_status_label, "#2196f3",
                 "rgba(33, 150, 243, 0.15)", "rgba(33, 150, 243, 0.4)"
             )
-            page.alarm_desc_label.setText(desc)
+            page.alarm_desc_label.setText(
+                _t("desc_passage_rad_detect_time", time=current_time)
+            )
             self._set_home_alarm_card_border("#2196f3")
             self._sync_channel_hard_alarm_log(False, packet)
         elif kind == "over_threshold":
             self._release_channel_reset_await_if_cleared(packet, source="l2_over_threshold")
             page.alarm_title_icon.load(get_icon_svg('alarm_inactive'))
             page.alarm_indicator.load(get_icon_svg('alarm_inactive'))
-            page.alarm_status_label.setText(_t("status_over_threshold"))
+            page.alarm_status_label.setText(_t("status_count_elevated"))
             self._set_home_status_style(
                 page.alarm_status_label, "#ff9800",
                 "rgba(255, 152, 0, 0.12)", "rgba(255, 152, 0, 0.35)"
@@ -2476,12 +2520,13 @@ class MainWindow(QMainWindow, UIBase):
                 need_n = int(getattr(packet, "match_threshold_n", 0) or 0)
             except (TypeError, ValueError):
                 need_n = 0
-            hit_n = bin(hit_mask & 0xFFFF).count("1")
-            if need_n > 0:
+            if need_n > 1:
                 desc = "%s | %s" % (
-                    desc,
-                    _t("desc_over_thresh_need_n", hit=hit_n, n=need_n),
+                    _t("desc_count_elevated_live"),
+                    _t("desc_match_n_for_alarm", n=need_n),
                 )
+            else:
+                desc = _t("desc_count_elevated_live")
             page.alarm_desc_label.setText(desc)
             self._set_home_alarm_card_border("#ff9800")
             self._sync_channel_hard_alarm_log(False, packet)
@@ -5395,6 +5440,12 @@ class MainWindow(QMainWindow, UIBase):
             self.server_host_label.setText(_t("set_server_host"))
             self.tcp_host_input.setPlaceholderText(_t("set_server_host_placeholder"))
             self.server_port_label.setText(_t("set_server_port"))
+            if hasattr(self, "tcp_multi_port_checkbox"):
+                self.tcp_multi_port_checkbox.setText(_t("set_tcp_multi_port"))
+            if hasattr(self, "tcp_port_master_label"):
+                self.tcp_port_master_label.setText(_t("set_tcp_port_master"))
+            if hasattr(self, "tcp_port_probe_label"):
+                self.tcp_port_probe_label.setText(_t("set_tcp_port_probe"))
             self.serial_port_label.setText(_t("set_serial_port"))
             self.refresh_serial_btn.setText(_t("btn_refresh"))
             self.baudrate_label.setText(_t("set_baudrate"))
