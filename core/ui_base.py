@@ -5853,8 +5853,11 @@ class UIBase():
     def format_fault_diag_message(self, client_id: str, code: str) -> str:
         """Diagnostic page: keep the code for maintenance tickets."""
         from core.diagnostics import FaultCode
+        from core.translation import _t, TranslationManager
         code = str(code)
-        name, _, _, _ = FaultCode.get_info(code)
+        name = _t("fault_diag_" + code)
+        if name == ("fault_diag_" + code):
+            name, _, _, _ = FaultCode.get_info(code)
         extra = ""
         if code == "E103":
             try:
@@ -5868,7 +5871,11 @@ class UIBase():
             )
             if expected <= 0 and hasattr(self, "probe_online_and_target"):
                 online, expected = self.probe_online_and_target()
-            extra = "（%s/%s）" % (online, expected)
+            lang = TranslationManager().get_language()
+            if lang == "en":
+                extra = " (%s/%s)" % (online, expected)
+            else:
+                extra = "（%s/%s）" % (online, expected)
         return ("%s %s%s" % (code, name, extra)).strip()
     
     def update_client_selection_combo(self):
