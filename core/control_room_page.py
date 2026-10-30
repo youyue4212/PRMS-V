@@ -374,9 +374,9 @@ class ControlRoomPage(QWidget):
         header.addWidget(self.title_label, 0, Qt.AlignVCenter)
 
         self.version_label = QLabel("")
-        self.version_label.setStyleSheet(
-            f"color: {MUTED}; font-size: {cr_px(12)}px; background: transparent; border: none;"
-        )
+        self.version_label.setAlignment(Qt.AlignCenter)
+        self.version_label.setWordWrap(False)
+        self.version_label.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
         header.addWidget(self.version_label, 0, Qt.AlignVCenter)
 
         self.master_link_label = QLabel("--")
@@ -682,13 +682,7 @@ class ControlRoomPage(QWidget):
             "offline": _t("probe_tile_offline"),
         }
         self.title_label.setText(_t("control_room_title"))
-        try:
-            from core.app_version import software_version_short
-            self.version_label.setText(
-                _t("control_room_version_fmt", version=software_version_short())
-            )
-        except Exception:
-            self.version_label.setText("")
+        self.refresh_version_chrome()
         self.probe_section_title.setText(_t("control_room_probe_wall"))
         self.occ_title.setText(_t("control_room_occupancy"))
         if hasattr(self, "system_title"):
@@ -762,6 +756,31 @@ class ControlRoomPage(QWidget):
             self.login_btn.setText(_t("btn_logout"))
             self.login_btn.setStyleSheet(self._header_btn_qss(ALARM, press="#c62828"))
         self.set_nav_enabled(not visible)
+
+    def refresh_version_chrome(self):
+        """顶栏短版本（胶囊）+ tooltip 与设置页 software_version_display 一致。"""
+        from core.translation import _t, TranslationManager
+        from core.app_version import software_version_short, software_version_display
+
+        try:
+            lang = TranslationManager().get_language()
+        except Exception:
+            lang = "zh"
+        multi = False
+        parent = getattr(self, "parent", None)
+        if parent is not None:
+            cfg = getattr(parent, "config", None)
+            multi = bool(getattr(cfg, "tcp_multi_port", False))
+        try:
+            self.version_label.setText(
+                _t("control_room_version_fmt", version=software_version_short())
+            )
+        except Exception:
+            self.version_label.setText(software_version_short())
+        full = software_version_display(lang, multi_port=multi)
+        tip = _t("tip_software_version")
+        self.version_label.setToolTip("%s\n%s" % (full, tip) if tip else full)
+        self._apply_pill(self.version_label, MUTED, emphasis=False)
 
     def set_master_link(self, text: str, level: str = "ok"):
         self.master_link_label.setText(text or "--")

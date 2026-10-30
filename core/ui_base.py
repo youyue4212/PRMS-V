@@ -2961,7 +2961,9 @@ class UIBase():
             )
             self.software_version_value_label.setToolTip(_t("tip_software_version"))
         cr = getattr(self, "control_room_page", None)
-        if cr is not None and hasattr(cr, "version_label"):
+        if cr is not None and hasattr(cr, "refresh_version_chrome"):
+            cr.refresh_version_chrome()
+        elif cr is not None and hasattr(cr, "version_label"):
             cr.version_label.setText(
                 _t("control_room_version_fmt", version=software_version_short())
             )
