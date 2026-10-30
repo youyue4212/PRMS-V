@@ -118,9 +118,13 @@ class MainWindow(QMainWindow, UIBase):
             role_name = self._window_role_name(current_user['role'])
             self.setWindowTitle(f"Gamma-ray Spectrometer - {username} ({role_name})")
         else:
-            self.setWindowTitle(
-                _t("control_room_title") if self.control_room_mode else _t("home_title")
-            )
+            if self.control_room_mode:
+                from core.app_version import software_version_short
+                self.setWindowTitle(
+                    "%s · %s" % (_t("control_room_title"), software_version_short())
+                )
+            else:
+                self.setWindowTitle(_t("home_title"))
         
         # 设置窗口初始大小，但不固定，允许外部控制全屏或调整大小
         if self.control_room_mode:
@@ -420,6 +424,8 @@ class MainWindow(QMainWindow, UIBase):
         if hasattr(self.bottom_nav, "retranslate_ui"):
             self.bottom_nav.retranslate_ui()
         self._apply_control_room_nav_labels()
+        if hasattr(self, "refresh_software_version_labels"):
+            self.refresh_software_version_labels()
         # 冷启动：无主控时占用区显示「未接入主控」，避免默认「通道空闲/主控离线」
         try:
             self._refresh_home_from_probes(getattr(self, "client_data", None) or {})
@@ -5406,9 +5412,15 @@ class MainWindow(QMainWindow, UIBase):
             role_name = self._window_role_name(self.current_user['role'])
             self.setWindowTitle(f"Gamma-ray Spectrometer - {username} ({role_name})")
         else:
-            self.setWindowTitle(
-                _t("control_room_title") if getattr(self, "control_room_mode", False) else _t("sys_title")
-            )
+            if getattr(self, "control_room_mode", False):
+                from core.app_version import software_version_short
+                self.setWindowTitle(
+                    "%s · %s" % (_t("control_room_title"), software_version_short())
+                )
+            else:
+                self.setWindowTitle(_t("home_title"))
+        if hasattr(self, "refresh_software_version_labels"):
+            self.refresh_software_version_labels()
             
         self.save_data_btn.setText(_t("btn_save"))
         self.user_management_btn.setText(_t("btn_user_mgmt"))
@@ -5757,11 +5769,13 @@ class MainWindow(QMainWindow, UIBase):
                 role_name = self._window_role_name(self.current_user.get("role"))
                 self.setWindowTitle(f"Gamma-ray Spectrometer - {username} ({role_name})")
             else:
-                self.setWindowTitle(
-                    _t("control_room_title")
-                    if getattr(self, "control_room_mode", False)
-                    else _t("sys_title")
-                )
+                if getattr(self, "control_room_mode", False):
+                    from core.app_version import software_version_short
+                    self.setWindowTitle(
+                        "%s · %s" % (_t("control_room_title"), software_version_short())
+                    )
+                else:
+                    self.setWindowTitle(_t("home_title"))
         except Exception:
             pass
 

@@ -60,6 +60,11 @@ def main():
     app = QApplication(sys.argv)
     app.setApplicationName("DAQ Tablet")
     app.setOrganizationName("Raysen")
+    try:
+        from core.app_version import APP_VERSION
+        app.setApplicationVersion(APP_VERSION)
+    except Exception:
+        pass
 
     # UI mode override for this process (also persisted when --control-room/--tablet)
     if args.control_room or args.tablet:

@@ -1297,7 +1297,26 @@ class UIBase():
     def add_widgets_to_setting_layout(self, settings_layout):
        # Settings placeholder
         
-        from core.translation import _t
+        from core.translation import _t, TranslationManager
+        from core.app_version import software_version_display
+
+        self.version_group = QGroupBox(_t("set_version_info"))
+        version_layout = QGridLayout(self.version_group)
+        self.software_version_title_label = QLabel(_t("set_software_version"))
+        self.software_version_title_label.setToolTip(_t("tip_software_version"))
+        lang = TranslationManager().get_language()
+        multi = bool(getattr(self.config, "tcp_multi_port", False))
+        self.software_version_value_label = QLabel(
+            software_version_display(lang, multi_port=multi)
+        )
+        self.software_version_value_label.setToolTip(_t("tip_software_version"))
+        self.software_version_value_label.setStyleSheet(
+            "color: #ff9800; font-size: 13px; font-weight: bold;"
+        )
+        version_layout.addWidget(self.software_version_title_label, 0, 0)
+        version_layout.addWidget(self.software_version_value_label, 0, 1, 1, 3)
+        settings_layout.addWidget(self.version_group)
+
         self.comm_group = QGroupBox(_t("set_comm_settings"))
         comm_layout = QGridLayout(self.comm_group)
         
@@ -2925,8 +2944,35 @@ class UIBase():
             self.auto_save_path_input.setText(path)
             self.log(f"Auto-save path set to: {path}", 'INFO')
         
+    def refresh_software_version_labels(self):
+        from core.translation import _t, TranslationManager
+        from core.app_version import software_version_display, software_version_short
+
+        lang = TranslationManager().get_language()
+        multi = bool(getattr(self.config, "tcp_multi_port", False))
+        if hasattr(self, "version_group"):
+            self.version_group.setTitle(_t("set_version_info"))
+        if hasattr(self, "software_version_title_label"):
+            self.software_version_title_label.setText(_t("set_software_version"))
+            self.software_version_title_label.setToolTip(_t("tip_software_version"))
+        if hasattr(self, "software_version_value_label"):
+            self.software_version_value_label.setText(
+                software_version_display(lang, multi_port=multi)
+            )
+            self.software_version_value_label.setToolTip(_t("tip_software_version"))
+        cr = getattr(self, "control_room_page", None)
+        if cr is not None and hasattr(cr, "version_label"):
+            cr.version_label.setText(
+                _t("control_room_version_fmt", version=software_version_short())
+            )
+
     def show_about(self):
-        QMessageBox.about(self, "About", "Gamma-ray Spectrometer Data Acquisition Software\nVersion 1.0\n© 2025")
+        from core.translation import _t, TranslationManager
+        from core.app_version import software_version_about
+
+        lang = TranslationManager().get_language()
+        title = _t("sys_title") if hasattr(self, "config") else "DAQ Tablet"
+        QMessageBox.about(self, title, software_version_about(lang) + "\n© Raysen")
     
     def on_cmd_feedback_received(self, packet: CmdFeedback):
         self.packet_counts['cmd'] += 1
@@ -4019,6 +4065,8 @@ class UIBase():
         else:
             self.config.update_settings(tcp_multi_port=False, tcp_port=self.tcp_port_spin.value())
         self.update_comm_settings_visibility()
+        if hasattr(self, "refresh_software_version_labels"):
+            self.refresh_software_version_labels()
         if not self.config.tcp_enabled:
             return
         self._reinit_tcp_worker_after_comm_change(

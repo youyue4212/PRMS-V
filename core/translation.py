@@ -486,6 +486,11 @@ class TranslationManager:
             "msg_confirm_new_pwd": "请确认新密码",
             
             # Settings Page Group Boxes & Controls
+            "set_version_info": "软件信息",
+            "set_software_version": "软件版本",
+            "tip_software_version": "送检/JJF 1.4 上位机软件版本；与固件 OTA 版本号无关。多端口为部署方式，版本号与单端口相同。",
+            "control_room_version_fmt": "软件 {version}",
+            "sys_title": "伽玛能谱探测系统",
             "set_comm_settings": "通讯设置",
             "set_tcp_enable": "启用 TCP/IP 服务端模式",
             "set_server_host": "服务端主机:",
@@ -1145,6 +1150,11 @@ class TranslationManager:
             "msg_confirm_new_pwd": "Please confirm new password",
             
             # Settings Page Group Boxes & Controls
+            "set_version_info": "Software Information",
+            "set_software_version": "Software Version",
+            "tip_software_version": "Host app version for JJF 1.4; not firmware OTA. Multi-port is deployment only; same release as single-port.",
+            "control_room_version_fmt": "App {version}",
+            "sys_title": "Gamma-ray Spectrometer",
             "set_comm_settings": "Communication Settings",
             "set_tcp_enable": "Enable TCP/IP Server Mode",
             "set_server_host": "Server Host:",
