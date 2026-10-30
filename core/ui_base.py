@@ -1933,7 +1933,7 @@ class UIBase():
                 return True
             else:
                 # Worker type mismatch, reinitialize
-                self._read_timer_bound = False
+                self._detach_read_timer_to_gui_thread()
                 self.initialize_worker()
                 if self.worker:
                     self.worker.moveToThread(self.worker_thread)
@@ -1947,17 +1947,34 @@ class UIBase():
                 return True
             else:
                 # Worker type mismatch, reinitialize
-                self._read_timer_bound = False
+                self._detach_read_timer_to_gui_thread()
                 self.initialize_worker()
                 if self.worker:
                     self.worker.moveToThread(self.worker_thread)
                     self._bind_read_timer_to_worker()
                 return False
+
+    def _qtimer_invoke(self, timer: QTimer, method: str, *, blocking: bool = False) -> None:
+        """QTimer start/stop 必须在 timer 所在线程执行，否则 Qt 报 killTimer 跨线程。"""
+        if timer is None:
+            return
+        if timer.thread() is QThread.currentThread():
+            getattr(timer, method)()
+            return
+        conn = Qt.BlockingQueuedConnection if blocking else Qt.QueuedConnection
+        if not QMetaObject.invokeMethod(timer, method, conn):
+            if method == "stop":
+                try:
+                    timer.stop()
+                except Exception:
+                    pass
     
     def _bind_read_timer_to_worker(self):
         """TCP read timer on worker thread so Excel/UI stalls do not stop recv."""
         if self._read_timer_bound or self.worker is None:
             return
+        if self.read_timer.thread() is not QThread.currentThread():
+            self._detach_read_timer_to_gui_thread()
         try:
             self.read_timer.setInterval(10)
             try:
@@ -1982,34 +1999,29 @@ class UIBase():
             return
         if not self._read_timer_bound:
             self._bind_read_timer_to_worker()
-        if not self._read_timer_bound:
-            self.read_timer.start()
-            return
         if not self.read_timer.isActive():
-            QMetaObject.invokeMethod(self.read_timer, "start", Qt.QueuedConnection)
+            self._qtimer_invoke(self.read_timer, "start", blocking=False)
 
     def _stop_read_timer(self):
-        if self.worker is None:
+        if not hasattr(self, "read_timer") or self.read_timer is None:
             return
-        if self._read_timer_bound and self.read_timer.isActive():
-            QMetaObject.invokeMethod(self.read_timer, "stop", Qt.QueuedConnection)
-        else:
-            self.read_timer.stop()
+        self._qtimer_invoke(self.read_timer, "stop", blocking=False)
+
+    def _stop_read_timer_sync(self):
+        """退出 / TCP reinit 前同步停表，避免 Queued stop 未完成就析构 worker。"""
+        if not hasattr(self, "read_timer") or self.read_timer is None:
+            return
+        self._qtimer_invoke(self.read_timer, "stop", blocking=True)
 
     def _detach_read_timer_to_gui_thread(self):
         """Stop read loop timer and allocate a fresh QTimer (avoid illegal moveToThread)."""
-        old_timer = self.read_timer
-        if self._read_timer_bound:
-            owner = old_timer.thread()
+        old_timer = getattr(self, "read_timer", None)
+        if old_timer is not None:
             gui = QThread.currentThread()
+            owner = old_timer.thread()
             if owner is not gui:
-                if old_timer.isActive():
-                    QMetaObject.invokeMethod(old_timer, "stop", Qt.BlockingQueuedConnection)
-                try:
-                    old_timer.timeout.disconnect()
-                except TypeError:
-                    pass
-                QMetaObject.invokeMethod(old_timer, "deleteLater", Qt.BlockingQueuedConnection)
+                self._qtimer_invoke(old_timer, "stop", blocking=True)
+                self._qtimer_invoke(old_timer, "deleteLater", blocking=True)
             else:
                 old_timer.stop()
                 try:
@@ -2024,6 +2036,7 @@ class UIBase():
         """Close sockets and stop read loop on worker thread (fixes WinError 10038 / timer races)."""
         if worker is None:
             return
+        self._stop_read_timer_sync()
         self._detach_read_timer_to_gui_thread()
         if not is_tcp_worker(worker):
             try:
@@ -4433,7 +4446,7 @@ class UIBase():
                     w = getattr(self, "worker", None)
                     if w is not None:
                         w.stop_reading()
-                    self._stop_read_timer()
+                    self._stop_read_timer_sync()
                 except Exception:
                     pass
                 try:
@@ -4450,11 +4463,20 @@ class UIBase():
         except Exception as e:
             self.log("Final auto-save on close failed: %s" % e, "WARNING")
         self._wait_autosave_worker(timeout=120.0)
-        try:
-            if getattr(self, "plot_timer", None) is not None:
-                self.plot_timer.stop()
-        except Exception:
-            pass
+        for name in (
+            "plot_timer",
+            "master_watchdog_timer",
+            "auto_save_timer",
+            "device_mon_timer",
+            "_idle_home_timer",
+            "_secret_hold_timer",
+        ):
+            try:
+                t = getattr(self, name, None)
+                if t is not None:
+                    self._qtimer_invoke(t, "stop", blocking=True)
+            except Exception:
+                pass
         w = getattr(self, "worker", None)
         try:
             if w is not None:
