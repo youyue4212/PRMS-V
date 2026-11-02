@@ -2763,59 +2763,192 @@ class MainWindow(QMainWindow, UIBase):
             decision = self._hard_alarm_decision_text(packet)
         return "%s | %s" % (probes, decision)
 
+    def _channel_slot_samples(self, packet, mask, allow_infer=False):
+        """命中槽位 → (槽号, 名称, 这一路 CPS)。mask=0 且允许推断时才猜槽位。"""
+        mask = int(mask or 0)
+        if mask:
+            indices = [i for i in range(16) if mask & (1 << i)]
+        elif allow_infer and packet is not None:
+            indices = list(self._infer_hit_indices(packet, mask=0) or [])
+        else:
+            indices = []
+        probe_cps = []
+        if packet is not None:
+            try:
+                probe_cps = list(getattr(packet, "probe_cps", None) or [])
+            except Exception:
+                probe_cps = []
+        samples = []
+        for i in indices:
+            cps = 0
+            if i < len(probe_cps):
+                try:
+                    cps = int(probe_cps[i] or 0)
+                except (TypeError, ValueError):
+                    cps = 0
+            samples.append((i, self._probe_slot_label(i), cps))
+        return samples
+
+    def _write_channel_probe_row(
+        self, logger, active, rec, decision, duration, counts_stat, mark_active, timestamp
+    ):
+        shown = float(rec["trigger"] if active else rec["peak"])
+        label = str(rec.get("label") or "")
+        if decision:
+            message = "%s %d cps | %s" % (label, int(round(shown)), decision)
+        else:
+            message = "%s %d cps" % (label, int(round(shown)))
+        logger.append_alarm_row(
+            client_id="master_channel",
+            alarm_status=bool(active),
+            count_rate=shown,
+            trigger_count_rate=float(rec["trigger"]),
+            peak_count_rate=float(rec["peak"]),
+            message=message,
+            alarm_type="ChannelMatch",
+            duration=float(duration or 0),
+            counts_stat=bool(counts_stat),
+            probe_slot=rec.get("slot"),
+            mark_active=mark_active,
+            timestamp=timestamp,
+        )
+
     def _sync_channel_hard_alarm_log(self, active: bool, packet=None):
-        """边沿写入通道符合硬报。设备列与判决文案用升起时锁存值，不用恢复那一包。"""
+        """一次通道报警按命中探头分行。计数率是这一路的，不是通道总数。"""
         prev = bool(getattr(self, "_channel_hard_alarm_active", False))
         mask = self._latch_hard_alarm_hit_mask(bool(active), packet)
-        msg = self._channel_hard_alarm_log_message(
-            packet, mask=mask, latch_decision=bool(active)
-        )
-        if prev == bool(active):
-            if active and packet is not None:
-                try:
-                    from core.alarm_logger import get_alarm_logger
-                    get_alarm_logger().log_alarm_event(
-                        client_id="master_channel",
-                        alarm_status=True,
-                        count_rate=float(getattr(packet, "total_cps", 0) or 0),
-                        temperature=None,
-                        hv=None,
-                        product_id=None,
-                        sensitivity=None,
-                        alarm_type="ChannelMatch",
-                        message=msg,
-                    )
-                except Exception:
-                    pass
-            self._refresh_alarm_log_nav_badge(radiation_alarm=bool(active))
-            return
-        self._channel_hard_alarm_active = bool(active)
         try:
             from core.alarm_logger import get_alarm_logger
-            cps = float(getattr(packet, "total_cps", 0) or 0) if packet else 0.0
-            decision = int(getattr(packet, "decision_result", 0) or 0) if packet else 0
-            get_alarm_logger().log_alarm_event(
-                client_id="master_channel",
-                alarm_status=bool(active),
-                count_rate=cps,
-                temperature=None,
-                hv=None,
-                product_id=None,
-                sensitivity=None,
-                alarm_type="ChannelMatch",
-                message=msg,
-            )
-            self.log(
-                "Channel hard-alarm %s (decision=0x%02X hit_mask=0x%04X cps=%d probes=%s)"
-                % ("ACTIVE" if active else "CLEAR", decision, mask, int(cps), msg),
-                "WARNING" if active else "INFO",
-            )
+            logger = get_alarm_logger()
         except Exception as e:
             self.log("Channel hard-alarm log failed: %s" % e, "ERROR")
-        if not active:
+            return
+
+        if active:
+            text = self._hard_alarm_decision_text(packet)
+            if text:
+                self._channel_hard_alarm_decision_text = text
+        decision = str(getattr(self, "_channel_hard_alarm_decision_text", "") or "").strip()
+        if not decision:
+            decision = self._hard_alarm_decision_text(packet)
+
+        tracks = getattr(self, "_channel_probe_tracks", None)
+        if not isinstance(tracks, dict):
+            tracks = {}
+            self._channel_probe_tracks = tracks
+
+        if active and not prev:
+            started = time.time()
+            self._channel_alarm_started_at = started
+            tracks.clear()
+            samples = self._channel_slot_samples(packet, mask, allow_infer=True)
+            if not samples:
+                total = 0
+                if packet is not None:
+                    try:
+                        total = int(getattr(packet, "total_cps", 0) or 0)
+                    except (TypeError, ValueError):
+                        total = 0
+                from core.translation import _t
+                samples = [(-1, _t("log_channel_device"), total)]
+            first = True
+            for slot, label, cps in samples:
+                rec = {
+                    "slot": slot,
+                    "label": label,
+                    "trigger": float(cps),
+                    "peak": float(cps),
+                }
+                tracks[slot] = rec
+                self._write_channel_probe_row(
+                    logger, True, rec, decision, 0.0,
+                    counts_stat=first,
+                    mark_active=True if first else None,
+                    timestamp=started,
+                )
+                first = False
+            self._channel_hard_alarm_active = True
+            self._channel_hard_alarm_probes_text = "、".join(
+                "%s %d cps" % (r["label"], int(r["trigger"])) for r in tracks.values()
+            )
+            self.log(
+                "Channel hard-alarm ACTIVE hit_mask=0x%04X probes=%s"
+                % (mask, self._channel_hard_alarm_probes_text),
+                "WARNING",
+            )
+        elif active and prev:
+            probe_cps = []
+            if packet is not None:
+                try:
+                    probe_cps = list(getattr(packet, "probe_cps", None) or [])
+                except Exception:
+                    probe_cps = []
+            for slot, rec in list(tracks.items()):
+                if isinstance(slot, int) and 0 <= slot < len(probe_cps):
+                    try:
+                        cps = float(int(probe_cps[slot] or 0))
+                    except (TypeError, ValueError):
+                        cps = float(rec["peak"])
+                    rec["peak"] = max(float(rec["peak"]), cps)
+                    shown = float(rec["peak"])
+                    if decision:
+                        message = "%s %d cps | %s" % (rec["label"], int(round(shown)), decision)
+                    else:
+                        message = "%s %d cps" % (rec["label"], int(round(shown)))
+                    logger.update_open_probe_peak("master_channel", slot, shown, message)
+            cur_mask = int(getattr(packet, "hit_probe_mask", 0) or 0) if packet is not None else 0
+            for slot, label, cps in self._channel_slot_samples(packet, cur_mask, allow_infer=False):
+                if slot in tracks:
+                    continue
+                rec = {
+                    "slot": slot,
+                    "label": label,
+                    "trigger": float(cps),
+                    "peak": float(cps),
+                }
+                tracks[slot] = rec
+                self._write_channel_probe_row(
+                    logger, True, rec, decision, 0.0,
+                    counts_stat=False,
+                    mark_active=None,
+                    timestamp=float(getattr(self, "_channel_alarm_started_at", time.time()) or time.time()),
+                )
+        elif (not active) and prev:
+            now = time.time()
+            started = float(getattr(self, "_channel_alarm_started_at", now) or now)
+            duration = max(0.0, now - started)
+            if not tracks:
+                total = 0
+                if packet is not None:
+                    try:
+                        total = int(getattr(packet, "total_cps", 0) or 0)
+                    except (TypeError, ValueError):
+                        total = 0
+                from core.translation import _t
+                tracks[-1] = {
+                    "slot": -1,
+                    "label": _t("log_channel_device"),
+                    "trigger": float(total),
+                    "peak": float(total),
+                }
+            first = True
+            for rec in list(tracks.values()):
+                self._write_channel_probe_row(
+                    logger, False, rec, decision, duration,
+                    counts_stat=False,
+                    mark_active=False if first else None,
+                    timestamp=now,
+                )
+                first = False
+            tracks.clear()
+            self._channel_hard_alarm_active = False
             self._channel_hard_alarm_hit_mask = 0
             self._channel_hard_alarm_probes_text = ""
             self._channel_hard_alarm_decision_text = ""
+            self.log(
+                "Channel hard-alarm CLEAR duration=%.3fs" % duration,
+                "INFO",
+            )
         self._refresh_alarm_log_nav_badge(radiation_alarm=bool(active))
 
     def _apply_home_latch_status(self, page, hard_alarm=False, latch_mode=False, offline=False):
