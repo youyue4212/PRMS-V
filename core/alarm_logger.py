@@ -109,6 +109,8 @@ class AlarmEvent:
     duration: float = 0.0
     trigger_count_rate: float = 0.0
     peak_count_rate: float = 0.0
+    counts_stat: bool = True
+    probe_slot: Optional[int] = None
 
 
 @singleton
@@ -328,6 +330,69 @@ class AlarmLogger:
         self._check_auto_save()
 
         return event
+
+    def append_alarm_row(
+        self,
+        client_id: str,
+        alarm_status: bool,
+        count_rate: float,
+        trigger_count_rate: float,
+        peak_count_rate: float,
+        message: str = "",
+        alarm_type: str = "ChannelMatch",
+        duration: float = 0.0,
+        counts_stat: bool = True,
+        probe_slot: Optional[int] = None,
+        mark_active: Optional[bool] = None,
+        timestamp: Optional[float] = None,
+    ):
+        """写一行通道探头记录，不走单客户端边沿状态机。"""
+        current_time = time.time() if timestamp is None else float(timestamp)
+        trigger = float(trigger_count_rate or 0)
+        peak = float(peak_count_rate or 0)
+        event = AlarmEvent(
+            timestamp=current_time,
+            client_id=client_id,
+            alarm_type=alarm_type,
+            alarm_status=bool(alarm_status),
+            count_rate=peak if not alarm_status else trigger,
+            temperature=None,
+            hv=None,
+            product_id=None,
+            sensitivity=None,
+            message=message or "",
+            duration=float(duration or 0),
+            trigger_count_rate=trigger,
+            peak_count_rate=peak,
+            counts_stat=bool(counts_stat),
+            probe_slot=probe_slot,
+        )
+        self.alarm_events.append(event)
+        if len(self.alarm_events) > MAX_MEMORY_EVENTS:
+            del self.alarm_events[:-MAX_MEMORY_EVENTS]
+        if mark_active is True:
+            self.active_alarms[client_id] = True
+        elif mark_active is False:
+            self.active_alarms[client_id] = False
+        self._check_and_rotate_file()
+        self._enqueue_excel_row(event)
+        self._check_auto_save()
+        return event
+
+    def update_open_probe_peak(self, client_id: str, probe_slot, peak: float, message: str = ""):
+        """报警未解除时，刷新这一路在界面上的峰值。Excel 触发行保持写下时的数。"""
+        for ev in reversed(self.alarm_events):
+            if (
+                ev.client_id == client_id
+                and ev.alarm_status
+                and getattr(ev, "probe_slot", None) == probe_slot
+                and str(ev.alarm_type) == "ChannelMatch"
+            ):
+                ev.peak_count_rate = float(peak)
+                ev.count_rate = float(peak)
+                if message:
+                    ev.message = message
+                return
 
     def _generate_alarm_message(self, alarm_status: bool, alarm_type: str, duration: float = 0.0,
                                 count_rate: float = 0.0, trigger_count_rate: float = 0.0,
@@ -1029,7 +1094,7 @@ class AlarmLogger:
             ts_ok = float(event.timestamp or 0) >= day_start
             if is_radiation_alarm_type(event.alarm_type):
                 last_rad = event
-                if ts_ok and bool(event.alarm_status):
+                if ts_ok and bool(event.alarm_status) and bool(getattr(event, "counts_stat", True)):
                     today_events += 1
             elif is_system_event_type(event.alarm_type):
                 last_sys = event
