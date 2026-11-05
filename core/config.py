@@ -136,6 +136,21 @@ class ConfigManager:
         self.archive_site_id = self.settings.value("ARCHIVE_SITE_ID", "", str)
         self.archive_machine_id = self.settings.value("ARCHIVE_MACHINE_ID", "", str)
 
+        # PRMS-V-11：上位机用 L2 入口/出口沿算车速。单端口、多端口均可。默认关，人员通道不受影响。
+        self.vehicle_channel = self._to_bool(self.settings.value("VEHICLE_CHANNEL", False))
+        try:
+            self.vehicle_length_m = float(self.settings.value("VEHICLE_LENGTH_M", 6.0))
+        except (TypeError, ValueError):
+            self.vehicle_length_m = 6.0
+        try:
+            self.vehicle_v_limit_kmh = float(self.settings.value("VEHICLE_V_LIMIT_KMH", 8.0))
+        except (TypeError, ValueError):
+            self.vehicle_v_limit_kmh = 8.0
+        if self.vehicle_length_m <= 0:
+            self.vehicle_length_m = 6.0
+        if self.vehicle_v_limit_kmh <= 0:
+            self.vehicle_v_limit_kmh = 8.0
+
     @staticmethod
     def _to_bool(value, default=False):
         if value is None:
@@ -286,7 +301,9 @@ class ConfigManager:
                        expected_probe_count=None, cps_window_minutes=None,
                        ui_mode=None, ir_installed=None,
                        archive_enabled=None, archive_path=None,
-                       archive_site_id=None, archive_machine_id=None):
+                       archive_site_id=None, archive_machine_id=None,
+                       vehicle_channel=None, vehicle_length_m=None,
+                       vehicle_v_limit_kmh=None):
         if language is not None:
             self.language = language
             self.settings.setValue("LANGUAGE", language)
@@ -392,6 +409,25 @@ class ConfigManager:
                 pass
             else:
                 self.settings.setValue("TCP_PORT_PROBE", self.tcp_port_probe)
+        if vehicle_channel is not None:
+            self.vehicle_channel = bool(vehicle_channel)
+            self.settings.setValue("VEHICLE_CHANNEL", self.vehicle_channel)
+        if vehicle_length_m is not None:
+            try:
+                self.vehicle_length_m = float(vehicle_length_m)
+            except (TypeError, ValueError):
+                self.vehicle_length_m = 6.0
+            if self.vehicle_length_m <= 0:
+                self.vehicle_length_m = 6.0
+            self.settings.setValue("VEHICLE_LENGTH_M", self.vehicle_length_m)
+        if vehicle_v_limit_kmh is not None:
+            try:
+                self.vehicle_v_limit_kmh = float(vehicle_v_limit_kmh)
+            except (TypeError, ValueError):
+                self.vehicle_v_limit_kmh = 8.0
+            if self.vehicle_v_limit_kmh <= 0:
+                self.vehicle_v_limit_kmh = 8.0
+            self.settings.setValue("VEHICLE_V_LIMIT_KMH", self.vehicle_v_limit_kmh)
 
     def save_settings(self):
         self.settings.sync()

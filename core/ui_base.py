@@ -736,6 +736,7 @@ class UIBase():
             self._clear_master_sessions_from_probe_faults(client_id)
         if self.master_summary_callback is not None:
             self.master_summary_callback(packet, client_id)
+        self._vehicle_on_summary(packet)
         self._maybe_log_all_probe_cps()
         if hasattr(self, "_release_probe_radiation_logs_for_master"):
             self._release_probe_radiation_logs_for_master()
@@ -1366,6 +1367,28 @@ class UIBase():
         )
         self.tcp_port_probe_spin.valueChanged.connect(self.on_tcp_port_probe_changed)
         comm_layout.addWidget(self.tcp_port_probe_spin, 3, 3)
+
+        self.vehicle_channel_checkbox = QCheckBox(_t("set_vehicle_channel"))
+        self.vehicle_channel_checkbox.setChecked(bool(getattr(self.config, "vehicle_channel", False)))
+        self.vehicle_channel_checkbox.stateChanged.connect(self.on_vehicle_channel_changed)
+        comm_layout.addWidget(self.vehicle_channel_checkbox, 8, 0, 1, 4)
+        self.vehicle_length_label = QLabel(_t("set_vehicle_length"))
+        comm_layout.addWidget(self.vehicle_length_label, 9, 0)
+        self.vehicle_length_spin = QDoubleSpinBox()
+        self.vehicle_length_spin.setRange(0.5, 100.0)
+        self.vehicle_length_spin.setDecimals(2)
+        self.vehicle_length_spin.setSingleStep(0.1)
+        self.vehicle_length_spin.setValue(float(getattr(self.config, "vehicle_length_m", 6.0)))
+        self.vehicle_length_spin.valueChanged.connect(self.on_vehicle_length_changed)
+        comm_layout.addWidget(self.vehicle_length_spin, 9, 1)
+        self.vehicle_v_limit_label = QLabel(_t("set_vehicle_v_limit"))
+        comm_layout.addWidget(self.vehicle_v_limit_label, 9, 2)
+        self.vehicle_v_limit_spin = QDoubleSpinBox()
+        self.vehicle_v_limit_spin.setRange(1.0, 40.0)
+        self.vehicle_v_limit_spin.setDecimals(1)
+        self.vehicle_v_limit_spin.setValue(float(getattr(self.config, "vehicle_v_limit_kmh", 8.0)))
+        self.vehicle_v_limit_spin.valueChanged.connect(self.on_vehicle_v_limit_changed)
+        comm_layout.addWidget(self.vehicle_v_limit_spin, 9, 3)
         
         # Serial Settings (only shown when TCP is disabled)
         self.serial_port_label = QLabel(_t("set_serial_port"))
@@ -4050,6 +4073,69 @@ class UIBase():
         if self.config.tcp_enabled and getattr(self.config, "tcp_multi_port", False):
             self._reinit_tcp_worker_after_comm_change("TCP probe port changed to %s" % port)
 
+    def on_vehicle_channel_changed(self, state):
+        enabled = state == Qt.Checked
+        self.config.update_settings(vehicle_channel=enabled)
+        self._vehicle_fsm = None
+
+    def on_vehicle_length_changed(self, value):
+        self.config.update_settings(vehicle_length_m=float(value))
+        fsm = getattr(self, "_vehicle_fsm", None)
+        if fsm is not None:
+            fsm.update_params(self.config.vehicle_length_m, self.config.vehicle_v_limit_kmh)
+
+    def on_vehicle_v_limit_changed(self, value):
+        self.config.update_settings(vehicle_v_limit_kmh=float(value))
+        fsm = getattr(self, "_vehicle_fsm", None)
+        if fsm is not None:
+            fsm.update_params(self.config.vehicle_length_m, self.config.vehicle_v_limit_kmh)
+
+    def _ensure_vehicle_fsm(self):
+        fsm = getattr(self, "_vehicle_fsm", None)
+        if fsm is not None:
+            return fsm
+        from pathlib import Path
+        from core.vehicle.passage_fsm import PassageFsm
+        from core.vehicle.passage_store import PassageStore
+        db = Path.home() / "daq_tablet" / "vehicle_passages.sqlite"
+        store = PassageStore(db)
+        self._vehicle_store = store
+        self._vehicle_fsm = PassageFsm(
+            self.config.vehicle_length_m,
+            self.config.vehicle_v_limit_kmh,
+            store,
+        )
+        return self._vehicle_fsm
+
+    def _vehicle_on_summary(self, packet):
+        """车辆通道开关打开时，用 L2 的入口/出口沿算车速。单端口和多端口都能收到 L2。"""
+        if packet is None:
+            return
+        if not getattr(self.config, "vehicle_channel", False):
+            return
+        try:
+            closed = self._ensure_vehicle_fsm().on_packet(packet)
+        except Exception as exc:
+            log_inst.warning(f"vehicle passage failed: {exc}")
+            return
+        if closed is None:
+            return
+        self.last_vehicle_passage = closed
+        if closed.invalid_reason:
+            log_inst.info(
+                f"PRMS-V passage {closed.passage_id} invalid: {closed.invalid_reason}"
+            )
+            return
+        log_inst.info(
+            f"PRMS-V passage {closed.passage_id} speed={closed.speed_kmh or 0.0:.2f} km/h "
+            f"overspeed={closed.overspeed} hard={closed.hard_alarm}"
+        )
+        if closed.r2_on and hasattr(self, "worker") and self.worker is not None:
+            try:
+                self.worker.control_single_relay(2, True)
+            except Exception as exc:
+                log_inst.warning(f"vehicle R2 on failed: {exc}")
+
     def on_tcp_multi_port_changed(self, state):
         enabled = state == Qt.Checked
         if enabled:
@@ -4474,6 +4560,16 @@ class UIBase():
             w = getattr(self, name, None)
             if w is not None:
                 w.setVisible(multi)
+        for name in (
+            "vehicle_channel_checkbox",
+            "vehicle_length_label",
+            "vehicle_length_spin",
+            "vehicle_v_limit_label",
+            "vehicle_v_limit_spin",
+        ):
+            w = getattr(self, name, None)
+            if w is not None:
+                w.setVisible(tcp_enabled)
         
         # Show/hide serial settings (only visible in serial/USB mode)
         serial_visible = not tcp_enabled

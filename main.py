@@ -61,8 +61,8 @@ def main():
     app.setApplicationName("DAQ Tablet")
     app.setOrganizationName("Raysen")
     try:
-        from core.app_version import APP_VERSION
-        app.setApplicationVersion(APP_VERSION)
+        from core.app_version import APP_VERSION, APP_BUILD
+        app.setApplicationVersion("%s (%s)" % (APP_VERSION, APP_BUILD))
     except Exception:
         pass
 
