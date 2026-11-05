@@ -310,6 +310,15 @@
             font-size: 20px; font-weight: 900; line-height: 1.25; letter-spacing: 0.3px;
             color: inherit; white-space: nowrap;
         }
+        .gate-speed {
+            display: none; margin-top: 6px; font-size: 16px; font-weight: 800; line-height: 1.2;
+            color: inherit; white-space: nowrap;
+        }
+        .gate-speed.show { display: block; }
+        .gate-status-card.ok .gate-speed { color: var(--hmi-ok); }
+        .gate-status-card.warn .gate-speed { color: var(--hmi-warn); }
+        .gate-status-card.passing .gate-speed { color: var(--hmi-info); }
+        .gate-status-card.alarm .gate-speed { color: #FF4D4D; }
         .gate-status-card.ok {
             background: rgba(16, 185, 129, 0.10); border-color: rgba(16, 185, 129, 0.55);
             color: var(--hmi-ok);
@@ -700,6 +709,7 @@
                     </div>
                     <div class="gate-text-col">
                         <div class="gate-title" id="passageBadge">未接入主控</div>
+                        <div class="gate-speed" id="gateSpeed"></div>
                     </div>
                 </div>
             </div>
@@ -1000,14 +1010,21 @@
             }, 3000);
         }
 
-        function setPassage(busy, text, kind, walk) {
+        function setPassage(busy, text, kind, walk, speed) {
             kind = kind || (busy ? 'passing' : 'vacant');
             isPassing = (kind === 'passing' || kind === 'alarm');
             var card = $('gateCard');
             var badge = $('passageBadge');
+            var speedEl = $('gateSpeed');
             var tone = 'ok';
             var fallback = UI.vacant || '';
             var showWalk = (walk === true);
+            var speedText = (speed || '').trim();
+            if (speedEl) {
+                speedEl.innerText = speedText;
+                if (speedText) speedEl.classList.add('show');
+                else speedEl.classList.remove('show');
+            }
             if (kind === 'alarm') {
                 tone = 'alarm';
                 fallback = UI.occupiedAlarm || UI.passing || '';
@@ -1218,7 +1235,7 @@
                     }
                 }
             }
-            if (state.passage) setPassage(!!state.passage.busy, state.passage.text, state.passage.kind, !!state.passage.walk);
+            if (state.passage) setPassage(!!state.passage.busy, state.passage.text, state.passage.kind, !!state.passage.walk, state.passage.speed);
             if (state.health) {
                 var hs = state.health.status || '';
                 if (state.health.warn && hs && hs.indexOf('\u26a0') < 0) hs = '\u26a0 ' + hs;

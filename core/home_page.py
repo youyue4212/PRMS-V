@@ -684,6 +684,7 @@ class HomePage(QWidget):
                 "busy": bool(self._passage_busy),
                 "walk": bool(getattr(self, "_passage_walk", False)),
                 "text": self.occupancy_status_label.text(),
+                "speed": str(getattr(self, "_vehicle_speed_text", "") or ""),
             },
             "health": {
                 "status": self.health_status_label.text(),

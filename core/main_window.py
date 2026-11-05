@@ -3774,30 +3774,83 @@ class MainWindow(QMainWindow, UIBase):
         if packet is None or not bool(getattr(self.config, "ir_installed", True)):
             return ""
         try:
-            if int(packet.sensor_mode_code()) != 0:
+            if int(packet.sensor_mode_code()) != 0 and not self._vehicle_channel_on():
                 return ""
         except Exception:
-            return ""
+            if not self._vehicle_channel_on():
+                return ""
         beams = format_ir_beam_states(packet, lang=lang, only_blocked=True)
         if not beams:
             return ""
         return ("\u3001" if lang != "en" else ", ").join(beams)
 
+    def _vehicle_channel_on(self) -> bool:
+        return bool(getattr(self.config, "vehicle_channel", False))
+
+    def _vehicle_in_channel(self, packet=None) -> bool:
+        """入口挡光或本趟尚未出出口，都算在通道内。"""
+        if not self._vehicle_channel_on():
+            return False
+        fsm = getattr(self, "_vehicle_fsm", None)
+        if fsm is not None and getattr(fsm, "open", None) is not None:
+            return True
+        pkt = packet if packet is not None else getattr(self, "latest_master_summary", None)
+        return bool(pkt is not None and getattr(pkt, "ir_entry", False))
+
+    def _occupancy_passing_text(self) -> str:
+        from core.translation import _t
+        if self._vehicle_channel_on():
+            return _t("status_vehicle_passing")
+        return _t("status_passing")
+
+    def _vehicle_speed_caption(self, lang="zh") -> str:
+        """车辆通道打开时：测速中 / 车速 / 超速。关开关则空。"""
+        if not self._vehicle_channel_on():
+            return ""
+        from core.translation import _t
+        if self._vehicle_in_channel():
+            return _t("status_speed_wait_exit")
+        closed = getattr(self, "last_vehicle_passage", None)
+        if closed is None or getattr(closed, "invalid_reason", ""):
+            return ""
+        speed = getattr(closed, "speed_kmh", None)
+        if speed is None:
+            return ""
+        text = "%.1f" % float(speed)
+        if getattr(closed, "overspeed", False):
+            return _t("status_overspeed", v=text)
+        return _t("status_speed", v=text)
+
+    def _with_vehicle_speed(self, desc: str, lang="zh") -> str:
+        speed = self._vehicle_speed_caption(lang)
+        page = getattr(self, "home_page", None)
+        if page is not None:
+            page._vehicle_speed_text = speed
+        if not speed:
+            return desc
+        text = (desc or "").strip()
+        if text:
+            return "%s  %s" % (text, speed)
+        return speed
+
     def _operator_occupancy_desc(self, kind: str, packet, lang="zh") -> str:
         """首页/总览：通道态为主，挡光只在挡住时点一下。"""
         from core.translation import _t
         if kind == "ungated":
-            return _t("desc_occ_ungated")
+            return self._with_vehicle_speed(_t("desc_occ_ungated"), lang)
         if kind == "alarm":
             base = _t("desc_traffic_detected")
         elif kind == "passing":
-            base = _t("desc_traffic_detected")
+            if self._vehicle_channel_on():
+                base = _t("desc_vehicle_detected")
+            else:
+                base = _t("desc_traffic_detected")
         else:
             base = _t("desc_no_traffic")
         blocked = self._blocked_beam_text(packet, lang)
         if blocked:
-            return "%s %s" % (base, blocked)
-        return base
+            base = "%s %s" % (base, blocked)
+        return self._with_vehicle_speed(base, lang)
 
     def _ungated_occupancy_desc(self, brief: str, lang="zh") -> str:
         from core.translation import _t
@@ -3815,6 +3868,10 @@ class MainWindow(QMainWindow, UIBase):
         """
         if master_offline or packet is None:
             return "offline"
+        if self._vehicle_in_channel(packet):
+            if bool(getattr(packet, "is_channel_alarm", lambda: False)()):
+                return "alarm"
+            return "passing"
         # 未配置时 0x02 只是探头符合，不能当成有人过门。
         if self._occupancy_is_ungated(packet):
             return "ungated"
@@ -3858,6 +3915,8 @@ class MainWindow(QMainWindow, UIBase):
 
     def _occupancy_should_walk(self, packet, kind: str) -> bool:
         """对射经过/对射窗内报警，以及雷达触发，才播行人。"""
+        if self._vehicle_channel_on():
+            return False
         if packet is None or kind not in ("passing", "alarm"):
             return False
         if kind == "passing":
@@ -3905,6 +3964,7 @@ class MainWindow(QMainWindow, UIBase):
             "QFrame { background-color: #ff9800; border-radius: 1px; }"
         )
         page._passage_walk = False
+        page._vehicle_speed_text = ""
         self._set_home_occupancy_kind(kind)
 
     def _update_home_occupancy(self, packet, lang="zh", master_offline=False):
@@ -3933,7 +3993,7 @@ class MainWindow(QMainWindow, UIBase):
         elif kind == "passing":
             page.occupancy_title_icon.load(get_icon_svg('occupancy_active'))
             page.occupancy_indicator.load(get_icon_svg('occupancy_active'))
-            page.occupancy_status_label.setText(_t("status_passing"))
+            page.occupancy_status_label.setText(self._occupancy_passing_text())
             self._set_home_status_style(
                 page.occupancy_status_label, "#2196f3",
                 "rgba(33, 150, 243, 0.15)", "rgba(33, 150, 243, 0.4)"
@@ -4189,7 +4249,7 @@ class MainWindow(QMainWindow, UIBase):
                 "background-color: #ffcdd2; color: #000000;"
             )
         elif kind == "passing":
-            self.occupancy_status_label.setText(_t("status_passing"))
+            self.occupancy_status_label.setText(self._occupancy_passing_text())
             self.occupancy_status_label.setStyleSheet(
                 "background-color: #bbdefb; color: #000000;"
             )
@@ -4223,6 +4283,11 @@ class MainWindow(QMainWindow, UIBase):
                     )
         except Exception:
             pass
+        speed = self._vehicle_speed_caption()
+        if speed:
+            self.occupancy_status_label.setText(
+                "%s  %s" % (self.occupancy_status_label.text(), speed)
+            )
 
     def _update_overview_occupancy_from_master(self, packet=None, master_offline=False):
         """概览占用卡：跟首页同一套操作员语义。通光不写对射，挡住才点入口/出口。"""
@@ -4287,7 +4352,7 @@ class MainWindow(QMainWindow, UIBase):
         elif kind == "passing":
             self.start_occupancy_flashing()
             self.overview_page.occupancy_title_icon.load(get_icon_svg('occupancy_active'))
-            self.overview_page.occupancy_status_label.setText(_t("status_passing"))
+            self.overview_page.occupancy_status_label.setText(self._occupancy_passing_text())
             self._set_overview_status_text(self.overview_page.occupancy_status_label, "#2196F3")
             self.overview_page.occupancy_desc_label.setText(desc)
             self.overview_page.occupancy_desc_label.setStyleSheet("""

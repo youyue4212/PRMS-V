@@ -734,9 +734,9 @@ class UIBase():
                 except Exception:
                     pass
             self._clear_master_sessions_from_probe_faults(client_id)
+        self._vehicle_on_summary(packet)
         if self.master_summary_callback is not None:
             self.master_summary_callback(packet, client_id)
-        self._vehicle_on_summary(packet)
         self._maybe_log_all_probe_cps()
         if hasattr(self, "_release_probe_radiation_logs_for_master"):
             self._release_probe_radiation_logs_for_master()
