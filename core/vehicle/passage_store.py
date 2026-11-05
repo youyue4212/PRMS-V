@@ -1,16 +1,131 @@
 # -*- coding: utf-8 -*-
-"""PRMS-V-11 通行记录。2B/2C 字段先留列，本阶段只写测速和 L2。"""
+"""PRMS-V-11 通行记录。SQLite 留在本机，同时写入 PRMS.vehicle_passages。"""
 
 from __future__ import annotations
 
 import json
 import sqlite3
+from datetime import datetime
 from pathlib import Path
+
+try:
+    from pymongo import MongoClient
+except ImportError:
+    MongoClient = None
+
+
+def vehicle_passage_document(row: dict, label_for_slot=None) -> dict:
+    """一辆车一次通行。字段与行人报警对齐，并带上车速。"""
+    opened = float(row.get("opened_at") or 0)
+    closed = float(row.get("closed_at") or opened or 0)
+    if opened <= 0:
+        opened = closed
+    t1 = row.get("t1_ms")
+    t2 = row.get("t2_ms")
+    duration = 0.0
+    if t1 is not None and t2 is not None:
+        duration = ((int(t2) - int(t1)) & 0xFFFFFFFF) / 1000.0
+    elif opened and closed:
+        duration = max(0.0, closed - opened)
+    invalid = str(row.get("invalid_reason") or "")
+    hard = bool(row.get("hard_alarm")) or int(row.get("decision") or 0) in (0x02, 0x03)
+    if invalid:
+        status = "invalid"
+    elif hard:
+        status = "alarm"
+    else:
+        status = "passed"
+    ctx = dict(row.get("context") or {})
+    hit = int(row.get("hit_probe_mask") or 0)
+    slots = [i for i in range(16) if hit & (1 << i)]
+    labels = []
+    for slot in slots:
+        if label_for_slot is not None:
+            try:
+                labels.append(str(label_for_slot(slot) or ""))
+            except Exception:
+                labels.append("探头 %d" % (slot + 1))
+        else:
+            labels.append("探头 %d" % (slot + 1))
+    peak_list = [int(v or 0) for v in list(row.get("peak_cps") or row.get("cps") or [])]
+    trigger_list = [int(v or 0) for v in list(row.get("trigger_cps") or [])]
+    peak = max(peak_list) if peak_list else 0
+    trigger = max(trigger_list) if trigger_list else peak
+    speed = row.get("speed_kmh")
+    speed_txt = "%.2f km/h" % float(speed) if speed is not None else ""
+    if invalid:
+        note = invalid
+    elif hard and speed_txt:
+        note = "辐射报警 %s" % speed_txt
+    else:
+        note = speed_txt or status
+    if row.get("overspeed") and speed_txt:
+        note = "%s 超速" % note
+    when = closed or opened
+    doc = {
+        "episode_id": str(row.get("passage_id") or ""),
+        "time": datetime.fromtimestamp(when) if when else datetime.now(),
+        "started_at": datetime.fromtimestamp(opened) if opened else None,
+        "ended_at": datetime.fromtimestamp(closed) if closed else None,
+        "status": status,
+        "decision": status,
+        "duration": float(duration),
+        "client_id": "vehicle_channel",
+        "master_id": ctx.get("master_id"),
+        "alarm_type": "VehiclePassage",
+        "counts_stat": not bool(invalid),
+        "probe_slot": slots[0] if slots else None,
+        "probe_label": "、".join(x for x in labels if x),
+        "trigger_cps": float(trigger),
+        "peak_cps": float(peak),
+        "cps": float(peak),
+        "probe_cps": peak_list,
+        "total_cps": ctx.get("total_cps"),
+        "decision_code": int(row.get("decision") or 0),
+        "decision_text": str(row.get("decision_text") or ""),
+        "hit_mask": hit,
+        "online_mask": ctx.get("online_mask"),
+        "ir_entry": True,
+        "ir_exit": t2 is not None,
+        "radar_gate": ctx.get("radar_gate"),
+        "sensor_mode": ctx.get("sensor_mode"),
+        "ungated": ctx.get("ungated"),
+        "latch_mode": ctx.get("latch_mode"),
+        "match_threshold_n": ctx.get("match_threshold_n"),
+        "window_x_sec": ctx.get("window_x_sec"),
+        "window_y_sec": ctx.get("window_y_sec"),
+        "length_m": row.get("length_m"),
+        "speed_kmh": None if speed is None else float(speed),
+        "v_limit_kmh": row.get("v_limit_kmh"),
+        "overspeed": bool(row.get("overspeed")),
+        "t1_ms": t1,
+        "t2_ms": t2,
+        "r2_on": bool(row.get("r2_on")),
+        "invalid_reason": invalid,
+        "note": note,
+    }
+    return doc
+
+
+def insert_vehicle_passage_mongo(row: dict, label_for_slot=None) -> None:
+    """写入 PRMS.vehicle_passages。连不上就跳过，不影响本机 SQLite。"""
+    if MongoClient is None:
+        return
+    try:
+        client = MongoClient("mongodb://127.0.0.1:27017", serverSelectionTimeoutMS=800)
+        client.admin.command("ping")
+        client["PRMS"]["vehicle_passages"].insert_one(
+            vehicle_passage_document(row, label_for_slot)
+        )
+        client.close()
+    except Exception as exc:
+        print("Mongo vehicle insert skipped:", exc)
 
 
 class PassageStore:
     def __init__(self, path: Path):
         self.path = Path(path)
+        self.label_for_slot = None
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(str(self.path))
         self._conn.execute(
@@ -65,6 +180,7 @@ class PassageStore:
             ),
         )
         self._conn.commit()
+        insert_vehicle_passage_mongo(row, self.label_for_slot)
 
     def close(self) -> None:
         self._conn.close()

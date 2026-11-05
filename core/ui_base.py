@@ -4090,6 +4090,14 @@ class UIBase():
         if fsm is not None:
             fsm.update_params(self.config.vehicle_length_m, self.config.vehicle_v_limit_kmh)
 
+    def _vehicle_probe_label(self, index: int) -> str:
+        if hasattr(self, "_probe_slot_label"):
+            try:
+                return str(self._probe_slot_label(int(index)) or "")
+            except Exception:
+                pass
+        return "探头 %d" % (int(index) + 1)
+
     def _ensure_vehicle_fsm(self):
         fsm = getattr(self, "_vehicle_fsm", None)
         if fsm is not None:
@@ -4099,6 +4107,7 @@ class UIBase():
         from core.vehicle.passage_store import PassageStore
         db = Path.home() / "daq_tablet" / "vehicle_passages.sqlite"
         store = PassageStore(db)
+        store.label_for_slot = self._vehicle_probe_label
         self._vehicle_store = store
         self._vehicle_fsm = PassageFsm(
             self.config.vehicle_length_m,
