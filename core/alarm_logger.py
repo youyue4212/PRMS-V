@@ -14,10 +14,16 @@ import os
 import queue
 import threading
 import time
+import uuid
 from pathlib import Path
 from typing import List, Dict, Optional
 from dataclasses import dataclass
 from core.singleton import singleton
+# MongoDB 导入
+try:
+    from pymongo import MongoClient
+except ImportError:
+    MongoClient = None
 
 
 EXCEL_COLS = [
@@ -111,10 +117,83 @@ class AlarmEvent:
     peak_count_rate: float = 0.0
     counts_stat: bool = True
     probe_slot: Optional[int] = None
+    record: Optional[dict] = None
+
+
+def pedestrian_alarm_document(event: "AlarmEvent") -> dict:
+    """一次行人辐射报警在 Mongo 里的文档。故障不走这里。"""
+    extra = dict(getattr(event, "record", None) or {})
+    ts = float(event.timestamp)
+    started = extra.get("started_at")
+    if started is None:
+        started = ts if event.alarm_status else ts - float(event.duration or 0)
+    ended = extra.get("ended_at")
+    if ended is None and not event.alarm_status:
+        ended = ts
+    status = "alarm" if event.alarm_status else "cleared"
+    slot = extra.get("probe_slot", getattr(event, "probe_slot", None))
+    peak = float(event.peak_count_rate or event.count_rate or 0)
+    hit = extra.get("hit_mask")
+    doc = {
+        "episode_id": str(extra.get("episode_id") or ""),
+        "time": datetime.fromtimestamp(ts),
+        "started_at": datetime.fromtimestamp(float(started or ts)),
+        "ended_at": datetime.fromtimestamp(float(ended)) if ended else None,
+        "status": status,
+        "decision": status,
+        "duration": float(event.duration or 0),
+        "client_id": str(event.client_id or ""),
+        "master_id": extra.get("master_id"),
+        "alarm_type": str(event.alarm_type or ""),
+        "counts_stat": bool(getattr(event, "counts_stat", True)),
+        "probe_slot": slot,
+        "probe_label": str(extra.get("probe_label") or ""),
+        "trigger_cps": float(event.trigger_count_rate or 0),
+        "peak_cps": peak,
+        "cps": peak,
+        "total_cps": extra.get("total_cps"),
+        "decision_code": extra.get("decision_code"),
+        "decision_text": str(extra.get("decision_text") or ""),
+        "hit_mask": int(hit or 0),
+        "online_mask": extra.get("online_mask"),
+        "ir_entry": extra.get("ir_entry"),
+        "ir_exit": extra.get("ir_exit"),
+        "radar_gate": extra.get("radar_gate"),
+        "sensor_mode": extra.get("sensor_mode"),
+        "ungated": extra.get("ungated"),
+        "latch_mode": extra.get("latch_mode"),
+        "match_threshold_n": extra.get("match_threshold_n"),
+        "window_x_sec": extra.get("window_x_sec"),
+        "window_y_sec": extra.get("window_y_sec"),
+        "note": str(event.message or ""),
+    }
+    product_id = extra.get("product_id", event.product_id)
+    if product_id is not None:
+        try:
+            doc["product_id"] = int(product_id)
+        except (TypeError, ValueError):
+            pass
+    return doc
+
+
+def _insert_pedestrian_alarm_mongo(event: "AlarmEvent") -> None:
+    """Write radiation alarm edge into PRMS.pedestrian_alarms; fail soft."""
+    if MongoClient is None:
+        return
+    if not is_radiation_alarm_type(event.alarm_type):
+        return
+    try:
+        client = MongoClient("mongodb://127.0.0.1:27017", serverSelectionTimeoutMS=800)
+        client.admin.command("ping")
+        client["PRMS"]["pedestrian_alarms"].insert_one(pedestrian_alarm_document(event))
+        client.close()
+    except Exception as e:
+        print("Mongo insert skipped:", e)
 
 
 @singleton
 class AlarmLogger:
+
     """Alarm logger manager singleton class
 
     上位机不重新判定报警：以设备报警位为准。
@@ -128,6 +207,7 @@ class AlarmLogger:
         self.alarm_start_times: Dict[str, float] = {}
         self.alarm_start_count_rates: Dict[str, float] = {}
         self.alarm_peak_count_rates: Dict[str, float] = {}
+        self._alarm_episode_ids: Dict[str, str] = {}
 
         if log_folder is None:
             raysen = Path.home() / "Raysen"
@@ -273,14 +353,21 @@ class AlarmLogger:
             self.alarm_start_times[client_id] = current_time
             self.alarm_start_count_rates[client_id] = count_rate
             self.alarm_peak_count_rates[client_id] = count_rate
+            self._alarm_episode_ids[client_id] = uuid.uuid4().hex
             trigger_count_rate = count_rate
             peak_count_rate = count_rate
             event_count_rate = count_rate
+            episode_started = current_time
+            episode_ended = None
         else:
             start_time = self.alarm_start_times.pop(client_id, current_time)
             duration = current_time - start_time
             trigger_count_rate = self.alarm_start_count_rates.pop(client_id, count_rate)
             peak_count_rate = self.alarm_peak_count_rates.pop(client_id, trigger_count_rate)
+            if client_id not in self._alarm_episode_ids:
+                self._alarm_episode_ids[client_id] = uuid.uuid4().hex
+            episode_started = start_time
+            episode_ended = current_time
             if system_evt:
                 peak_count_rate = 0.0
                 trigger_count_rate = 0.0
@@ -302,8 +389,17 @@ class AlarmLogger:
             ),
             duration=duration,
             trigger_count_rate=trigger_count_rate,
-            peak_count_rate=peak_count_rate
+            peak_count_rate=peak_count_rate,
+            record={
+                "episode_id": self._alarm_episode_ids.get(client_id, ""),
+                "started_at": episode_started,
+                "ended_at": episode_ended,
+                "hit_mask": 0,
+                "product_id": product_id,
+            },
         )
+        if not alarm_status:
+            self._alarm_episode_ids.pop(client_id, None)
 
         self.alarm_events.append(event)
         if len(self.alarm_events) > MAX_MEMORY_EVENTS:
@@ -327,6 +423,7 @@ class AlarmLogger:
         # 先日切再入队，避免跨日后第一条写进昨天的表再被归档
         self._check_and_rotate_file()
         self._enqueue_excel_row(event)
+        _insert_pedestrian_alarm_mongo(event)
         self._check_auto_save()
 
         return event
@@ -345,6 +442,7 @@ class AlarmLogger:
         probe_slot: Optional[int] = None,
         mark_active: Optional[bool] = None,
         timestamp: Optional[float] = None,
+        record: Optional[dict] = None,
     ):
         """写一行通道探头记录，不走单客户端边沿状态机。"""
         current_time = time.time() if timestamp is None else float(timestamp)
@@ -366,6 +464,7 @@ class AlarmLogger:
             peak_count_rate=peak,
             counts_stat=bool(counts_stat),
             probe_slot=probe_slot,
+            record=dict(record) if record else None,
         )
         self.alarm_events.append(event)
         if len(self.alarm_events) > MAX_MEMORY_EVENTS:
@@ -376,6 +475,7 @@ class AlarmLogger:
             self.active_alarms[client_id] = False
         self._check_and_rotate_file()
         self._enqueue_excel_row(event)
+        _insert_pedestrian_alarm_mongo(event)
         self._check_auto_save()
         return event
 

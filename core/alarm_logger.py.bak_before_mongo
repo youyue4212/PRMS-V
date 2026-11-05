@@ -1,0 +1,1161 @@
+# -*- coding: utf-8 -*-
+"""
+Alarm Logger Manager
+For recording alarm events and automatically saving to EXCEL files
+
+Excel I/O runs on a background writer thread so UI / DAQ paths stay non-blocking.
+Day-rotate / file create also run on the writer thread.
+"""
+
+import json
+import pandas as pd
+from datetime import datetime
+import os
+import queue
+import threading
+import time
+from pathlib import Path
+from typing import List, Dict, Optional
+from dataclasses import dataclass
+from core.singleton import singleton
+# MongoDB 导入
+try:
+    from pymongo import MongoClient
+except ImportError:
+    MongoClient = None
+
+
+EXCEL_COLS = [
+    'Timestamp', 'DateTime', 'ClientID', 'AlarmType',
+    'AlarmStatus', 'PeakCountRate', 'TriggerCountRate',
+    'Duration', 'Message'
+]
+EVENT_EXCEL_COLS = [
+    'Timestamp', 'DateTime', 'ClientID', 'AlarmType',
+    'AlarmStatus', 'Duration', 'Message'
+]
+
+STREAM_RADIATION = "radiation"
+STREAM_EVENT = "event"
+STREAM_COLS = {
+    STREAM_RADIATION: EXCEL_COLS,
+    STREAM_EVENT: EVENT_EXCEL_COLS,
+}
+STREAM_PREFIX = {
+    STREAM_RADIATION: "alarm_log_",
+    STREAM_EVENT: "event_log_",
+}
+STREAM_CATEGORY = {
+    STREAM_RADIATION: "AlarmLogs",
+    STREAM_EVENT: "EventLogs",
+}
+
+# 有界队列：满则落盘 spool，避免卡 UI / 丢事件
+WRITE_QUEUE_MAX = 500
+# 内存事件列表上限（清屏前 UI 展示用）
+MAX_MEMORY_EVENTS = 5000
+WRITE_RETRIES = 3
+WRITE_RETRY_SLEEP_S = 0.35
+
+# 工业分层：辐射/通道安全报警 vs 系统·通信事件（不可混进辐射统计）
+RADIATION_ALARM_TYPES = frozenset({"ChannelMatch", "Radiation", "radiation", "Alarm"})
+SYSTEM_EVENT_TYPES = frozenset({"MasterFault", "ProbeFault"})
+MASTER_FAULT_PREFIX = "master_fault_"
+PROBE_FAULT_PREFIX = "probe_fault_"
+
+
+def is_radiation_alarm_type(alarm_type: str) -> bool:
+    return str(alarm_type or "") in RADIATION_ALARM_TYPES
+
+
+def is_system_event_type(alarm_type: str) -> bool:
+    return str(alarm_type or "") in SYSTEM_EVENT_TYPES
+
+
+def is_system_event_client(client_id: str) -> bool:
+    s = str(client_id or "")
+    return s.startswith(MASTER_FAULT_PREFIX) or s.startswith(PROBE_FAULT_PREFIX)
+
+
+def event_excel_stream(alarm_type: str, client_id: str = "") -> str:
+    if is_system_event_type(alarm_type) or is_system_event_client(client_id):
+        return STREAM_EVENT
+    return STREAM_RADIATION
+
+
+def probe_fault_log_id(code: str, probe_client_id: str) -> str:
+    return "%s%s_%s" % (PROBE_FAULT_PREFIX, code, probe_client_id or "probe")
+
+
+def parse_system_fault_code(client_id: str) -> str:
+    s = str(client_id or "")
+    if s.startswith(MASTER_FAULT_PREFIX):
+        return s[len(MASTER_FAULT_PREFIX):]
+    if s.startswith(PROBE_FAULT_PREFIX):
+        rest = s[len(PROBE_FAULT_PREFIX):]
+        code, _, _ = rest.partition("_")
+        return code
+    return ""
+
+
+@dataclass
+class AlarmEvent:
+    """Alarm event data class"""
+    timestamp: float
+    client_id: str
+    alarm_type: str
+    alarm_status: bool
+    count_rate: float  # ACTIVE=触发瞬时；INACTIVE=报警期间峰值；系统事件应为 0
+    temperature: Optional[float]
+    hv: Optional[float]
+    product_id: Optional[int]
+    sensitivity: Optional[int]
+    message: str
+    duration: float = 0.0
+    trigger_count_rate: float = 0.0
+    peak_count_rate: float = 0.0
+    counts_stat: bool = True
+    probe_slot: Optional[int] = None
+
+
+@singleton
+class AlarmLogger:
+
+    def _insert_pedestrian_alarm_mongo(event: "AlarmEvent") -> None:
+    """辐射报警边沿写入 PRMS.pedestrian_alarms；失败不影响 Excel。"""
+    if MongoClient is None:
+        return
+    if not is_radiation_alarm_type(event.alarm_type):
+        return
+    try:
+        client = MongoClient("mongodb://127.0.0.1:27017", serverSelectionTimeoutMS=800)
+        client.admin.command("ping")
+        doc = {
+            "time": datetime.fromtimestamp(event.timestamp).strftime("%Y-%m-%d %H:%M:%S"),
+            "decision": "alarm" if event.alarm_status else "cleared",
+            "hit_mask": int(event.product_id) if event.product_id is not None else 0,
+            "cps": float(event.peak_count_rate or event.count_rate or 0),
+            "client_id": str(event.client_id or ""),
+            "alarm_type": str(event.alarm_type or ""),
+            "duration": float(event.duration or 0),
+            "trigger_cps": float(event.trigger_count_rate or 0),
+            "note": str(event.message or ""),
+        }
+        client["PRMS"]["pedestrian_alarms"].insert_one(doc)
+        client.close()
+    except Exception as e:
+        print("Mongo insert skipped:", e)
+    
+    """Alarm logger manager singleton class
+
+    上位机不重新判定报警：以设备报警位为准。
+    ACTIVE 期间持续跟踪峰值 CPS；解除时记录峰值与持续时间。
+    Excel 追加/建文件/日切均在后台写线程完成。
+    """
+
+    def __init__(self, log_folder: Optional[str] = None):
+        self.alarm_events: List[AlarmEvent] = []
+        self.active_alarms: Dict[str, bool] = {}
+        self.alarm_start_times: Dict[str, float] = {}
+        self.alarm_start_count_rates: Dict[str, float] = {}
+        self.alarm_peak_count_rates: Dict[str, float] = {}
+
+        if log_folder is None:
+            raysen = Path.home() / "Raysen"
+            self.log_folder = raysen / "AlarmLogs"
+            self.event_folder = raysen / "EventLogs"
+        else:
+            self.log_folder = Path(log_folder)
+            self.event_folder = self.log_folder.parent / "EventLogs"
+
+        self.log_folder.mkdir(parents=True, exist_ok=True)
+        self.event_folder.mkdir(parents=True, exist_ok=True)
+        self._folders = {
+            STREAM_RADIATION: self.log_folder,
+            STREAM_EVENT: self.event_folder,
+        }
+        self._spools = {
+            STREAM_RADIATION: self.log_folder / "alarm_write_spool.jsonl",
+            STREAM_EVENT: self.event_folder / "event_write_spool.jsonl",
+        }
+        self._spool_path = self._spools[STREAM_RADIATION]
+        self._paths = {STREAM_RADIATION: None, STREAM_EVENT: None}
+
+        self.auto_save_interval = 300
+        self.last_auto_save_time = time.time()
+
+        self.current_excel_file = None
+        self._path_lock = threading.Lock()
+        self._io_lock = threading.Lock()
+        self._spool_lock = threading.Lock()
+        self._write_q: queue.Queue = queue.Queue(maxsize=WRITE_QUEUE_MAX)
+        self._writer_stop = threading.Event()
+        self._write_fail_count = 0
+        self._archive_q: queue.Queue = queue.Queue()
+        self._archiver_stop = threading.Event()
+        self._archiver = threading.Thread(
+            target=self._archive_loop,
+            name="AlarmExcelArchive",
+            daemon=True,
+        )
+        self._archiver.start()
+        self._writer = threading.Thread(
+            target=self._writer_loop,
+            name="AlarmExcelWriter",
+            daemon=True,
+        )
+        self._writer.start()
+        # 只挂接当天已有文件，不在启动时新建空表
+        self._try_put(("ensure_file",), block=True, timeout=1.0)
+
+    def _get_default_log_folder(self) -> Path:
+        home_dir = Path.home()
+        log_folder = home_dir / "Raysen" / "AlarmLogs"
+        return log_folder
+
+    def _excel_alarm_type(self, alarm_type: str) -> str:
+        """Excel 给人看；内存里仍用 ChannelMatch / Radiation / MasterFault / ProbeFault。"""
+        from core.translation import _t
+        t = str(alarm_type or "")
+        if t == "ChannelMatch":
+            return _t("log_type_channel_match")
+        if t in ("Radiation", "radiation", "Alarm"):
+            return _t("log_type_radiation")
+        if t in ("MasterFault", "ProbeFault"):
+            return _t("log_type_system_comm")
+        return t
+
+    def _event_to_row(self, event: AlarmEvent) -> dict:
+        stream = event_excel_stream(event.alarm_type, event.client_id)
+        row = {
+            '_stream': stream,
+            'Timestamp': event.timestamp,
+            'DateTime': datetime.fromtimestamp(event.timestamp).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3],
+            'ClientID': event.client_id,
+            'AlarmType': self._excel_alarm_type(event.alarm_type),
+            'AlarmStatus': 'ACTIVE' if event.alarm_status else 'INACTIVE',
+            'Duration': f"{event.duration:.3f}" if event.duration > 0 else "",
+            'Message': event.message,
+        }
+        if stream != STREAM_EVENT:
+            row['PeakCountRate'] = event.peak_count_rate
+            row['TriggerCountRate'] = event.trigger_count_rate
+        return row
+
+    def _try_put(self, item: tuple, block: bool = False, timeout: float = 0.05) -> bool:
+        if self._writer_stop.is_set():
+            if item[0] == "append":
+                self._append_spool_rows([item[1]])
+            return False
+        try:
+            self._write_q.put(item, block=block, timeout=timeout)
+            return True
+        except queue.Full:
+            if item[0] == "append":
+                self._append_spool_rows([item[1]])
+                print("Alarm Excel queue full → row spilled to spool")
+            return False
+
+    def log_alarm_event(self,
+                       client_id: str,
+                       alarm_status: bool,
+                       count_rate: float,
+                       temperature: Optional[float],
+                       hv: Optional[float],
+                       product_id: Optional[int],
+                       sensitivity: Optional[int],
+                       alarm_type: str = "Radiation",
+                       message: str = ""):
+        """设备报警位边沿变化时记录；ACTIVE 期间持续更新峰值 CPS。
+
+        MasterFault / ProbeFault（系统/通信）不跟踪峰值 CPS，避免把断线前末帧当成「报警峰值」。
+        """
+        current_time = time.time()
+        previous_status = self.active_alarms.get(client_id, False)
+        system_evt = is_system_event_type(alarm_type) or is_system_event_client(client_id)
+        if system_evt:
+            count_rate = 0.0
+
+        # 仍在报警中：只更新峰值 / 文案，不写新行
+        if previous_status and alarm_status:
+            if not system_evt:
+                prev_peak = self.alarm_peak_count_rates.get(client_id, count_rate)
+                self.alarm_peak_count_rates[client_id] = max(prev_peak, count_rate)
+            if message:
+                for ev in reversed(self.alarm_events):
+                    if ev.client_id == client_id and ev.alarm_status:
+                        ev.message = message
+                        if not system_evt:
+                            ev.peak_count_rate = self.alarm_peak_count_rates[client_id]
+                            ev.count_rate = ev.peak_count_rate
+                        break
+            return None
+
+        # 无边沿变化则不记
+        if previous_status == alarm_status:
+            return None
+
+        duration = 0.0
+        trigger_count_rate = count_rate
+        peak_count_rate = count_rate
+        event_count_rate = count_rate
+
+        if alarm_status:
+            self.alarm_start_times[client_id] = current_time
+            self.alarm_start_count_rates[client_id] = count_rate
+            self.alarm_peak_count_rates[client_id] = count_rate
+            trigger_count_rate = count_rate
+            peak_count_rate = count_rate
+            event_count_rate = count_rate
+        else:
+            start_time = self.alarm_start_times.pop(client_id, current_time)
+            duration = current_time - start_time
+            trigger_count_rate = self.alarm_start_count_rates.pop(client_id, count_rate)
+            peak_count_rate = self.alarm_peak_count_rates.pop(client_id, trigger_count_rate)
+            if system_evt:
+                peak_count_rate = 0.0
+                trigger_count_rate = 0.0
+            event_count_rate = peak_count_rate
+
+        event = AlarmEvent(
+            timestamp=current_time,
+            client_id=client_id,
+            alarm_type=alarm_type,
+            alarm_status=alarm_status,
+            count_rate=event_count_rate,
+            temperature=temperature,
+            hv=hv,
+            product_id=product_id,
+            sensitivity=sensitivity,
+            message=message if message else self._generate_alarm_message(
+                alarm_status, alarm_type, duration, event_count_rate,
+                trigger_count_rate, peak_count_rate
+            ),
+            duration=duration,
+            trigger_count_rate=trigger_count_rate,
+            peak_count_rate=peak_count_rate
+        )
+
+        self.alarm_events.append(event)
+        if len(self.alarm_events) > MAX_MEMORY_EVENTS:
+            # 保留最近事件供 UI；Excel 由写线程负责持久化
+            del self.alarm_events[:-MAX_MEMORY_EVENTS]
+        self.active_alarms[client_id] = alarm_status
+
+        status_text = "start" if alarm_status else "end"
+        duration_text = f", duration: {duration:.1f} seconds" if not alarm_status and duration > 0 else ""
+        if system_evt:
+            print(
+                "Alarm event recorded: client %s - %s %s%s - %s"
+                % (client_id, alarm_type, status_text, duration_text, event.message)
+            )
+        else:
+            print(
+                f"Alarm event recorded: client {client_id} - {alarm_type} alarm {status_text}{duration_text} - "
+                f"trigger: {trigger_count_rate:.1f} cps, peak: {peak_count_rate:.1f} cps - {event.message}"
+            )
+
+        # 先日切再入队，避免跨日后第一条写进昨天的表再被归档
+        self._check_and_rotate_file()
+        self._enqueue_excel_row(event)
+        _insert_pedestrian_alarm_mongo(event)
+        self._check_auto_save()
+
+        return event
+
+    def append_alarm_row(
+        self,
+        client_id: str,
+        alarm_status: bool,
+        count_rate: float,
+        trigger_count_rate: float,
+        peak_count_rate: float,
+        message: str = "",
+        alarm_type: str = "ChannelMatch",
+        duration: float = 0.0,
+        counts_stat: bool = True,
+        probe_slot: Optional[int] = None,
+        mark_active: Optional[bool] = None,
+        timestamp: Optional[float] = None,
+    ):
+        """写一行通道探头记录，不走单客户端边沿状态机。"""
+        current_time = time.time() if timestamp is None else float(timestamp)
+        trigger = float(trigger_count_rate or 0)
+        peak = float(peak_count_rate or 0)
+        event = AlarmEvent(
+            timestamp=current_time,
+            client_id=client_id,
+            alarm_type=alarm_type,
+            alarm_status=bool(alarm_status),
+            count_rate=peak if not alarm_status else trigger,
+            temperature=None,
+            hv=None,
+            product_id=None,
+            sensitivity=None,
+            message=message or "",
+            duration=float(duration or 0),
+            trigger_count_rate=trigger,
+            peak_count_rate=peak,
+            counts_stat=bool(counts_stat),
+            probe_slot=probe_slot,
+        )
+        self.alarm_events.append(event)
+        if len(self.alarm_events) > MAX_MEMORY_EVENTS:
+            del self.alarm_events[:-MAX_MEMORY_EVENTS]
+        if mark_active is True:
+            self.active_alarms[client_id] = True
+        elif mark_active is False:
+            self.active_alarms[client_id] = False
+        self._check_and_rotate_file()
+        self._enqueue_excel_row(event)
+        _insert_pedestrian_alarm_mongo(event)
+        self._check_auto_save()
+        return event
+
+    def update_open_probe_peak(self, client_id: str, probe_slot, peak: float, message: str = ""):
+        """报警未解除时，刷新这一路在界面上的峰值。Excel 触发行保持写下时的数。"""
+        for ev in reversed(self.alarm_events):
+            if (
+                ev.client_id == client_id
+                and ev.alarm_status
+                and getattr(ev, "probe_slot", None) == probe_slot
+                and str(ev.alarm_type) == "ChannelMatch"
+            ):
+                ev.peak_count_rate = float(peak)
+                ev.count_rate = float(peak)
+                if message:
+                    ev.message = message
+                return
+
+    def _generate_alarm_message(self, alarm_status: bool, alarm_type: str, duration: float = 0.0,
+                                count_rate: float = 0.0, trigger_count_rate: float = 0.0,
+                                peak_count_rate: float = 0.0) -> str:
+        if alarm_status:
+            return f"{alarm_type} alarm triggered at {trigger_count_rate:.1f} cps"
+        else:
+            if duration > 0:
+                if duration < 60:
+                    duration_str = f"{duration:.1f}s"
+                elif duration < 3600:
+                    duration_str = f"{duration / 60:.1f}min"
+                else:
+                    duration_str = f"{duration / 3600:.1f}h"
+                return (f"{alarm_type} alarm cleared, peak {peak_count_rate:.1f} cps "
+                        f"(triggered at {trigger_count_rate:.1f} cps, lasted {duration_str})")
+            return (f"{alarm_type} alarm cleared, peak {peak_count_rate:.1f} cps "
+                    f"(triggered at {trigger_count_rate:.1f} cps)")
+
+    def _enqueue_excel_row(self, event: AlarmEvent):
+        """UI 线程只入队行数据；路径/建文件由写线程决定。"""
+        self._try_put(("append", self._event_to_row(event)))
+
+    def _writer_loop(self):
+        pending: List[dict] = []
+        batch_limit = 25
+        idle_flush_s = 0.4
+
+        while not self._writer_stop.is_set():
+            try:
+                item = self._write_q.get(timeout=idle_flush_s)
+            except queue.Empty:
+                if pending:
+                    self._flush_pending(pending)
+                    pending = []
+                self._drain_spool_into_excel()
+                self._rotate_expired_paths()
+                continue
+
+            kind = item[0]
+            if kind == "stop":
+                if pending:
+                    self._flush_pending(pending)
+                    pending = []
+                self._drain_spool_into_excel()
+                self._rotate_expired_paths()
+                break
+            if kind == "flush":
+                if pending:
+                    self._flush_pending(pending)
+                    pending = []
+                self._drain_spool_into_excel()
+                self._rotate_expired_paths()
+                done_evt = item[1]
+                if done_evt is not None:
+                    done_evt.set()
+                continue
+            if kind == "ensure_file":
+                if pending:
+                    self._flush_pending(pending)
+                    pending = []
+                for stream in (STREAM_RADIATION, STREAM_EVENT):
+                    self._ensure_excel_file(stream, force_new=False, create=False)
+                # 跨日关机后再开机：磁盘上昨天的表不在 _paths 里，补归档
+                self._archive_leftover_completed_files()
+                continue
+            if kind == "rotate":
+                # 先把日切前已排队的行（含 spool）写入当前（昨天）文件，再归档过期文件
+                if pending:
+                    self._flush_pending(pending)
+                    pending = []
+                self._drain_spool_into_excel()
+                self._rotate_expired_paths()
+                continue
+            if kind == "append":
+                pending.append(item[1])
+                if len(pending) >= batch_limit:
+                    self._flush_pending(pending)
+                    pending = []
+
+        # drain remaining after stop
+        while True:
+            try:
+                item = self._write_q.get_nowait()
+            except queue.Empty:
+                break
+            if item[0] == "append":
+                pending.append(item[1])
+            elif item[0] == "flush" and item[1] is not None:
+                item[1].set()
+        if pending:
+            self._flush_pending(pending)
+        self._drain_spool_into_excel()
+
+    def _today_file_prefix(self, stream: str = STREAM_RADIATION) -> str:
+        return datetime.now().strftime(STREAM_PREFIX.get(stream, "alarm_log_") + "%Y%m%d_")
+
+    def _set_path(self, stream: str, path: Optional[Path]) -> None:
+        self._paths[stream] = path
+        if stream == STREAM_RADIATION:
+            self.current_excel_file = path
+
+    def _latest_today_file(self, stream: str = STREAM_RADIATION) -> Optional[Path]:
+        """Reuse today's newest file for this stream (skip in-progress temps)."""
+        folder = self._folders.get(stream, self.log_folder)
+        try:
+            prefix = self._today_file_prefix(stream)
+            candidates = []
+            for path in folder.glob(prefix + "*.xlsx"):
+                name = path.name
+                if ".writing." in name:
+                    continue
+                if not path.is_file():
+                    continue
+                candidates.append(path)
+            if not candidates:
+                return None
+            candidates.sort(key=lambda p: p.stat().st_mtime if p.exists() else 0, reverse=True)
+            return candidates[0]
+        except OSError:
+            return None
+
+    def _excel_file_date(self, path: Optional[Path]):
+        """从 alarm_log_/event_log_YYYYMMDD_HHMMSS 解析文件日期。"""
+        if path is None:
+            return None
+        try:
+            parts = path.stem.split("_")
+            if len(parts) >= 3 and len(parts[2]) == 8 and parts[2].isdigit():
+                return datetime.strptime(parts[2], "%Y%m%d").date()
+        except (ValueError, IndexError):
+            pass
+        try:
+            if path.exists():
+                return datetime.fromtimestamp(os.path.getctime(path)).date()
+        except OSError:
+            return None
+        return None
+
+    def _row_local_date(self, row: dict):
+        try:
+            return datetime.fromtimestamp(float(row.get("Timestamp"))).date()
+        except (TypeError, ValueError):
+            pass
+        text = str(row.get("DateTime") or "")[:10]
+        try:
+            return datetime.strptime(text, "%Y-%m-%d").date()
+        except ValueError:
+            return datetime.now().date()
+
+    def _file_needs_rotate(self, path: Optional[Path]) -> bool:
+        if path is None:
+            return False
+        if not path.exists():
+            return True
+        file_date = self._excel_file_date(path)
+        if file_date is None:
+            return True
+        return file_date != datetime.now().date()
+
+    def _rotate_expired_paths(self):
+        """只归档已过期文件；当天仍在写的另一路不动。"""
+        for stream in (STREAM_RADIATION, STREAM_EVENT):
+            with self._path_lock:
+                path = self._paths.get(stream)
+            if path is not None and self._file_needs_rotate(path):
+                self._ensure_excel_file(stream, force_new=True, create=False)
+
+    def _iter_stream_excels(self, stream: str):
+        folder = self._folders.get(stream, self.log_folder)
+        prefix = STREAM_PREFIX.get(stream, "alarm_log_")
+        try:
+            for path in folder.glob(prefix + "*.xlsx"):
+                name = path.name
+                if ".writing." in name or ".writing.xlsx" in name:
+                    continue
+                if not path.is_file():
+                    continue
+                yield path
+        except OSError:
+            return
+
+    def _archive_leftover_completed_files(self):
+        """启动时扫描磁盘：已不是当天的表补归档。当天正在写的不碰。
+
+        同一文件同一 hash 由 archive_file 去重，重复开机不会再写 manifest。
+        """
+        live = {}
+        with self._path_lock:
+            for stream in (STREAM_RADIATION, STREAM_EVENT):
+                path = self._paths.get(stream)
+                live[stream] = path
+        for stream in (STREAM_RADIATION, STREAM_EVENT):
+            category = STREAM_CATEGORY.get(stream, "AlarmLogs")
+            current = live.get(stream)
+            current_key = None
+            if current is not None:
+                try:
+                    current_key = str(current.resolve())
+                except OSError:
+                    current_key = str(current)
+            for path in self._iter_stream_excels(stream):
+                try:
+                    path_key = str(path.resolve())
+                except OSError:
+                    path_key = str(path)
+                if current_key and path_key == current_key and not self._file_needs_rotate(path):
+                    continue
+                if not self._file_needs_rotate(path):
+                    continue
+                self._archive_completed_file(path, category)
+
+    def _align_excel_df(self, df: pd.DataFrame, cols=None) -> pd.DataFrame:
+        """只保留本流列。历史未打开的文件不动；当天正在写的表下次落盘时对齐。"""
+        cols = list(cols or EXCEL_COLS)
+        if df is None:
+            return pd.DataFrame(columns=cols)
+        out = df.copy()
+        for col in cols:
+            if col not in out.columns:
+                out[col] = ""
+        return out.reindex(columns=cols)
+
+    def _concat_excel_frames(self, existing: pd.DataFrame, incoming: pd.DataFrame, cols=None) -> pd.DataFrame:
+        """空表不参与 concat，避免首条报警被空帧吞掉。"""
+        cols = list(cols or EXCEL_COLS)
+        left = self._align_excel_df(existing, cols)
+        right = self._align_excel_df(incoming, cols)
+        if left.empty:
+            return right
+        if right.empty:
+            return left
+        return self._align_excel_df(pd.concat([left, right], ignore_index=True), cols)
+
+    def _archive_settings(self) -> dict:
+        try:
+            from core.config import ConfigManager
+            cfg = ConfigManager()
+            return {
+                "archive_enabled": bool(getattr(cfg, "archive_enabled", False)),
+                "archive_path": getattr(cfg, "archive_path", "") or "",
+                "site_id": getattr(cfg, "archive_site_id", "") or "",
+                "machine_id": getattr(cfg, "archive_machine_id", "") or "",
+            }
+        except Exception:
+            return {}
+
+    def _archive_loop(self):
+        """外拷/写 manifest 与 Excel 写线程分开，网盘卡住时报警仍能落盘。"""
+        while True:
+            try:
+                item = self._archive_q.get(timeout=0.4)
+            except queue.Empty:
+                if not self._archiver_stop.is_set():
+                    continue
+                # stop 与入队可能交错：Empty 醒来时队列里可能还有任务，不能直接退出
+                try:
+                    item = self._archive_q.get_nowait()
+                except queue.Empty:
+                    break
+            if item is None:
+                # 哨兵只表示开始收尾；继续抽干已入队任务
+                self._archiver_stop.set()
+                continue
+            path, category = item
+            self._archive_file_now(path, category)
+
+    def _archive_completed_file(self, path: Optional[Path], category: str) -> None:
+        """日切后只入队归档。失败只打日志，不影响本地 Excel。下次开机 leftover 会补。"""
+        if path is None:
+            return
+        try:
+            if not path.exists() or path.stat().st_size <= 0:
+                return
+        except OSError:
+            return
+        self._archive_q.put((Path(path), str(category)))
+
+    def _archive_file_now(self, path: Path, category: str) -> None:
+        try:
+            if not path.exists() or path.stat().st_size <= 0:
+                return
+        except OSError:
+            return
+        try:
+            from core.archive_manager import archive_file
+            archive_file(
+                path,
+                category,
+                metadata={"filename": path.name, "kind": category},
+                settings=self._archive_settings(),
+            )
+        except Exception as e:
+            print("Alarm/event archive record failed for %s: %s" % (path, e))
+
+    def _ensure_excel_file(self, stream: str = STREAM_RADIATION,
+                           force_new: bool = False, create: bool = False):
+        """仅写线程调用。启动只复用当天文件；有事件才新建，避免一堆空表。"""
+        folder = self._folders.get(stream, self.log_folder)
+        cols = STREAM_COLS.get(stream, EXCEL_COLS)
+        prefix = STREAM_PREFIX.get(stream, "alarm_log_")
+        category = STREAM_CATEGORY.get(stream, "AlarmLogs")
+        with self._path_lock:
+            path = self._paths.get(stream)
+
+        if force_new:
+            # 只归档真正过期的文件。另一路仍是当天文件时不要被连带日切。
+            if path is not None and self._file_needs_rotate(path):
+                self._archive_completed_file(path, category)
+                with self._path_lock:
+                    self._set_path(stream, None)
+                path = None
+            if not create:
+                return
+
+        if not force_new:
+            if path is not None and path.exists() and not self._file_needs_rotate(path):
+                return
+            if path is not None and self._file_needs_rotate(path):
+                self._archive_completed_file(path, category)
+                with self._path_lock:
+                    self._set_path(stream, None)
+                path = None
+            existing = self._latest_today_file(stream)
+            if existing is not None and not self._file_needs_rotate(existing):
+                with self._path_lock:
+                    self._set_path(stream, existing)
+                return
+            if not create:
+                return
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        new_path = folder / ("%s%s.xlsx" % (prefix, timestamp))
+        df = pd.DataFrame(columns=cols)
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+            with self._io_lock:
+                from core.excel_io import dataframe_to_excel_atomic
+                size = dataframe_to_excel_atomic(df, new_path)
+            with self._path_lock:
+                self._set_path(stream, new_path)
+            print("Created new %s file: %s (%s bytes)" % (stream, new_path, size))
+        except Exception as e:
+            print("Failed to create %s log file: %s" % (stream, e))
+            if path is None or not path.exists():
+                with self._path_lock:
+                    self._set_path(stream, None)
+
+    def _row_stream(self, row: dict) -> str:
+        marked = row.get("_stream")
+        if marked in (STREAM_RADIATION, STREAM_EVENT):
+            return marked
+        cid = str(row.get("ClientID") or "")
+        if is_system_event_client(cid):
+            return STREAM_EVENT
+        at = str(row.get("AlarmType") or "")
+        if at in SYSTEM_EVENT_TYPES or "通信" in at or "Comms" in at:
+            return STREAM_EVENT
+        return STREAM_RADIATION
+
+    def _flush_pending(self, pending: List[dict]):
+        if not pending:
+            return
+        groups = {STREAM_RADIATION: [], STREAM_EVENT: []}
+        for row in pending:
+            stream = self._row_stream(row)
+            groups[stream].append(row)
+        for stream, rows in groups.items():
+            if rows:
+                self._flush_stream(stream, rows)
+
+    def _write_rows_with_retry(self, path: Path, rows: List[dict], cols: List[str]) -> bool:
+        last_err = None
+        for attempt in range(1, WRITE_RETRIES + 1):
+            try:
+                self._append_rows_sync(path, rows, cols)
+                self._write_fail_count = 0
+                return True
+            except Exception as e:
+                last_err = e
+                print("Excel write attempt %s/%s failed (%s): %s" % (
+                    attempt, WRITE_RETRIES, path.name, e
+                ))
+                time.sleep(WRITE_RETRY_SLEEP_S * attempt)
+        self._write_fail_count += 1
+        self._append_spool_rows(rows)
+        print("Excel write failed after retries → spool (%s)" % last_err)
+        return False
+
+    def _flush_stream(self, stream: str, rows: List[dict]):
+        if not rows:
+            return
+        cols = STREAM_COLS.get(stream, EXCEL_COLS)
+        with self._path_lock:
+            path = self._paths.get(stream)
+
+        # 日切后同一批里可能还有昨天的行：先写入昨天文件再归档，避免混进今天
+        if path is not None and path.exists() and self._file_needs_rotate(path):
+            file_date = self._excel_file_date(path)
+            old_rows = []
+            new_rows = []
+            for row in rows:
+                if file_date is not None and self._row_local_date(row) == file_date:
+                    old_rows.append(row)
+                else:
+                    new_rows.append(row)
+            if old_rows:
+                self._write_rows_with_retry(path, old_rows, cols)
+            self._ensure_excel_file(stream, force_new=True, create=False)
+            rows = new_rows
+            if not rows:
+                return
+
+        self._ensure_excel_file(stream, force_new=False, create=True)
+        with self._path_lock:
+            path = self._paths.get(stream)
+        if path is None:
+            self._append_spool_rows(rows)
+            print("No Excel path for %s → rows spilled to spool" % stream)
+            return
+        self._write_rows_with_retry(path, rows, cols)
+
+    def _excel_payload(self, rows: List[dict], cols: List[str]) -> List[dict]:
+        out = []
+        for row in rows:
+            out.append({col: row.get(col, "") for col in cols})
+        return out
+
+    def _append_rows_sync(self, filepath: Path, rows: List[dict], cols=None):
+        if not rows:
+            return
+        cols = list(cols or EXCEL_COLS)
+        payload = self._excel_payload(rows, cols)
+        with self._io_lock:
+            if filepath.exists() and filepath.stat().st_size > 0:
+                existing = pd.read_excel(filepath)
+            else:
+                existing = pd.DataFrame(columns=cols)
+
+            df = self._concat_excel_frames(existing, pd.DataFrame(payload), cols)
+            from core.excel_io import dataframe_to_excel_atomic
+            dataframe_to_excel_atomic(df, filepath)
+
+    def _append_spool_rows(self, rows: List[dict]):
+        if not rows:
+            return
+        groups = {STREAM_RADIATION: [], STREAM_EVENT: []}
+        for row in rows:
+            stream = self._row_stream(row)
+            groups[stream].append(row)
+        try:
+            with self._spool_lock:
+                for stream, group in groups.items():
+                    if not group:
+                        continue
+                    spool = self._spools[stream]
+                    spool.parent.mkdir(parents=True, exist_ok=True)
+                    with open(spool, "a", encoding="utf-8") as f:
+                        for row in group:
+                            f.write(json.dumps(row, ensure_ascii=False, default=str) + "\n")
+        except Exception as e:
+            print("Failed to write alarm spool: %s" % e)
+
+    def _drain_one_spool(self, stream: str) -> None:
+        spool = self._spools[stream]
+        with self._spool_lock:
+            if not spool.exists():
+                return
+            try:
+                raw = spool.read_text(encoding="utf-8").strip()
+            except Exception as e:
+                print("Spool read failed (%s): %s" % (stream, e))
+                return
+            if not raw:
+                try:
+                    spool.unlink()
+                except OSError:
+                    pass
+                return
+            rows = []
+            for line in raw.splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rows.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+            if not rows:
+                try:
+                    spool.unlink()
+                except OSError:
+                    pass
+                return
+            staging = spool.with_suffix(".draining.jsonl")
+            try:
+                if staging.exists():
+                    staging.unlink()
+            except OSError:
+                pass
+            try:
+                spool.replace(staging)
+            except OSError as e:
+                print("Spool stage failed (%s): %s" % (stream, e))
+                return
+
+        try:
+            self._flush_stream(stream, rows)
+            try:
+                staging.unlink()
+            except OSError:
+                pass
+            print("Recovered %s %s rows from spool" % (len(rows), stream))
+        except Exception as e:
+            print("Spool recover failed (will retry) %s: %s" % (stream, e))
+            with self._spool_lock:
+                try:
+                    if staging.exists():
+                        extra = staging.read_text(encoding="utf-8")
+                        with open(spool, "a", encoding="utf-8") as f:
+                            f.write(extra if extra.endswith("\n") or not extra else extra + "\n")
+                        staging.unlink()
+                except Exception as e2:
+                    print("Spool restore failed (%s): %s" % (stream, e2))
+
+    def _drain_spool_into_excel(self):
+        """把失败 spool 补写回当前 Excel（写线程空闲时）。"""
+        self._drain_one_spool(STREAM_RADIATION)
+        self._drain_one_spool(STREAM_EVENT)
+
+    def flush(self, timeout: float = 8.0) -> bool:
+        """等待后台写队列落盘。退出/合并保存前调用；日常路径勿在 UI 热路径调用。"""
+        if self._writer_stop.is_set() or not self._writer.is_alive():
+            return True
+        done = threading.Event()
+        if not self._try_put(("flush", done), block=True, timeout=1.0):
+            return False
+        return done.wait(timeout=timeout)
+
+    def shutdown(self, timeout: float = 10.0):
+        """应用退出时调用：刷盘并停止写线程。"""
+        ok = self.flush(timeout=max(1.0, timeout * 0.6))
+        self._writer_stop.set()
+        self._try_put(("stop",), block=True, timeout=0.5)
+        self._writer.join(timeout=timeout)
+        self._archiver_stop.set()
+        try:
+            self._archive_q.put_nowait(None)
+        except queue.Full:
+            pass
+        # 给本地补归档一点时间；网盘卡住不长时间挡退出（daemon，下次开机 leftover 会补）
+        self._archiver.join(timeout=min(5.0, max(1.0, timeout * 0.4)))
+        if not ok or self._writer.is_alive():
+            print("Alarm Excel shutdown: flush/join incomplete; check spool file if present")
+
+    def _check_and_rotate_file(self):
+        """UI 仅发出轮转提示，不阻塞。尚无当日文件时不建空表。"""
+        with self._path_lock:
+            paths = list(self._paths.values())
+        if any(self._file_needs_rotate(path) for path in paths if path is not None):
+            self._try_put(("rotate",))
+
+    def _check_auto_save(self):
+        # 事件已异步追加；禁止周期性全量覆写，避免清屏后冲掉文件历史
+        self.last_auto_save_time = time.time()
+
+    def save_all_events(self, filename: Optional[str] = None):
+        """Merge in-memory events into the matching Excel stream; never shrink history."""
+        self.flush(timeout=8.0)
+        if filename:
+            filepath = self.log_folder / filename
+            events = [
+                e for e in self.alarm_events
+                if event_excel_stream(e.alarm_type, e.client_id) == STREAM_RADIATION
+            ]
+            self._merge_events_into_file(filepath, events, EXCEL_COLS)
+            return
+        with self._path_lock:
+            rad_path = self._paths.get(STREAM_RADIATION)
+            evt_path = self._paths.get(STREAM_EVENT)
+        rad_events = [
+            e for e in self.alarm_events
+            if event_excel_stream(e.alarm_type, e.client_id) == STREAM_RADIATION
+        ]
+        evt_events = [
+            e for e in self.alarm_events
+            if event_excel_stream(e.alarm_type, e.client_id) == STREAM_EVENT
+        ]
+        if rad_path is not None:
+            self._merge_events_into_file(rad_path, rad_events, EXCEL_COLS)
+        if evt_path is not None:
+            self._merge_events_into_file(evt_path, evt_events, EVENT_EXCEL_COLS)
+
+    def _merge_events_into_file(self, filepath: Path, events: List[AlarmEvent], cols: List[str]):
+        try:
+            with self._io_lock:
+                if filepath.exists() and filepath.stat().st_size > 0:
+                    df = pd.read_excel(filepath)
+                else:
+                    df = pd.DataFrame(columns=cols)
+
+                if events:
+                    data = [self._event_to_row(event) for event in events]
+                    df = self._concat_excel_frames(df, pd.DataFrame(data), cols)
+                    subset = [c for c in ('Timestamp', 'ClientID', 'AlarmStatus') if c in df.columns]
+                    if subset:
+                        df = df.drop_duplicates(subset=subset, keep='last')
+
+                df = self._align_excel_df(df, cols)
+
+                if df.empty and not events:
+                    print("No alarm events to save")
+                    return
+
+                from core.excel_io import dataframe_to_excel_atomic
+                size = dataframe_to_excel_atomic(df, filepath)
+            print("Merged/saved alarm events to: %s (%s bytes, rows=%s)" % (
+                filepath, size, len(df)
+            ))
+        except Exception as e:
+            print("Failed to save alarm events: %s" % e)
+
+    def get_recent_events(self, count: int = 100, category: Optional[str] = None) -> List[AlarmEvent]:
+        """category: None=全部 | 'radiation' | 'system'"""
+        events = self.alarm_events
+        if category == "radiation":
+            events = [e for e in events if is_radiation_alarm_type(e.alarm_type)]
+        elif category == "system":
+            events = [e for e in events if is_system_event_type(e.alarm_type)]
+        if not events:
+            return []
+        return events[-count:]
+
+    def get_active_alarms(self) -> Dict[str, bool]:
+        return self.active_alarms.copy()
+
+    def get_active_radiation_count(self) -> int:
+        return sum(
+            1 for cid, v in self.active_alarms.items()
+            if v and not is_system_event_client(cid)
+        )
+
+    def get_active_system_count(self) -> int:
+        return sum(
+            1 for cid, v in self.active_alarms.items()
+            if v and is_system_event_client(cid)
+        )
+
+    def reset_client_state(self, client_id: str):
+        """清理指定客户端的报警状态（断线/复位时调用），不生成事件。"""
+        self.active_alarms.pop(client_id, None)
+        self.alarm_start_times.pop(client_id, None)
+        self.alarm_start_count_rates.pop(client_id, None)
+        self.alarm_peak_count_rates.pop(client_id, None)
+
+    def clear_events(self, clear_active_state: bool = False):
+        """Clear on-screen event list.
+
+        By default keep active_alarms / peak tracking so edge logging stays correct
+        while an alarm is still physically active. Excel files are never deleted here.
+        """
+        self.alarm_events.clear()
+        if clear_active_state:
+            self.active_alarms.clear()
+            self.alarm_start_times.clear()
+            self.alarm_start_count_rates.clear()
+            self.alarm_peak_count_rates.clear()
+        print("Cleared displayed alarm events (active_state=%s)" % clear_active_state)
+
+    def get_statistics(self) -> Dict:
+        now = datetime.now()
+        day_start = datetime(now.year, now.month, now.day).timestamp()
+
+        empty = {
+            'total_events': 0,
+            'today_events': 0,
+            'active_alarms': 0,
+            'today_system_events': 0,
+            'active_system': 0,
+            'alarm_types': {},
+            'clients': {},
+            'last_event': None,
+            'last_system_event': None,
+        }
+        if not self.alarm_events:
+            # 清屏只清列表；活动边沿仍要给 KPI / Tab 角标
+            empty['active_alarms'] = self.get_active_radiation_count()
+            empty['active_system'] = self.get_active_system_count()
+            return empty
+
+        alarm_types = {}
+        # 今日辐射报警：只计 ChannelMatch/Radiation 触发边沿（不含主控通信故障）
+        today_events = 0
+        today_system = 0
+        last_rad = None
+        last_sys = None
+        for event in self.alarm_events:
+            alarm_types[event.alarm_type] = alarm_types.get(event.alarm_type, 0) + 1
+            ts_ok = float(event.timestamp or 0) >= day_start
+            if is_radiation_alarm_type(event.alarm_type):
+                last_rad = event
+                if ts_ok and bool(event.alarm_status) and bool(getattr(event, "counts_stat", True)):
+                    today_events += 1
+            elif is_system_event_type(event.alarm_type):
+                last_sys = event
+                if ts_ok and bool(event.alarm_status):
+                    today_system += 1
+
+        clients = {}
+        for event in self.alarm_events:
+            if event.client_id not in clients:
+                clients[event.client_id] = {'total': 0, 'active': 0}
+            clients[event.client_id]['total'] += 1
+            if event.alarm_status:
+                clients[event.client_id]['active'] += 1
+
+        return {
+            'total_events': len(self.alarm_events),
+            'today_events': today_events,
+            'active_alarms': self.get_active_radiation_count(),
+            'today_system_events': today_system,
+            'active_system': self.get_active_system_count(),
+            'alarm_types': alarm_types,
+            'clients': clients,
+            'last_event': last_rad,
+            'last_system_event': last_sys,
+        }
+
+
+def get_alarm_logger() -> AlarmLogger:
+    return AlarmLogger()
+
+

@@ -6,6 +6,7 @@ import re
 import struct
 import serial
 import os
+import uuid
 from datetime import datetime
 from dataclasses import dataclass
 from typing import Optional
@@ -2789,8 +2790,69 @@ class MainWindow(QMainWindow, UIBase):
             samples.append((i, self._probe_slot_label(i), cps))
         return samples
 
+    def _capture_channel_alarm_mongo(self, packet, mask, decision_text):
+        """报警升起时锁存判定、门控和阈值。解除包不再改这些字段。"""
+        from core.master_summary import (
+            MASTER_DECISION_WINDOW_MATCHED,
+            MASTER_DECISION_JOINT_ALARM,
+        )
+        ctx = {
+            "episode_id": str(getattr(self, "_channel_alarm_episode_id", "") or ""),
+            "decision_text": str(decision_text or ""),
+            "hit_mask": int(mask or 0),
+            "started_at": float(getattr(self, "_channel_alarm_started_at", 0) or 0),
+        }
+        if packet is None:
+            return ctx
+        try:
+            code = int(getattr(packet, "decision_result", 0) or 0)
+        except (TypeError, ValueError):
+            code = 0
+        if code in (MASTER_DECISION_WINDOW_MATCHED, MASTER_DECISION_JOINT_ALARM):
+            ctx["decision_code"] = code
+        try:
+            ctx["master_id"] = int(getattr(packet, "master_id", 0) or 0)
+        except (TypeError, ValueError):
+            ctx["master_id"] = 0
+        try:
+            ctx["online_mask"] = int(getattr(packet, "online_mask", 0) or 0)
+        except (TypeError, ValueError):
+            ctx["online_mask"] = 0
+        try:
+            ctx["total_cps"] = int(getattr(packet, "total_cps", 0) or 0)
+        except (TypeError, ValueError):
+            ctx["total_cps"] = 0
+        ctx["ir_entry"] = bool(getattr(packet, "ir_entry", False))
+        ctx["ir_exit"] = bool(getattr(packet, "ir_exit", False))
+        ctx["radar_gate"] = bool(getattr(packet, "radar_gate", False))
+        try:
+            ctx["sensor_mode"] = int(packet.sensor_mode_code())
+        except Exception:
+            ctx["sensor_mode"] = None
+        ctx["ungated"] = bool(getattr(packet, "ir_degraded", False))
+        ctx["latch_mode"] = bool(getattr(packet, "alarm_latch_mode", False))
+        try:
+            ctx["match_threshold_n"] = int(getattr(packet, "match_threshold_n", 0) or 0)
+            ctx["window_x_sec"] = int(getattr(packet, "window_x_sec", 0) or 0)
+            ctx["window_y_sec"] = int(getattr(packet, "window_y_sec", 0) or 0)
+        except (TypeError, ValueError):
+            pass
+        return ctx
+
+    def _channel_row_record(self, rec, mask, decision, started, ended=None):
+        base = dict(getattr(self, "_channel_alarm_mongo_ctx", None) or {})
+        base["episode_id"] = str(getattr(self, "_channel_alarm_episode_id", "") or "")
+        base["decision_text"] = str(decision or base.get("decision_text") or "")
+        base["hit_mask"] = int(mask or 0)
+        base["started_at"] = float(started or 0)
+        base["ended_at"] = float(ended) if ended else None
+        base["probe_slot"] = rec.get("slot")
+        base["probe_label"] = str(rec.get("label") or "")
+        return base
+
     def _write_channel_probe_row(
-        self, logger, active, rec, decision, duration, counts_stat, mark_active, timestamp
+        self, logger, active, rec, decision, duration, counts_stat, mark_active, timestamp,
+        record=None,
     ):
         shown = float(rec["trigger"] if active else rec["peak"])
         label = str(rec.get("label") or "")
@@ -2811,6 +2873,7 @@ class MainWindow(QMainWindow, UIBase):
             probe_slot=rec.get("slot"),
             mark_active=mark_active,
             timestamp=timestamp,
+            record=record,
         )
 
     def _sync_channel_hard_alarm_log(self, active: bool, packet=None):
@@ -2840,6 +2903,10 @@ class MainWindow(QMainWindow, UIBase):
         if active and not prev:
             started = time.time()
             self._channel_alarm_started_at = started
+            self._channel_alarm_episode_id = uuid.uuid4().hex
+            self._channel_alarm_mongo_ctx = self._capture_channel_alarm_mongo(
+                packet, mask, decision
+            )
             tracks.clear()
             samples = self._channel_slot_samples(packet, mask, allow_infer=True)
             if not samples:
@@ -2865,6 +2932,7 @@ class MainWindow(QMainWindow, UIBase):
                     counts_stat=first,
                     mark_active=True if first else None,
                     timestamp=started,
+                    record=self._channel_row_record(rec, mask, decision, started),
                 )
                 first = False
             self._channel_hard_alarm_active = True
@@ -2907,11 +2975,15 @@ class MainWindow(QMainWindow, UIBase):
                     "peak": float(cps),
                 }
                 tracks[slot] = rec
+                started_at = float(
+                    getattr(self, "_channel_alarm_started_at", time.time()) or time.time()
+                )
                 self._write_channel_probe_row(
                     logger, True, rec, decision, 0.0,
                     counts_stat=False,
                     mark_active=None,
-                    timestamp=float(getattr(self, "_channel_alarm_started_at", time.time()) or time.time()),
+                    timestamp=started_at,
+                    record=self._channel_row_record(rec, mask, decision, started_at),
                 )
         elif (not active) and prev:
             now = time.time()
@@ -2938,6 +3010,7 @@ class MainWindow(QMainWindow, UIBase):
                     counts_stat=False,
                     mark_active=False if first else None,
                     timestamp=now,
+                    record=self._channel_row_record(rec, mask, decision, started, ended=now),
                 )
                 first = False
             tracks.clear()
@@ -2945,6 +3018,8 @@ class MainWindow(QMainWindow, UIBase):
             self._channel_hard_alarm_hit_mask = 0
             self._channel_hard_alarm_probes_text = ""
             self._channel_hard_alarm_decision_text = ""
+            self._channel_alarm_episode_id = ""
+            self._channel_alarm_mongo_ctx = {}
             self.log(
                 "Channel hard-alarm CLEAR duration=%.3fs" % duration,
                 "INFO",
