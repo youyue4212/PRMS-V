@@ -4076,7 +4076,14 @@ class UIBase():
     def on_vehicle_channel_changed(self, state):
         enabled = state == Qt.Checked
         self.config.update_settings(vehicle_channel=enabled)
-        self._vehicle_fsm = None
+        if enabled:
+            self._ensure_vehicle_fsm()
+        else:
+            self._vehicle_fsm = None
+        if hasattr(self, "_apply_vehicle_shell"):
+            self._apply_vehicle_shell()
+        if hasattr(self, "_refresh_vehicle_dashboard"):
+            self._refresh_vehicle_dashboard()
 
     def on_vehicle_length_changed(self, value):
         self.config.update_settings(vehicle_length_m=float(value))

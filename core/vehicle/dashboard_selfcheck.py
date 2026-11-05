@@ -1,0 +1,231 @@
+# -*- coding: utf-8 -*-
+"""车辆通道主界面四态自检。不启动完整监测软件。"""
+
+from __future__ import annotations
+
+import sys
+import tempfile
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from core.vehicle.dashboard_model import build_dashboard, history_row
+from core.vehicle.passage_fsm import Passage
+from core.vehicle.passage_store import PassageStore
+
+
+class _Pkt:
+    def __init__(self, decision, hit=0):
+        self.decision_result = decision
+        self.hit_probe_mask = hit
+
+
+def _probes(cps, hit_flags=()):
+    out = []
+    for i, value in enumerate(cps):
+        out.append({
+            "location": "左侧" if i == 0 else "右侧",
+            "cps": value,
+            "online": True,
+            "comm_fault": False,
+            "hv_fault": False,
+            "hit": i in hit_flags,
+        })
+    return out
+
+
+def _field(model, name):
+    for key, val in model["fields"]:
+        if key == name:
+            return val
+    raise KeyError(name)
+
+
+def _check(name, cond):
+    if not cond:
+        raise SystemExit("FAIL " + name)
+
+
+def main():
+    idle = build_dashboard(_Pkt(0x00), _probes([342, 298]), None, [], True, "03", 8)
+    _check("idle banner", idle["banner"] == "通道空闲" and idle["banner_tone"] == "ok")
+    _check("idle chips", idle["chips"] == ["主控在线", "辐射正常"])
+    _check("idle no reset", idle["show_reset"] is False)
+    _check("idle hard", _field(idle, "辐射硬报") == "无")
+    _check("idle speed dash", _field(idle, "车速") == "—")
+    _check("idle no survey row", all(name != "测速" for name, _val in idle["fields"]))
+    _check("idle capture", idle["capture"] == "wait")
+    _check("idle card count", len(idle["probes"]) == 2 and idle["probes"][0]["show_cps"] is True)
+
+    open_hard = Passage(
+        passage_id="open-1", t1_ms=1, length_m=6, v_limit_kmh=8,
+        plate="京A·D12345", peak_cps=[1542, 1287], hit_probe_mask=0x3,
+    )
+    closed_fast = {
+        "passage_id": "old-fast",
+        "peak_cps": [400, 343],
+        "speed_kmh": 21.0,
+        "overspeed": True,
+        "hard_alarm": False,
+        "decision": 0,
+        "plate": "京C·F6655",
+        "closed_at": 1_700_000_000,
+    }
+    closed_alarm = {
+        "passage_id": "old-alarm",
+        "peak_cps": [1542, 1287],
+        "speed_kmh": 15.5,
+        "overspeed": True,
+        "hard_alarm": True,
+        "decision": 0x03,
+        "plate": "京D·A9876",
+        "closed_at": 1_700_000_100,
+    }
+    alarm = build_dashboard(
+        _Pkt(0x03, 0x3), _probes([1542, 1287], (0, 1)), open_hard,
+        [closed_fast, {"passage_id": "open-1", "plate": "SHOULD-SKIP", "peak_cps": [1], "closed_at": 5}],
+        True, "03", 8,
+    )
+    _check("alarm banner", alarm["banner"] == "辐射报警")
+    _check("alarm chips", "禁行" in alarm["chips"] and "车辆经过" in alarm["chips"])
+    _check("alarm reset", alarm["show_reset"] is True)
+    _check("alarm speed", _field(alarm, "车速") == "等待出口")
+    _check("alarm total", _field(alarm, "γ总计") == "2829" and _field(alarm, "峰值CPS") == "1542")
+    _check("alarm hit", _field(alarm, "命中掩码") == "探头1+2")
+    _check("alarm open not in history", all(r["plate"] != "SHOULD-SKIP" for r in alarm["history"]))
+    invalid = history_row({"invalid_reason": "timeout", "speed_kmh": 21, "overspeed": True, "closed_at": 9})
+    _check("timeout not pass", invalid["result"] == "无效" and invalid["overspeed"] == "—" and invalid["radiation"] == "—")
+    fast = history_row(closed_fast)
+    _check("overspeed still pass", fast["overspeed"] == "是" and fast["result"] == "放行" and fast["radiation"] == "正常")
+    banned = history_row(closed_alarm)
+    _check("hard ban", banned["radiation"] == "硬报" and banned["result"] == "禁行" and banned["overspeed"] == "是")
+    fixed = history_row({"peak_cps": [512, 812], "speed_kmh": 7.1, "closed_at": 10})
+    _check("peak not above total", int(fixed["peak"]) <= int(fixed["total"]))
+
+    open_soft = Passage(
+        passage_id="soft-1", t1_ms=2, length_m=6, v_limit_kmh=8,
+        plate="京A·D12345", peak_cps=[890, 760], hit_probe_mask=0x3,
+    )
+    soft = build_dashboard(_Pkt(0x01, 0x3), _probes([890, 760], (0, 1)), open_soft, [closed_fast], True, "03", 8)
+    _check("elevated banner", soft["banner"] == "计数偏高" and soft["banner_tone"] == "amber")
+    _check("elevated no normal chip", "辐射正常" not in soft["chips"] and "禁行" not in soft["chips"])
+    _check("elevated no reset", soft["show_reset"] is False)
+    _check("elevated speed", _field(soft, "车速") == "等待出口" and _field(soft, "辐射硬报") == "无")
+    _check("elevated numbers", _field(soft, "峰值CPS") == "890" and _field(soft, "γ总计") == "1650")
+    _check("elevated hit", _field(soft, "命中掩码") == "探头1+2")
+    _check("elevated plate", soft["plate"] == "京A·D12345")
+    _check("live totals not copied into history", all(r["total"] != "1650" for r in soft["history"]))
+
+    fault_probes = [
+        {"location": "左侧", "cps": 342, "online": False, "comm_fault": True, "hv_fault": False},
+        {"location": "右侧", "cps": 298, "online": True, "comm_fault": False, "hv_fault": True},
+    ]
+    fault = build_dashboard(_Pkt(0x00), fault_probes, None, [], True, "03", 8)
+    _check("fault banner", fault["banner"] == "系统故障")
+    _check("fault master", fault["chips"] == ["主控在线"])
+    _check("fault no reset", fault["show_reset"] is False and "禁行" not in fault["chips"])
+    _check("fault hard none", _field(fault, "辐射硬报") == "无")
+    _check("fault comm hides cps", fault["probes"][0]["status"] == "通信异常" and fault["probes"][0]["show_cps"] is False)
+    _check("fault hv", fault["probes"][1]["status"] == "高压偏离" and fault["probes"][1]["show_cps"] is True)
+    _check("fault idle channel", _field(fault, "通道状态") == "空闲")
+    _check("elevated guide", "停车复查" in soft["guide"] and soft["show_diagnose"] is False)
+    _check("fault guide", "不是辐射报警" in fault["guide"] and fault["show_diagnose"] is True)
+    dropped = build_dashboard(
+        _Pkt(0), _probes([1, 1]), None,
+        [{"invalid_reason": "timeout", "peak_cps": [9], "closed_at": 4, "passage_id": "bad"}],
+        True, "03", 8,
+    )
+    _check("invalid hidden", dropped["history"] == [])
+    slots = build_dashboard(
+        _Pkt(0),
+        [{"absent": True, "online": False}, {"absent": True, "online": False}],
+        None, [], True, "03", 8,
+    )
+    _check("absent slots", len(slots["probes"]) == 2 and all(p["status"] == "未接入" for p in slots["probes"]))
+    _check("absent not fault", slots["banner"] == "通道空闲")
+    kept = history_row({"decision": 0x01, "peak_cps": [10, 4], "speed_kmh": 5, "closed_at": 3})
+    _check("elevated stays normal", kept["radiation"] == "正常" and kept["result"] == "放行")
+
+    offline = build_dashboard(None, _probes([10, 10]), None, [], False, "03", 8)
+    _check("master chip", offline["chips"][0] == "主控离线" and offline["banner"] == "通道空闲")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        store = PassageStore(Path(tmp) / "p.sqlite")
+        store.insert(open_hard.as_row() | {
+            "closed_at": 20,
+            "hard_alarm": True,
+            "decision": 0x03,
+            "speed_kmh": 15.5,
+            "overspeed": True,
+            "peak_cps": [1542, 1287],
+        })
+        got = store.recent(5)
+        store.close()
+        _check("store keeps peak", got and got[0]["peak_cps"] == [1542, 1287])
+        _check("store plate", got[0]["plate"] == "京A·D12345")
+
+    from PyQt5.QtWidgets import QApplication, QLabel
+    app = QApplication.instance() or QApplication([])
+    from core.vehicle_dashboard_page import VehicleDashboardPage
+    page = VehicleDashboardPage()
+    page.show()
+    app.processEvents()
+    page.apply_model(soft)
+    app.processEvents()
+    _check("qt banner", page.banner_label.text() == "计数偏高")
+    _check("qt reset hidden", page.reset_btn.isHidden() is True)
+    _check("qt hard field", page._field_values["辐射硬报"].text() == "无")
+    page.apply_model(alarm)
+    app.processEvents()
+    _check("qt reset shown", page.reset_btn.isVisible() is True)
+    _check("qt ban chip", any(isinstance(w, QLabel) and w.text() == "禁行" for i in range(page.chip_host.count()) for w in [page.chip_host.itemAt(i).widget()]))
+    _check("qt threshold", page._field_keys["阈值说明"].isVisible() is True)
+    _check("qt alarm keeps plate", page._field_rows["车牌"].isVisible() is True)
+    _check("qt alarm keeps total", page._field_rows["γ总计"].isVisible() is True)
+    _check("qt reset gray", page.reset_btn.isEnabled() is False)
+    headers = [page.history.horizontalHeaderItem(c).text() for c in range(page.history.columnCount())]
+    _check(
+        "qt history cols",
+        headers == ["通行时间", "通道", "车牌", "γ总计", "峰值", "辐射结果", "速度", "超速", "通行结果"],
+    )
+    page.apply_model(fault)
+    app.processEvents()
+    _check("qt fault", page.banner_label.text() == "系统故障" and page.reset_btn.isVisible() is False)
+    _check("qt comm word", page._cards[0].status.text() == "通信异常" and page._cards[0].cps.text() == "")
+    _check("qt hv word", page._cards[1].cps.text() == "298" and page._cards[1].status.text() == "高压偏离" and page._cards[1].unit.isVisible())
+    _check("qt fault wrench", page.status_icon.isVisible() is True)
+    _check("qt empty history", page.history.rowCount() == 1 and page.history.item(0, 0).text() == "暂无通行记录")
+    hv0 = build_dashboard(_Pkt(0x00), [
+        {"location": "左侧", "cps": 586, "online": True, "comm_fault": False, "hv_fault": False},
+        {"location": "右侧", "cps": 0, "online": True, "comm_fault": False, "hv_fault": True},
+    ], None, [], True, "03", 8)
+    page.apply_model(hv0)
+    app.processEvents()
+    _check("qt hv zero dash", page._cards[1].cps.text() == "—" and page._cards[1].unit.isHidden())
+    page.apply_model(build_dashboard(_Pkt(0), _probes([342] * 8), None, [], True, "03", 8))
+    app.processEvents()
+    _check("qt eight compact", all(c._compact for c in page._cards[:8]) and page._cards[7].isVisible())
+    page.apply_model(build_dashboard(_Pkt(0), _probes([342] * 4), None, [], True, "03", 8))
+    app.processEvents()
+    _check("qt four full", not any(c._compact for c in page._cards[:4]) and page._cards[4].isHidden())
+    page.apply_model(fault)
+    _check("qt trouble", "查链路" in page.trouble.text() and "等高压" in page.trouble.text())
+    page.set_reset_allowed(True)
+    page.apply_model(alarm)
+    _check("qt reset live", page.reset_btn.isEnabled() is True)
+    page.apply_model(soft)
+    _check("qt recheck", page.recheck_btn.isVisible() is True and page.reset_btn.isVisible() is False)
+    page.apply_model(idle)
+    app.processEvents()
+    _check("qt idle", page.banner_label.text() == "通道空闲" and page.capture.text() == "等待过车")
+    _check("qt login", page.banner.login_btn.text() == "登录")
+    page.set_session(True, "admin")
+    _check("qt session", page.banner.login_btn.text() == "退出" and page.banner.session_label.text() == "admin")
+    _check("qt no threshold", page._field_keys["阈值说明"].isVisible() is False)
+    print("ok vehicle dashboard")
+
+
+if __name__ == "__main__":
+    main()

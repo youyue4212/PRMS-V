@@ -29,6 +29,7 @@ class Passage:
     peak_cps: list = field(default_factory=list)
     trigger_cps: list = field(default_factory=list)
     invalid_reason: str = ""
+    plate: str = ""
     r2_on: bool = False
     opened_at: float = 0.0
     closed_at: float = 0.0
@@ -52,6 +53,7 @@ class Passage:
             "peak_cps": self.peak_cps,
             "trigger_cps": self.trigger_cps,
             "invalid_reason": self.invalid_reason,
+            "plate": self.plate,
             "r2_on": self.r2_on,
             "opened_at": self.opened_at,
             "closed_at": self.closed_at,

@@ -150,6 +150,16 @@ class PassageStore:
             """
         )
         self._conn.commit()
+        have = {r[1] for r in self._conn.execute("PRAGMA table_info(passage)")}
+        for name, typ in (
+            ("peak_json", "TEXT"),
+            ("opened_at", "REAL"),
+            ("closed_at", "REAL"),
+            ("hard_alarm", "INTEGER"),
+        ):
+            if name not in have:
+                self._conn.execute("ALTER TABLE passage ADD COLUMN %s %s" % (name, typ))
+        self._conn.commit()
 
     def insert(self, row: dict) -> None:
         cps = row.get("cps") or []
@@ -158,8 +168,9 @@ class PassageStore:
             INSERT OR REPLACE INTO passage (
                 passage_id, t1_ms, t2_ms, length_m, speed_kmh, v_limit_kmh,
                 overspeed, decision, hit_probe_mask, cps_json,
-                plate, plate_manual, image_paths, r2_on, invalid_reason
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                plate, plate_manual, image_paths, r2_on, invalid_reason,
+                peak_json, opened_at, closed_at, hard_alarm
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 row["passage_id"],
@@ -177,10 +188,67 @@ class PassageStore:
                 row.get("image_paths") or "",
                 1 if row.get("r2_on") else 0,
                 row.get("invalid_reason") or "",
+                json.dumps([int(v or 0) for v in list(row.get("peak_cps") or cps)]),
+                float(row.get("opened_at") or 0),
+                float(row.get("closed_at") or 0),
+                1 if row.get("hard_alarm") else 0,
             ),
         )
         self._conn.commit()
         insert_vehicle_passage_mongo(row, self.label_for_slot)
 
+    def recent(self, limit: int = 8) -> list:
+        """已结束的通行，新的在前。未出出口的本趟不在表里。"""
+        cur = self._conn.execute(
+            """
+            SELECT passage_id, speed_kmh, v_limit_kmh, overspeed, decision,
+                   hit_probe_mask, cps_json, peak_json, plate, plate_manual,
+                   invalid_reason, opened_at, closed_at, hard_alarm
+            FROM passage
+            ORDER BY COALESCE(closed_at, opened_at, 0) DESC, rowid DESC
+            LIMIT ?
+            """,
+            (int(limit),),
+        )
+        rows = []
+        for rec in cur.fetchall():
+            cps = _json_list(rec[6])
+            peak = _json_list(rec[7]) or cps
+            when = float(rec[12] or rec[11] or 0)
+            rows.append({
+                "passage_id": rec[0],
+                "speed_kmh": rec[1],
+                "v_limit_kmh": rec[2],
+                "overspeed": bool(rec[3]),
+                "decision": int(rec[4] or 0),
+                "hit_probe_mask": int(rec[5] or 0),
+                "cps": cps,
+                "peak_cps": peak,
+                "plate": rec[9] or rec[8] or "",
+                "invalid_reason": rec[10] or "",
+                "opened_at": float(rec[11] or 0),
+                "closed_at": when,
+                "hard_alarm": bool(rec[13]),
+            })
+        return rows
+
     def close(self) -> None:
         self._conn.close()
+
+
+def _json_list(raw) -> list:
+    if not raw:
+        return []
+    try:
+        data = json.loads(raw)
+    except (TypeError, ValueError):
+        return []
+    if not isinstance(data, list):
+        return []
+    out = []
+    for item in data:
+        try:
+            out.append(int(item or 0))
+        except (TypeError, ValueError):
+            out.append(0)
+    return out

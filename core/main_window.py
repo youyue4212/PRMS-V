@@ -193,6 +193,16 @@ class MainWindow(QMainWindow, UIBase):
         self.stacked_widget.addWidget(self.alarm_log_page)
         self.stacked_widget.addWidget(self.settings_page)
 
+        from core.vehicle_dashboard_page import VehicleDashboardPage
+        self.vehicle_page = VehicleDashboardPage(self)
+        self.vehicle_page.reset_requested.connect(self.request_channel_alarm_reset)
+        self.vehicle_page.plate_edited.connect(self._on_vehicle_plate)
+        self.vehicle_page.login_requested.connect(lambda: self.login(preferred_page=0))
+        self.vehicle_page.logout_requested.connect(self.logout)
+        self.vehicle_page.hide()
+        self.vehicle_page.setParent(self._shell_stash)
+        self._apply_vehicle_shell()
+
         # 各页内容（尤其设置页）高度可能超过屏幕；禁止把底栏顶出去。
         self.stacked_widget.setMinimumHeight(0)
         self.stacked_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
@@ -2185,6 +2195,7 @@ class MainWindow(QMainWindow, UIBase):
             self._update_settings_occupancy_from_master(None, master_offline=True)
             if getattr(self, "control_room_mode", False):
                 self._refresh_control_room_snapshot()
+            self._refresh_vehicle_dashboard()
             return
 
         # decision 边沿日志，便于确认主控是否已离开 0x01
@@ -2225,6 +2236,127 @@ class MainWindow(QMainWindow, UIBase):
         self._update_home_health_and_faults()
         if getattr(self, "control_room_mode", False):
             self._refresh_control_room_snapshot()
+        self._refresh_vehicle_dashboard()
+
+    def _apply_vehicle_shell(self):
+        """车辆通道打开时，主显示换成图1至图4；关掉后回到人员通道主页。"""
+        page = getattr(self, "vehicle_page", None)
+        stack = getattr(self, "stacked_widget", None)
+        home = getattr(self, "primary_home_page", None)
+        if page is None or stack is None or home is None:
+            return
+        want = bool(getattr(self.config, "vehicle_channel", False))
+        target = page if want else home
+        if stack.widget(0) is target:
+            return
+        current = stack.currentWidget()
+        removed = stack.widget(0)
+        stack.removeWidget(removed)
+        removed.hide()
+        removed.setParent(self._shell_stash)
+        stack.insertWidget(0, target)
+        target.setMinimumHeight(0)
+        target.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        if current is None or current is removed:
+            stack.setCurrentIndex(0)
+        else:
+            stack.setCurrentWidget(current)
+
+    def _vehicle_lane(self) -> str:
+        lane = str(getattr(self.config, "archive_machine_id", "") or "").strip()
+        return lane or "03"
+
+    def _vehicle_dashboard_probes(self) -> list:
+        entries = list(getattr(getattr(self, "home_page", None), "_probe_entries", []) or [])
+        hv = set()
+        comm = set()
+        dm = getattr(self, "diagnostics_manager", None)
+        if dm is not None and hasattr(dm, "get_all_active_faults"):
+            try:
+                from core.diagnostics import FaultCode
+                hv_codes = {FaultCode.E201, FaultCode.E202, FaultCode.E203}
+                for client_id, code, *_rest in dm.get_all_active_faults() or []:
+                    cid = str(client_id or "")
+                    if code in hv_codes:
+                        hv.add(cid)
+                    elif self._is_probe_comm_fault(client_id, code):
+                        comm.add(cid)
+            except Exception:
+                pass
+        cards = []
+        try:
+            expect = int(getattr(self.config, "expected_probe_count", 2) or 0)
+        except (TypeError, ValueError):
+            expect = 2
+        if expect <= 0:
+            expect = 2
+        expect = max(1, min(expect, 16))
+        if not entries:
+            return [{
+                "absent": True,
+                "location": "",
+                "cps": 0,
+                "online": False,
+                "comm_fault": False,
+                "hv_fault": False,
+                "hit": False,
+            } for _ in range(expect)]
+        for e in entries[:16]:
+            cid = str(e.get("client_id") or "").strip()
+            online = bool(e.get("online"))
+            absent = (not cid) and (not online)
+            cards.append({
+                "absent": absent,
+                "location": e.get("location") or "",
+                "cps": int(e.get("cps") or 0),
+                "online": online,
+                "comm_fault": (not absent) and (cid in comm or not online),
+                "hv_fault": (not absent) and cid in hv and online,
+                "hit": bool(e.get("hit")),
+            })
+        return cards
+
+    def _refresh_vehicle_dashboard(self):
+        if not getattr(self.config, "vehicle_channel", False):
+            return
+        page = getattr(self, "vehicle_page", None)
+        if page is None:
+            return
+        from core.vehicle.dashboard_model import build_dashboard
+        packet = getattr(self, "latest_master_summary", None)
+        try:
+            master_online = bool(self.is_master_online())
+        except Exception:
+            master_online = packet is not None
+        fsm = getattr(self, "_vehicle_fsm", None)
+        passage = getattr(fsm, "open", None) if fsm is not None else None
+        history = []
+        store = getattr(self, "_vehicle_store", None)
+        if store is not None:
+            try:
+                history = store.recent(40)
+            except Exception:
+                history = []
+        limit = float(getattr(self.config, "vehicle_v_limit_kmh", 8.0) or 8.0)
+        page.apply_model(build_dashboard(
+            packet,
+            self._vehicle_dashboard_probes(),
+            passage,
+            history,
+            master_online,
+            self._vehicle_lane(),
+            limit,
+        ))
+        page.set_reset_allowed(bool(self._is_privileged_user()))
+        name = ""
+        if self.is_logged_in() and isinstance(getattr(self, "current_user", None), dict):
+            name = str(self.current_user.get("username") or "")
+        page.set_session(bool(self.is_logged_in()), name)
+
+    def _on_vehicle_plate(self, text: str):
+        fsm = getattr(self, "_vehicle_fsm", None)
+        if fsm is not None and getattr(fsm, "open", None) is not None:
+            fsm.open.plate = text
 
     def _sync_master_relay_ui_from_l2(self, packet):
         """设置页主控继电器勾选/状态跟 L2 bit4/5/6（有 pending 命令时跳过，避免打架）。"""
@@ -4529,6 +4661,8 @@ class MainWindow(QMainWindow, UIBase):
                 self._refresh_control_room_snapshot()
             except Exception:
                 pass
+        if hasattr(self, "_refresh_vehicle_dashboard"):
+            self._refresh_vehicle_dashboard()
 
     def update_ui_for_user_role(self):
         """根据用户角色更新UI"""
@@ -4601,6 +4735,8 @@ class MainWindow(QMainWindow, UIBase):
         if hasattr(self, "alarm_log_page") and hasattr(self.alarm_log_page, "update_auth_controls"):
             self.alarm_log_page.update_auth_controls()
         self._sync_control_room_action_bar()
+        if hasattr(self, "_refresh_vehicle_dashboard"):
+            self._refresh_vehicle_dashboard()
     
     def update_settings_controls_for_role(self, role):
         """根据用户角色更新设置页面控件状态"""
