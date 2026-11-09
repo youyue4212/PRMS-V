@@ -738,6 +738,7 @@ class UIBase():
         if self.master_summary_callback is not None:
             self.master_summary_callback(packet, client_id)
         self._maybe_log_all_probe_cps()
+        self._maybe_log_vehicle_l2_probe_gap(packet)
         if hasattr(self, "_release_probe_radiation_logs_for_master"):
             self._release_probe_radiation_logs_for_master()
 
@@ -4159,7 +4160,6 @@ class UIBase():
         return "探头 %d" % (int(index) + 1)
 
     def _ensure_vehicle_camera(self):
-        from core.vehicle.camera_config import load_vehicle_camera_config
         from core.vehicle.camera_service import VehicleCameraService
 
         svc = getattr(self, "_vehicle_camera", None)
@@ -4177,19 +4177,20 @@ class UIBase():
                 lambda: bool(getattr(self.config, "vehicle_channel", False))
             )
             self._vehicle_camera = svc
-        svc.reload_config(load_vehicle_camera_config(self.config))
         page = getattr(self, "vehicle_page", None)
         if page is not None and hasattr(page, "capture"):
             svc.set_rtsp_fallback(page.capture.grab_jpeg_bytes)
         return svc
 
     def _sync_vehicle_camera_config(self):
+        from core.vehicle.camera_config import load_vehicle_camera_config
+
         svc = getattr(self, "_vehicle_camera", None)
         if not getattr(self.config, "vehicle_channel", False):
             if svc is not None:
                 svc.shutdown()
             return
-        self._ensure_vehicle_camera()
+        self._ensure_vehicle_camera().reload_config(load_vehicle_camera_config(self.config))
 
     def _on_vehicle_plate_http_listen(self, port: int):
         path = str(getattr(self.config, "vehicle_plate_http_path", "/hik/anpr") or "/hik/anpr")
@@ -5567,6 +5568,46 @@ class UIBase():
         
         for cid in expired_clients:
             del self.client_data[cid]
+
+    def _maybe_log_vehicle_l2_probe_gap(self, packet, interval_sec=30.0):
+        """车辆通道：L2 online_mask 有探头离线时提示（以 RS485 为准，非 TCP 直连）。"""
+        if not getattr(self.config, "vehicle_channel", False) or packet is None:
+            return
+        try:
+            now = time.time()
+            last = float(getattr(self, "_last_vehicle_l2_gap_log_at", 0.0) or 0.0)
+            if now - last < float(interval_sec):
+                return
+            expect = int(getattr(self.config, "expected_probe_count", 2) or 2)
+            expect = max(1, min(expect, 16))
+            mask = int(getattr(packet, "online_mask", 0) or 0)
+            cps = list(getattr(packet, "probe_cps", None) or [])
+            hold = getattr(self, "_vehicle_probe_gap_hold", None)
+            if hold is None:
+                hold = {}
+                self._vehicle_probe_gap_hold = hold
+            from core.probe_online_hold import debounce_probe_online
+
+            offline = []
+            for i in range(expect):
+                value = int(cps[i] or 0) if i < len(cps) else 0
+                online = debounce_probe_online(
+                    hold, i, bool(mask & (1 << i)), value, now
+                )
+                if not online:
+                    offline.append(i + 1)
+            if not offline:
+                return
+            self._last_vehicle_l2_gap_log_at = now
+            names = "、".join("站号%d" % n for n in offline)
+            self.log(
+                "PRMS-V：主控 L2 显示 %s 未在线（RS485 轮询位）；"
+                "车辆页探头 CPS/状态以 L2 为准。未接 485 时不应以 TCP 8234 计数代替。"
+                % names,
+                "WARNING",
+            )
+        except Exception:
+            return
 
     def _maybe_log_all_probe_cps(self, interval_sec=10.0):
         """Throttle a human-readable per-probe CPS line into daq_log."""

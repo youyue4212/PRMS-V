@@ -84,6 +84,7 @@ class VehicleCameraService(QObject):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._config = VehicleCameraConfig()
+        self._plate_http_sig = None
         self._get_open_passage: Optional[Callable[[], Passage | None]] = None
         self._pending: set[str] = set()
         self._snap_queue: list[tuple[str, str]] = []
@@ -110,6 +111,15 @@ class VehicleCameraService(QObject):
         self._clip.set_capture_dir(config.capture_dir)
         self._sync_plate_http()
 
+    def _plate_http_signature(self) -> tuple:
+        c = self._config
+        return (
+            bool(c.plate_http_enabled),
+            str(c.plate_http_host or "0.0.0.0"),
+            int(c.plate_http_port or 8236),
+            bool(self._vehicle_channel_on()),
+        )
+
     def sync_rtsp_buffer(self, url: str):
         self._clip.set_capture_dir(self._config.capture_dir)
         self._clip.set_rtsp_url(normalize_rtsp_url(url))
@@ -119,6 +129,7 @@ class VehicleCameraService(QObject):
         if self._plate_http is not None:
             self._plate_http.stop()
             self._plate_http = None
+        self._plate_http_sig = None
 
     def plate_http_port(self) -> int:
         if self._plate_http is not None and self._plate_http.running():
@@ -126,11 +137,19 @@ class VehicleCameraService(QObject):
         return int(self._config.plate_http_port or 0)
 
     def _sync_plate_http(self):
+        sig = self._plate_http_signature()
+        if (
+            self._plate_http_sig == sig
+            and self._plate_http is not None
+            and self._plate_http.running()
+        ):
+            return
         if self._plate_http is None:
             self._plate_http = PlateHttpServer(self)
             self._plate_http.plate_received.connect(self._on_http_plate)
             self._plate_http.listen_failed.connect(self.plate_http_error.emit)
         self._plate_http.stop()
+        self._plate_http_sig = None
         if not self._config.plate_http_enabled:
             return
         if not self._vehicle_channel_on():
@@ -140,6 +159,7 @@ class VehicleCameraService(QObject):
             int(self._config.plate_http_port or 8236),
         )
         if self._plate_http.running():
+            self._plate_http_sig = sig
             self.plate_http_listening.emit(self._plate_http.listen_port())
 
     def _on_http_plate(self, plate: str, remote: str, image=None):

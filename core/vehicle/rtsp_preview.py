@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import os
 
-from PyQt5.QtCore import QObject, Qt, QBuffer, QIODevice, QThread, pyqtSignal
+from PyQt5.QtCore import QObject, Qt, QBuffer, QIODevice, QThread, QTimer, pyqtSignal
 from PyQt5.QtGui import QImage, QPixmap
 from PyQt5.QtWidgets import QLabel, QSizePolicy, QVBoxLayout, QWidget
 
@@ -31,13 +31,18 @@ class _RtspWorker(QObject):
         super().__init__()
         self._url = ""
         self._stop = False
+        self._paused = False
 
     def configure(self, url: str):
         self._url = str(url or "").strip()
         self._stop = False
+        self._paused = False
 
     def request_stop(self):
         self._stop = True
+
+    def set_paused(self, paused: bool):
+        self._paused = bool(paused)
 
     def run(self):
         try:
@@ -62,6 +67,9 @@ class _RtspWorker(QObject):
         cap = None
         fail_count = 0
         while not self._stop:
+            if self._paused:
+                QThread.msleep(150)
+                continue
             if cap is None or not cap.isOpened():
                 if cap is not None:
                     cap.release()
@@ -70,8 +78,8 @@ class _RtspWorker(QObject):
                 cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
                 if not cap.isOpened():
                     fail_count += 1
-                    self.status.emit("连接 RTSP 失败" if fail_count >= 2 else "正在连接…")
-                    self.msleep(800)
+                    self.status.emit("等待相机连接" if fail_count >= 2 else "正在连接…")
+                    QThread.msleep(800)
                     continue
                 fail_count = 0
                 self.status.emit("")
@@ -82,8 +90,8 @@ class _RtspWorker(QObject):
             if not ok or frame is None:
                 cap.release()
                 cap = None
-                self.status.emit("视频中断，重连中…")
-                self.msleep(400)
+                self.status.emit("等待相机连接")
+                QThread.msleep(400)
                 continue
 
             try:
@@ -92,8 +100,9 @@ class _RtspWorker(QObject):
                 continue
             h, w, ch = rgb.shape
             img = QImage(rgb.data, w, h, ch * w, QImage.Format_RGB888).copy()
-            self.frame_ready.emit(img)
-            self.msleep(66)
+            if not self._stop:
+                self.frame_ready.emit(img)
+            QThread.msleep(66)
 
         if cap is not None:
             cap.release()
@@ -115,6 +124,9 @@ class RtspPreviewWidget(QWidget):
         self._alarm_path = ""
         self._thread = None
         self._worker = None
+        self._stop_timer = QTimer(self)
+        self._stop_timer.setSingleShot(True)
+        self._stop_timer.timeout.connect(self._stop_worker_now)
 
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
@@ -251,12 +263,22 @@ class RtspPreviewWidget(QWidget):
 
     def showEvent(self, event):
         super().showEvent(event)
-        if self._url:
+        if self._stop_timer.isActive():
+            self._stop_timer.stop()
+        if self._worker is not None and self._thread is not None and self._thread.isRunning():
+            self._worker.set_paused(False)
+        elif self._url:
             self._start_worker()
 
     def hideEvent(self, event):
-        self._stop_worker()
+        # 切页只暂停刷帧，不等待 OpenCV 断流；否则 cap.read/open 超时时会卡住 UI。
+        if self._worker is not None:
+            self._worker.set_paused(True)
         super().hideEvent(event)
+
+    def closeEvent(self, event):
+        self._stop_worker()
+        super().closeEvent(event)
 
     def _start_worker(self):
         if not self._url:
@@ -268,12 +290,16 @@ class RtspPreviewWidget(QWidget):
         self._worker.moveToThread(self._thread)
         self._worker.configure(self._url)
         self._thread.started.connect(self._worker.run)
-        self._worker.frame_ready.connect(self._on_frame)
-        self._worker.status.connect(self._on_status)
+        self._worker.frame_ready.connect(self._on_frame, Qt.QueuedConnection)
+        self._worker.status.connect(self._on_status, Qt.QueuedConnection)
         self._worker.finished.connect(self._thread.quit)
         self._thread.start()
 
     def _stop_worker(self):
+        self._stop_timer.stop()
+        self._stop_worker_now()
+
+    def _stop_worker_now(self):
         w = self._worker
         t = self._thread
         if w is not None:
@@ -283,4 +309,5 @@ class RtspPreviewWidget(QWidget):
             t.wait(1500)
         self._worker = None
         self._thread = None
-        self._last_image = None
+        if not self.isVisible():
+            self._last_image = None

@@ -2401,7 +2401,12 @@ class MainWindow(QMainWindow, UIBase):
         online_mask = int(getattr(packet, "online_mask", 0) or 0) if packet is not None else 0
         hp = getattr(self, "home_page", None)
         tile_hold = getattr(hp, "_tile_hold", None) if hp is not None else None
+        vehicle_hold = getattr(self, "_vehicle_probe_hold", None)
+        if vehicle_hold is None:
+            vehicle_hold = {}
+            self._vehicle_probe_hold = vehicle_hold
         now = time.time()
+        vehicle_mode = bool(getattr(self.config, "vehicle_channel", False))
 
         cards = []
         for slot in range(expect):
@@ -2411,18 +2416,43 @@ class MainWindow(QMainWindow, UIBase):
             if packet is not None and slot < len(probe_cps):
                 cps = int(probe_cps[slot] or 0)
                 raw_online = bool(online_mask & (1 << slot))
-                if tile_hold is not None:
+                # 车辆页：CPS 只信 L2；在线状态单独防抖（mask 约 1s 一包会闪 bit）
+                if vehicle_mode:
+                    first_offline_sample = (
+                        (not raw_online)
+                        and cps <= 0
+                        and int(slot) not in vehicle_hold
+                    )
+                    if first_offline_sample:
+                        # 启动/切页首包可能先到 0 mask；给 UI 一个确认周期，避免闪“通信异常”。
+                        vehicle_hold[int(slot)] = {
+                            "offline_since": now,
+                            "last": (0, True, False),
+                        }
+                        online = True
+                    else:
+                        online = debounce_probe_online(
+                            vehicle_hold, slot, raw_online, cps, now
+                        )
+                    absent = False
+                elif tile_hold is not None:
                     online = debounce_probe_online(tile_hold, slot, raw_online, cps, now)
                     st = tile_hold.get(slot) or {}
                     if not raw_online and online and st.get("last"):
                         cps = int(st["last"][0])
+                    if cid or online or cps > 0 or raw_online:
+                        absent = False
                 else:
                     online = raw_online
-                if tile_hold is not None:
+                    if cid or online or cps > 0 or raw_online:
+                        absent = False
+                if tile_hold is not None and not vehicle_mode:
                     st = tile_hold.setdefault(slot, {"offline_since": None, "last": None})
                     st["last"] = (cps, online, bool(e.get("hit")))
-                if cid or online or cps > 0 or raw_online:
-                    absent = False
+            elif vehicle_mode:
+                cps = 0
+                online = False
+                absent = False
             else:
                 cps = int(e.get("cps") or 0)
                 online = bool(e.get("online")) if e else False

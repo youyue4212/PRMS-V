@@ -11,7 +11,8 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from core.vehicle.dashboard_model import build_dashboard, history_row
+from core.vehicle.dashboard_model import FIELD_ORDER, build_dashboard, history_row
+from core.translation import _t
 from core.vehicle.passage_fsm import Passage
 from core.vehicle.passage_store import PassageStore
 
@@ -39,11 +40,25 @@ def _probes(cps, hit_flags=(), slots=()):
     return out
 
 
+def _field_id(name: str) -> str:
+    if name in FIELD_ORDER:
+        return name
+    for fid in FIELD_ORDER:
+        if _t("vfield_" + fid) == name:
+            return fid
+    return name
+
+
 def _field(model, name):
-    for key, val in model["fields"]:
-        if key == name:
-            return val
+    fid = _field_id(name)
+    for item in model["fields"]:
+        if item.get("id") == fid:
+            return item.get("text")
     raise KeyError(name)
+
+
+def _field_ids(model) -> set:
+    return {str(f.get("id") or "") for f in model.get("fields") or []}
 
 
 def _check(name, cond):
@@ -74,7 +89,7 @@ def main():
     _check("idle no reset", idle["show_reset"] is False)
     _check("idle hard", _field(idle, "辐射硬报") == "无")
     _check("idle speed dash", _field(idle, "车速") == "—")
-    _check("idle no survey row", all(name != "测速" for name, _val in idle["fields"]))
+    _check("idle no survey row", "speed" not in _field_ids(idle) or _field(idle, "speed") == "—")
     _check("idle capture", idle["capture"] == "wait")
     _check("idle card count", len(idle["probes"]) == 2 and idle["probes"][0]["show_cps"] is True)
 
@@ -112,8 +127,8 @@ def main():
     _check("alarm reset", alarm["show_reset"] is True)
     _check("alarm speed", _field(alarm, "车速") == "等待出口")
     _check("alarm peak", _field(alarm, "峰值CPS") == "1542")
-    _check("alarm no gamma row", all(n != "γ总计" for n, _ in alarm["fields"]))
-    _check("alarm no hit mask ui", all(n != "命中掩码" for n, _ in alarm["fields"]))
+    _check("alarm no gamma row", "gamma_total" not in _field_ids(alarm))
+    _check("alarm no hit mask ui", "hit_mask" not in _field_ids(alarm))
     swapped = build_dashboard(
         _Pkt(0x03, 0x2),
         [
@@ -144,7 +159,7 @@ def main():
     _check("elevated no reset", soft["show_reset"] is False)
     _check("elevated speed", _field(soft, "车速") == "等待出口" and _field(soft, "辐射硬报") == "无")
     _check("elevated numbers", _field(soft, "峰值CPS") == "890" and _field(soft, "γ总计") == "1650")
-    _check("elevated no hit mask ui", all(n != "命中掩码" for n, _ in soft["fields"]))
+    _check("elevated no hit mask ui", "hit_mask" not in _field_ids(soft))
     _check("elevated plate", soft["plate"] == "京A·D12345")
     _check("live totals not copied into history", all(r["total"] != "1650" for r in soft["history"]))
 
@@ -206,14 +221,14 @@ def main():
     app.processEvents()
     _check("qt banner", page.banner_label.text() == "计数偏高")
     _check("qt reset hidden", page.reset_btn.isHidden() is True)
-    _check("qt hard field", page._field_values["辐射硬报"].text() == "无")
+    _check("qt hard field", page._field_values["rad_hard"].text() == "无")
     page.apply_model(alarm)
     app.processEvents()
     _check("qt reset shown", page.reset_btn.isVisible() is True)
     _check("qt ban chip", any(isinstance(w, QLabel) and w.text() == "禁行" for i in range(page.chip_host.count()) for w in [page.chip_host.itemAt(i).widget()]))
-    _check("qt threshold", page._field_keys["阈值说明"].isVisible() is True)
-    _check("qt alarm keeps plate", page._field_rows["车牌"].isVisible() is True)
-    _check("qt alarm hides gamma", page._field_rows["γ总计"].isVisible() is False)
+    _check("qt threshold", page._field_keys["threshold_note"].isVisible() is True)
+    _check("qt alarm keeps plate", page._field_rows["plate"].isVisible() is True)
+    _check("qt alarm hides gamma", page._field_rows["gamma_total"].isVisible() is False)
     _check("qt reset gray", page.reset_btn.isEnabled() is False)
     headers = [page.history.horizontalHeaderItem(c).text() for c in range(page.history.columnCount())]
     _check(
@@ -249,10 +264,14 @@ def main():
     page.apply_model(idle)
     app.processEvents()
     _check("qt idle", page.banner_label.text() == "通道空闲" and page.capture.center_text() == "等待过车")
-    _check("qt login", page.banner.login_btn.text() == "登录")
+    _check("qt login", page.banner.login_btn.text() == _t("btn_login"))
     page.set_session(True, "admin")
-    _check("qt session", page.banner.login_btn.text() == "退出" and page.banner.session_label.text() == "admin")
-    _check("qt no threshold", page._field_keys["阈值说明"].isVisible() is False)
+    _check(
+        "qt session",
+        page.banner.login_btn.text() == _t("btn_logout")
+        and page.banner.session_label.text() == "admin",
+    )
+    _check("qt no threshold", page._field_keys["threshold_note"].isVisible() is False)
     print("ok vehicle dashboard")
 
 
