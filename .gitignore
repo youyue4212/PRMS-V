@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyd
+.Python
+*.egg-info/
+.venv/
+venv/
+
+# 打包产物（勿入 Git；体积大且 GitHub 限制 100MB）
+/build/
+/dist/
+/packaging/build/
+/packaging/dist/
+*.rar
+*.zip
+*.exe
+*.pkg
+
+# 本地配置（按需提交）
+# users.json
