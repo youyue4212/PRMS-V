@@ -16,7 +16,7 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEngineSettings
 from PyQt5.QtWebChannel import QWebChannel
 
-PROBE_OFFLINE_HOLD_SEC = 2.0
+from core.probe_online_hold import PROBE_OFFLINE_HOLD_SEC, debounce_probe_online
 
 _HMI_HTML = os.path.normpath(
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hmi_web", "index.html")
@@ -868,18 +868,7 @@ class HomePage(QWidget):
             self.parent.open_probe_overview(client_id, slot_index=slot_index)
 
     def _debounce_online(self, slot: int, want_online: bool, cps: int, now: float) -> bool:
-        st = self._tile_hold.setdefault(slot, {"offline_since": None, "last": None})
-        if want_online or int(cps or 0) > 0:
-            st["offline_since"] = None
-            return True
-        if st["offline_since"] is None:
-            st["offline_since"] = now
-            if st.get("last") and st["last"][1]:
-                return True
-            return False
-        if (now - float(st["offline_since"])) < PROBE_OFFLINE_HOLD_SEC:
-            return True
-        return False
+        return debounce_probe_online(self._tile_hold, slot, want_online, cps, now)
 
     def update_probe_tiles_from_master(self, summary, master_online, lang="zh"):
         if summary is None:
@@ -903,6 +892,7 @@ class HomePage(QWidget):
             st["last"] = (int(cps), online, hit)
             self._probe_entries[i].update({
                 "cps": int(cps), "online": online, "hit": hit,
+                "l2_slot": i,
                 "name": self._live_probe_name(i, self._probe_entries[i]),
                 "location": self._slot_location(i),
             })
@@ -943,6 +933,15 @@ class HomePage(QWidget):
             slot_id = prev.get("slot_id") if prev else None
             if slot_id is None:
                 slot_id = i
+            l2_slot = None
+            parent = self.parent
+            if cid and parent is not None and hasattr(parent, "_client_l2_slot_index"):
+                try:
+                    l2_slot = parent._client_l2_slot_index(str(cid).strip())
+                except Exception:
+                    l2_slot = None
+            if l2_slot is None:
+                l2_slot = int(slot_id)
             self._probe_entries[i] = {
                 "name": self._live_probe_name(i, {
                     "client_id": cid,
@@ -956,6 +955,7 @@ class HomePage(QWidget):
                 "client_id": cid,
                 "threshold": int(e.get("threshold", 1000) or 1000),
                 "slot_id": slot_id,
+                "l2_slot": l2_slot,
             }
         self._had_tile_data = True
         self.schedule_web_flush()

@@ -24,3 +24,8 @@ daq_tablet Windows 运行说明
   2. 进入该文件夹，双击 daq_tablet.exe
   3. 若仍提示缺少 DLL，安装 Microsoft Visual C++ 2015-2022 Redistributable (x64)
      https://aka.ms/vs/17/release/vc_redist.x64.exe
+
+车辆通道 RTSP 预览（PRMS-V）：
+  - 本安装包已内置 OpenCV，目标机无需再 pip install opencv-python。
+  - 在软件「设置 → 通讯」中开启车辆通道并填写摄像机 RTSP 地址即可。
+  - 若中间区提示「请安装 opencv-python」，说明 _internal 不完整或使用了旧版打包产物，请重新用 packaging\build_windows.bat 打整包并整夹拷贝。

@@ -1389,6 +1389,38 @@ class UIBase():
         self.vehicle_v_limit_spin.setValue(float(getattr(self.config, "vehicle_v_limit_kmh", 8.0)))
         self.vehicle_v_limit_spin.valueChanged.connect(self.on_vehicle_v_limit_changed)
         comm_layout.addWidget(self.vehicle_v_limit_spin, 9, 3)
+
+        self.vehicle_rtsp_label = QLabel(_t("set_vehicle_rtsp"))
+        comm_layout.addWidget(self.vehicle_rtsp_label, 10, 0)
+        self.vehicle_rtsp_input = QLineEdit()
+        self.vehicle_rtsp_input.setPlaceholderText(_t("set_vehicle_rtsp_placeholder"))
+        self.vehicle_rtsp_input.setText(str(getattr(self.config, "vehicle_rtsp_url", "") or ""))
+        self.vehicle_rtsp_input.editingFinished.connect(self.on_vehicle_rtsp_changed)
+        self.vehicle_rtsp_input.returnPressed.connect(self.on_vehicle_rtsp_changed)
+        comm_layout.addWidget(self.vehicle_rtsp_input, 10, 1, 1, 3)
+
+        self.vehicle_plate_http_label = QLabel(_t("set_vehicle_plate_http_port"))
+        comm_layout.addWidget(self.vehicle_plate_http_label, 11, 0)
+        self.vehicle_plate_http_spin = QSpinBox()
+        self.vehicle_plate_http_spin.setRange(1024, 65535)
+        self.vehicle_plate_http_spin.setValue(
+            int(getattr(self.config, "vehicle_plate_http_port", 8236))
+        )
+        self.vehicle_plate_http_spin.valueChanged.connect(self.on_vehicle_plate_http_port_changed)
+        comm_layout.addWidget(self.vehicle_plate_http_spin, 11, 1)
+        self.vehicle_plate_http_hint = QLabel(_t("set_vehicle_plate_http_hint"))
+        self.vehicle_plate_http_hint.setWordWrap(True)
+        comm_layout.addWidget(self.vehicle_plate_http_hint, 11, 2, 1, 2)
+
+        self.vehicle_lane_label = QLabel(_t("set_vehicle_lane_id"))
+        comm_layout.addWidget(self.vehicle_lane_label, 12, 0)
+        self.vehicle_lane_input = QLineEdit()
+        self.vehicle_lane_input.setPlaceholderText(_t("set_vehicle_lane_id_placeholder"))
+        self.vehicle_lane_input.setMaxLength(16)
+        self.vehicle_lane_input.setText(str(getattr(self.config, "archive_machine_id", "") or ""))
+        self.vehicle_lane_input.editingFinished.connect(self.on_vehicle_lane_id_changed)
+        self.vehicle_lane_input.returnPressed.connect(self.on_vehicle_lane_id_changed)
+        comm_layout.addWidget(self.vehicle_lane_input, 12, 1, 1, 3)
         
         # Serial Settings (only shown when TCP is disabled)
         self.serial_port_label = QLabel(_t("set_serial_port"))
@@ -4080,8 +4112,12 @@ class UIBase():
             self._ensure_vehicle_fsm()
         else:
             self._vehicle_fsm = None
+            if hasattr(self, "_sync_vehicle_camera_config"):
+                self._sync_vehicle_camera_config()
         if hasattr(self, "_apply_vehicle_shell"):
             self._apply_vehicle_shell()
+        if hasattr(self, "_sync_vehicle_camera_config"):
+            self._sync_vehicle_camera_config()
         if hasattr(self, "_refresh_vehicle_dashboard"):
             self._refresh_vehicle_dashboard()
 
@@ -4097,6 +4133,23 @@ class UIBase():
         if fsm is not None:
             fsm.update_params(self.config.vehicle_length_m, self.config.vehicle_v_limit_kmh)
 
+    def on_vehicle_rtsp_changed(self):
+        raw = self.vehicle_rtsp_input.text().strip() if hasattr(self, "vehicle_rtsp_input") else ""
+        self.config.update_settings(vehicle_rtsp_url=raw)
+        if hasattr(self, "_sync_vehicle_rtsp"):
+            self._sync_vehicle_rtsp()
+
+    def on_vehicle_plate_http_port_changed(self, port: int):
+        self.config.update_settings(vehicle_plate_http_port=int(port))
+        if hasattr(self, "_sync_vehicle_camera_config"):
+            self._sync_vehicle_camera_config()
+
+    def on_vehicle_lane_id_changed(self):
+        raw = self.vehicle_lane_input.text().strip() if hasattr(self, "vehicle_lane_input") else ""
+        self.config.update_settings(archive_machine_id=raw)
+        if hasattr(self, "_flush_vehicle_dashboard"):
+            self._flush_vehicle_dashboard()
+
     def _vehicle_probe_label(self, index: int) -> str:
         if hasattr(self, "_probe_slot_label"):
             try:
@@ -4104,6 +4157,103 @@ class UIBase():
             except Exception:
                 pass
         return "探头 %d" % (int(index) + 1)
+
+    def _ensure_vehicle_camera(self):
+        from core.vehicle.camera_config import load_vehicle_camera_config
+        from core.vehicle.camera_service import VehicleCameraService
+
+        svc = getattr(self, "_vehicle_camera", None)
+        if svc is None:
+            svc = VehicleCameraService(self)
+            svc.set_passage_accessor(
+                lambda: getattr(getattr(self, "_vehicle_fsm", None), "open", None)
+            )
+            svc.capture_done.connect(self._on_vehicle_capture_done)
+            svc.capture_failed.connect(self._on_vehicle_capture_failed)
+            svc.plate_ingested.connect(self._on_vehicle_plate_ingested)
+            svc.plate_http_listening.connect(self._on_vehicle_plate_http_listen)
+            svc.plate_http_error.connect(self._on_vehicle_plate_http_err)
+            svc.set_vehicle_channel_gate(
+                lambda: bool(getattr(self.config, "vehicle_channel", False))
+            )
+            self._vehicle_camera = svc
+        svc.reload_config(load_vehicle_camera_config(self.config))
+        page = getattr(self, "vehicle_page", None)
+        if page is not None and hasattr(page, "capture"):
+            svc.set_rtsp_fallback(page.capture.grab_jpeg_bytes)
+        return svc
+
+    def _sync_vehicle_camera_config(self):
+        svc = getattr(self, "_vehicle_camera", None)
+        if not getattr(self.config, "vehicle_channel", False):
+            if svc is not None:
+                svc.shutdown()
+            return
+        self._ensure_vehicle_camera()
+
+    def _on_vehicle_plate_http_listen(self, port: int):
+        path = str(getattr(self.config, "vehicle_plate_http_path", "/hik/anpr") or "/hik/anpr")
+        log_inst.info(
+            "PRMS-V plate HTTP listening 0.0.0.0:%s (camera alarm host -> http://<PC-IP>:%s%s)"
+            % (port, port, path)
+        )
+
+    def _on_vehicle_plate_http_err(self, reason: str):
+        if reason == "no_open_passage_or_manual_plate":
+            log_inst.info(
+                "识牌 HTTP 已收到，但未写入：当前没有进行中的本趟（请先挡入口红外，"
+                "右侧出现「车辆经过/等待出口」后再发；或已手补车牌不会被覆盖）"
+            )
+            return
+        if reason == "parse_empty":
+            log_inst.info("识牌 HTTP 已收到，但报文里没解析出车牌号（检查 XML/编码）")
+            return
+        log_inst.warning("PRMS-V plate HTTP: %s" % reason)
+
+    def _on_vehicle_capture_done(self, passage_id: str, path: str):
+        log_inst.info("PRMS-V capture %s -> %s" % (passage_id, path))
+        self._vehicle_sync_evidence_store(passage_id)
+        if hasattr(self, "_flush_vehicle_dashboard"):
+            self._flush_vehicle_dashboard()
+
+    def _vehicle_sync_evidence_store(self, passage_id: str):
+        from core.vehicle.evidence_export import export_passage_evidence
+
+        fsm = getattr(self, "_vehicle_fsm", None)
+        store = getattr(self, "_vehicle_store", None)
+        if store is None:
+            return
+        row = None
+        open_row = getattr(fsm, "open", None) if fsm is not None else None
+        if open_row is not None and str(open_row.passage_id) == str(passage_id):
+            row = open_row.as_row()
+        if row is None:
+            last = getattr(fsm, "last_closed", None) if fsm is not None else None
+            if last is not None and str(last.passage_id) == str(passage_id):
+                row = last.as_row()
+        if row is None:
+            row = store.get_row(passage_id)
+        if not row:
+            return
+        store.update_image_paths(passage_id, row.get("image_paths") or "")
+        try:
+            bundle = export_passage_evidence(
+                row,
+                config=self.config,
+                label_for_slot=getattr(store, "label_for_slot", None),
+            )
+            if bundle is not None:
+                log_inst.info("PRMS-V evidence bundle %s" % bundle)
+        except Exception as exc:
+            log_inst.warning("PRMS-V evidence export failed: %s" % exc)
+
+    def _on_vehicle_capture_failed(self, passage_id: str, reason: str):
+        log_inst.warning("PRMS-V alarm capture failed %s: %s" % (passage_id, reason))
+
+    def _on_vehicle_plate_ingested(self, passage_id: str, plate: str):
+        log_inst.info("PRMS-V camera plate %s -> %s" % (passage_id, plate))
+        if hasattr(self, "_flush_vehicle_dashboard"):
+            self._flush_vehicle_dashboard()
 
     def _ensure_vehicle_fsm(self):
         fsm = getattr(self, "_vehicle_fsm", None)
@@ -4130,13 +4280,28 @@ class UIBase():
         if not getattr(self.config, "vehicle_channel", False):
             return
         try:
-            closed = self._ensure_vehicle_fsm().on_packet(packet)
+            fsm = self._ensure_vehicle_fsm()
+            prev_open_id = str(getattr(getattr(fsm, "open", None), "passage_id", "") or "")
+            prev_hard = bool(getattr(getattr(fsm, "open", None), "hard_alarm", False))
+            cam = self._ensure_vehicle_camera()
+            closed = fsm.on_packet(packet)
+            open_row = getattr(fsm, "open", None)
+            if open_row is not None:
+                oid = str(open_row.passage_id or "")
+                if oid and oid != prev_open_id:
+                    cam.on_passage_entry(open_row)
+            if open_row is not None and open_row.hard_alarm and not prev_hard:
+                cam.on_hard_alarm_edge(open_row)
         except Exception as exc:
             log_inst.warning(f"vehicle passage failed: {exc}")
             return
         if closed is None:
             return
         self.last_vehicle_passage = closed
+        try:
+            cam.on_passage_closed(closed)
+        except Exception as exc:
+            log_inst.warning("PRMS-V exit capture schedule failed: %s" % exc)
         if closed.invalid_reason:
             log_inst.info(
                 f"PRMS-V passage {closed.passage_id} invalid: {closed.invalid_reason}"
@@ -4146,6 +4311,8 @@ class UIBase():
             f"PRMS-V passage {closed.passage_id} speed={closed.speed_kmh or 0.0:.2f} km/h "
             f"overspeed={closed.overspeed} hard={closed.hard_alarm}"
         )
+        if closed.hard_alarm:
+            self._vehicle_sync_evidence_store(closed.passage_id)
         if closed.r2_on and hasattr(self, "worker") and self.worker is not None:
             try:
                 self.worker.control_single_relay(2, True)
@@ -4582,6 +4749,13 @@ class UIBase():
             "vehicle_length_spin",
             "vehicle_v_limit_label",
             "vehicle_v_limit_spin",
+            "vehicle_rtsp_label",
+            "vehicle_rtsp_input",
+            "vehicle_plate_http_label",
+            "vehicle_plate_http_spin",
+            "vehicle_plate_http_hint",
+            "vehicle_lane_label",
+            "vehicle_lane_input",
         ):
             w = getattr(self, name, None)
             if w is not None:
@@ -5745,6 +5919,24 @@ class UIBase():
                 continue
         ips.discard("")
         return len(ips) <= 1
+
+    def _client_l2_slot_index(self, client_id: str):
+        """0-based L2 slot (probe_cps[] / hit_probe_mask bit); Modbus 站号 N → slot N-1."""
+        if not client_id or client_id in ("master", "system"):
+            return None
+        try:
+            pid = self._resolve_product_id(client_id)
+            if pid is not None and 1 <= int(pid) <= 16 and self._product_id_is_unique(int(pid)):
+                return int(pid) - 1
+        except Exception:
+            pass
+        try:
+            num = self._resolve_probe_display_num(client_id)
+            if num is not None and 1 <= int(num) <= 16:
+                return int(num) - 1
+        except Exception:
+            pass
+        return None
 
     def get_probe_label(self, client_id: str) -> str:
         """

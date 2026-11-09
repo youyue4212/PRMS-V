@@ -30,6 +30,8 @@ class Passage:
     trigger_cps: list = field(default_factory=list)
     invalid_reason: str = ""
     plate: str = ""
+    plate_manual: bool = False
+    image_paths: str = ""
     r2_on: bool = False
     opened_at: float = 0.0
     closed_at: float = 0.0
@@ -54,6 +56,8 @@ class Passage:
             "trigger_cps": self.trigger_cps,
             "invalid_reason": self.invalid_reason,
             "plate": self.plate,
+            "plate_manual": "1" if self.plate_manual else "",
+            "image_paths": self.image_paths,
             "r2_on": self.r2_on,
             "opened_at": self.opened_at,
             "closed_at": self.closed_at,

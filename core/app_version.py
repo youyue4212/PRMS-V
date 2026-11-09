@@ -13,9 +13,12 @@ def software_version_short() -> str:
 
 
 def software_version_display(lang: str = "zh", multi_port: bool = False) -> str:
-    """多端口只是部署方式，版本号与单端口相同。"""
     product = APP_PRODUCT_ZH if str(lang or "").startswith("zh") else APP_PRODUCT_EN
-    return f"{product} {APP_VERSION}"
+    text = f"{product} {APP_VERSION}"
+    if multi_port:
+        tag = " · 多端口" if str(lang or "").startswith("zh") else " · multi-port"
+        text += tag
+    return text
 
 
 def software_version_about(lang: str = "zh") -> str:

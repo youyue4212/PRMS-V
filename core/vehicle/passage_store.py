@@ -197,6 +197,58 @@ class PassageStore:
         self._conn.commit()
         insert_vehicle_passage_mongo(row, self.label_for_slot)
 
+    def update_image_paths(self, passage_id: str, image_paths: str) -> None:
+        pid = str(passage_id or "").strip()
+        if not pid:
+            return
+        self._conn.execute(
+            "UPDATE passage SET image_paths=? WHERE passage_id=?",
+            (str(image_paths or ""), pid),
+        )
+        self._conn.commit()
+
+    def get_row(self, passage_id: str) -> dict | None:
+        pid = str(passage_id or "").strip()
+        if not pid:
+            return None
+        cur = self._conn.execute(
+            """
+            SELECT passage_id, t1_ms, t2_ms, length_m, speed_kmh, v_limit_kmh,
+                   overspeed, decision, hit_probe_mask, cps_json, peak_json,
+                   plate, plate_manual, image_paths, r2_on, invalid_reason,
+                   opened_at, closed_at, hard_alarm
+            FROM passage WHERE passage_id=?
+            """,
+            (pid,),
+        )
+        rec = cur.fetchone()
+        if not rec:
+            return None
+        cps = _json_list(rec[9])
+        peak = _json_list(rec[10]) or cps
+        return {
+            "passage_id": rec[0],
+            "t1_ms": rec[1],
+            "t2_ms": rec[2],
+            "length_m": rec[3],
+            "speed_kmh": rec[4],
+            "v_limit_kmh": rec[5],
+            "overspeed": bool(rec[6]),
+            "decision": int(rec[7] or 0),
+            "hit_probe_mask": int(rec[8] or 0),
+            "cps": cps,
+            "peak_cps": peak,
+            "trigger_cps": [],
+            "plate": rec[11] or "",
+            "plate_manual": rec[12] or "",
+            "image_paths": rec[13] or "",
+            "r2_on": bool(rec[14]),
+            "invalid_reason": rec[15] or "",
+            "opened_at": float(rec[16] or 0),
+            "closed_at": float(rec[17] or 0),
+            "hard_alarm": bool(rec[18]),
+        }
+
     def recent(self, limit: int = 8) -> list:
         """已结束的通行，新的在前。未出出口的本趟不在表里。"""
         cur = self._conn.execute(

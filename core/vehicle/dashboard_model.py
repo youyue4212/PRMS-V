@@ -5,9 +5,28 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from core.translation import _t
+from core.vehicle.evidence_assets import path_for_role
+
 HARD = (0x02, 0x03)
 ELEVATED = 0x01
 SYSTEM_FAULT = 0xFF
+
+FIELD_ORDER = (
+    "channel_status",
+    "plate",
+    "speed",
+    "speed_limit",
+    "overspeed",
+    "rad_hard",
+    "peak_cps",
+    "gamma_total",
+    "threshold_note",
+)
+
+
+def _em() -> str:
+    return _t("vdash_emdash")
 
 
 def _num_list(values) -> list:
@@ -31,20 +50,19 @@ def _totals(values) -> tuple:
     return total, peak
 
 
-def _hit_text(mask: int) -> str:
-    bits = [i for i in range(16) if int(mask or 0) & (1 << i)]
-    if not bits:
-        return "—"
-    return "探头" + "+".join(str(i + 1) for i in bits)
-
-
 def _speed_text(speed) -> str:
     if speed is None:
-        return "—"
+        return _em()
     try:
         return "%.1f" % float(speed)
     except (TypeError, ValueError):
-        return "—"
+        return _em()
+
+
+def _yes_no_unknown(yes: bool, known: bool) -> str:
+    if not known:
+        return _em()
+    return _t("vdash_yes") if yes else _t("vdash_no")
 
 
 def history_row(row: dict, lane: str = "03") -> dict:
@@ -63,23 +81,29 @@ def history_row(row: dict, lane: str = "03") -> dict:
     if when > 0:
         stamp = datetime.fromtimestamp(when).strftime("%Y-%m-%d %H:%M:%S")
     else:
-        stamp = "—"
+        stamp = _em()
     if invalid:
-        radiation = "—"
-        over_txt = "—"
-        result = "无效"
-        speed_txt = "—"
+        radiation = _em()
+        over_txt = _em()
+        result = _t("vhist_result_invalid")
+        speed_txt = _em()
+        result_kind = "invalid"
+        rad_kind = ""
     elif hard:
-        radiation = "硬报"
-        over_txt = "是" if overspeed else ("否" if speed is not None else "—")
-        result = "禁行"
+        radiation = _t("vhist_rad_hard")
+        over_txt = _yes_no_unknown(overspeed, speed is not None)
+        result = _t("vhist_result_deny")
         speed_txt = _speed_text(speed)
+        result_kind = "deny"
+        rad_kind = "hard"
     else:
-        radiation = "正常"
-        over_txt = "是" if overspeed else ("否" if speed is not None else "—")
-        result = "放行"
+        radiation = _t("vhist_rad_ok")
+        over_txt = _yes_no_unknown(overspeed, speed is not None)
+        result = _t("vhist_result_pass")
         speed_txt = _speed_text(speed)
-    plate = str(row.get("plate") or "").strip() or "—"
+        result_kind = "pass"
+        rad_kind = "ok"
+    plate = str(row.get("plate") or "").strip() or _em()
     return {
         "time": stamp,
         "lane": str(lane or "03"),
@@ -90,84 +114,143 @@ def history_row(row: dict, lane: str = "03") -> dict:
         "speed": speed_txt,
         "overspeed": over_txt,
         "result": result,
+        "result_kind": result_kind,
+        "rad_kind": rad_kind,
+        "overspeed_yes": overspeed and speed is not None,
     }
+
+
+def vehicle_probe_location(index: int, count: int) -> str:
+    side = _t("vprobe_side_left") if index % 2 == 0 else _t("vprobe_side_right")
+    if count <= 2:
+        return side
+    return _t("vprobe_side_row", side=side, row=index // 2 + 1)
+
+
+def _probe_slot(probe: dict, fallback: int) -> int:
+    try:
+        return int(probe.get("slot", fallback))
+    except (TypeError, ValueError):
+        return fallback
+
+
+def _probe_label_num(probe: dict, slot: int) -> int:
+    try:
+        n = int(probe.get("label_num", slot + 1))
+        return n if n > 0 else slot + 1
+    except (TypeError, ValueError):
+        return slot + 1
 
 
 def _probe_cards(probes, decision: int, hit_mask: int) -> list:
     cards = []
-    for i, probe in enumerate(list(probes or [])):
+    probes = list(probes or [])
+    probes.sort(key=lambda p: _probe_slot(p or {}, 0))
+    for i, probe in enumerate(probes):
         probe = probe or {}
+        slot = _probe_slot(probe, i)
+        label = _probe_label_num(probe, slot)
         location = str(probe.get("location") or "").strip()
         if not location:
-            location = "左侧" if i == 0 else ("右侧" if i == 1 else "")
+            location = vehicle_probe_location(slot, len(probes))
+        title = _t("vprobe_title", n=label)
+        meta = {
+            "slot": slot,
+            "label_num": label,
+            "client_id": probe.get("client_id"),
+        }
         if probe.get("absent"):
             cards.append({
-                "title": "探头 %d" % (i + 1),
+                "title": title,
                 "location": location,
                 "cps_text": "",
-                "status": "未接入",
+                "status": _t("vprobe_absent"),
+                "status_key": "absent",
                 "tone": "offline",
                 "show_cps": False,
+                **meta,
             })
             continue
         comm = bool(probe.get("comm_fault"))
         hv = bool(probe.get("hv_fault"))
         online = bool(probe.get("online", True))
-        hit = bool(int(hit_mask or 0) & (1 << i)) or bool(probe.get("hit"))
+        masked = bool(int(hit_mask or 0) & (1 << slot))
+        hit = masked or (bool(probe.get("hit")) and not hit_mask)
         cps = int(probe.get("cps") or 0)
         if comm or not online:
             cards.append({
-                "title": "探头 %d" % (i + 1),
+                "title": title,
                 "location": location,
                 "cps_text": "",
-                "status": "通信异常",
+                "status": _t("vprobe_comm_fault"),
+                "status_key": "comm",
                 "tone": "fault",
                 "show_cps": False,
+                **meta,
             })
             continue
         if hv:
-            status, tone = "高压偏离", "fault"
-        elif decision in HARD and hit:
-            status, tone = "报警", "alarm"
+            cards.append({
+                "title": title,
+                "location": location,
+                "cps_text": "",
+                "status": _t("vprobe_hv_fault"),
+                "status_key": "hv",
+                "tone": "fault",
+                "show_cps": False,
+                **meta,
+            })
+            continue
+        if decision in HARD and hit:
+            status, tone, sk = _t("vprobe_alarm"), "alarm", "alarm"
         elif decision == ELEVATED and hit:
-            status, tone = "偏高", "amber"
+            status, tone, sk = _t("vprobe_elevated"), "amber", "elevated"
         else:
-            status, tone = "正常", "ok"
+            status, tone, sk = _t("vprobe_ok"), "ok", "ok"
         cards.append({
-            "title": "探头 %d" % (i + 1),
+            "title": title,
             "location": location,
             "cps_text": str(cps),
             "status": status,
+            "status_key": sk,
             "tone": tone,
             "show_cps": True,
+            **meta,
         })
     return cards
 
 
 def _banner(decision: int, probes_view: list, master_online: bool, passage_open: bool) -> tuple:
     probe_fault = any(
-        card["tone"] == "fault" for card in probes_view if card["status"] != "未接入"
+        card.get("status_key") not in ("absent", None) and card.get("tone") == "fault"
+        for card in probes_view
     )
     if decision in HARD:
         tone = "alarm"
-        title = "辐射报警"
+        title = _t("vbanner_rad_alarm")
     elif decision == SYSTEM_FAULT or probe_fault:
         tone = "fault"
-        title = "系统故障"
+        title = _t("vbanner_sys_fault")
     elif decision == ELEVATED:
         tone = "amber"
-        title = "计数偏高"
+        title = _t("vbanner_elevated")
     else:
         tone = "ok"
-        title = "通道空闲"
-    chips = ["主控在线" if master_online else "主控离线"]
+        title = _t("vbanner_passing") if passage_open else _t("vbanner_idle")
+    chips = [
+        _t("vchip_master_online") if master_online else _t("vchip_master_offline"),
+    ]
     if tone == "ok":
-        chips.append("辐射正常")
+        chips.append(_t("vchip_rad_ok"))
     elif tone == "alarm":
         if passage_open:
-            chips.append("车辆经过")
-        chips.append("禁行")
+            chips.append(_t("vchip_passing"))
+        chips.append(_t("vchip_deny"))
     return title, tone, chips
+
+
+def _mk_field(fid: str, text: str, hint: str = "") -> dict:
+    return {"id": fid, "text": text, "hint": hint}
 
 
 def build_dashboard(
@@ -196,9 +279,9 @@ def build_dashboard(
     cards = _probe_cards(probes, decision, hit_mask)
     title, tone, chips = _banner(decision, cards, bool(master_online), passage is not None)
     if tone == "amber":
-        guide = "请停车复查，确认不是硬报后再放行"
+        guide = _t("vguide_elevated")
     elif tone == "fault":
-        guide = "这是设备故障，不是辐射报警。通信或高压要在设备侧恢复"
+        guide = _t("vguide_fault")
     else:
         guide = ""
     hard = decision in HARD
@@ -210,19 +293,25 @@ def build_dashboard(
     speed = getattr(passage, "speed_kmh", None) if passage is not None else None
 
     if passage is None:
-        channel = "空闲"
-        speed_txt = "—"
-        over_txt = "—"
+        channel_txt = _t("vval_channel_idle")
+        channel_hint = "idle"
+        speed_txt = _em()
+        over_txt = _em()
+        over_hint = ""
         capture = "wait"
     elif waiting or speed is None:
-        channel = "车辆经过"
-        speed_txt = "等待出口"
-        over_txt = "—"
+        channel_txt = _t("vval_channel_passing")
+        channel_hint = "passing"
+        speed_txt = _t("vval_wait_exit")
+        over_txt = _em()
+        over_hint = ""
         capture = "plate" if plate else "manual"
     else:
-        channel = "车辆经过"
+        channel_txt = _t("vval_channel_passing")
+        channel_hint = "passing"
         speed_txt = _speed_text(speed)
-        over_txt = "是" if bool(getattr(passage, "overspeed", False)) else "否"
+        over_txt = _yes_no_unknown(bool(getattr(passage, "overspeed", False)), True)
+        over_hint = "yes" if bool(getattr(passage, "overspeed", False)) else "no"
         capture = "plate" if plate else "manual"
 
     live_nums = []
@@ -236,19 +325,46 @@ def build_dashboard(
         ]
     total, peak = _totals(live_nums) if passage is not None else (0, 0)
 
+    plate_txt = plate if plate else _t("vval_plate_manual")
+    rad_txt = _t("vdash_yes") if hard else _t("vval_rad_none")
+    rad_hint = "yes" if hard else "no"
+
     fields = [
-        ("通道状态", channel),
-        ("车牌", plate if plate else "— 可手补"),
-        ("车速", speed_txt),
-        ("限速", "%.0f km/h" % float(v_limit or 0)),
-        ("超速", over_txt),
-        ("辐射硬报", "是" if hard else "无"),
-        ("峰值CPS", str(peak) if passage is not None else "—"),
-        ("γ总计", str(total) if passage is not None else "—"),
-        ("命中掩码", _hit_text(hit_mask) if (hard or decision == ELEVATED) else "—"),
+        _mk_field("channel_status", channel_txt, channel_hint),
+        _mk_field("plate", plate_txt),
+        _mk_field("speed", speed_txt),
+        _mk_field("speed_limit", _t("vval_speed_limit", v=int(v_limit or 0))),
+        _mk_field("overspeed", over_txt, over_hint),
+        _mk_field("rad_hard", rad_txt, rad_hint),
+        _mk_field("peak_cps", str(peak) if passage is not None else _em()),
+        _mk_field("gamma_total", str(total) if passage is not None else _em()),
     ]
+    alarm_image = ""
+    if hard and passage is not None:
+        raw_paths = str(getattr(passage, "image_paths", "") or "")
+        alarm_image = (
+            path_for_role(raw_paths, "alarm")
+            or path_for_role(raw_paths, "exit")
+            or path_for_role(raw_paths, "entry")
+        )
+
     if hard:
-        fields.append(("阈值说明", "动态阈值"))
+        fields.append(_mk_field("threshold_note", _t("vval_threshold_dyn")))
+        keep = (
+            "rad_hard", "peak_cps", "threshold_note",
+            "channel_status", "plate", "speed", "speed_limit", "overspeed",
+        )
+        fields = [f for f in fields if f["id"] in keep]
+        priority = {n: i for i, n in enumerate(keep)}
+        fields.sort(key=lambda f: priority.get(f["id"], 99))
+    elif decision == ELEVATED:
+        keep = (
+            "channel_status", "plate", "rad_hard", "peak_cps", "gamma_total",
+            "speed", "speed_limit", "overspeed",
+        )
+        fields = [f for f in fields if f["id"] in keep]
+        priority = {n: i for i, n in enumerate(keep)}
+        fields.sort(key=lambda f: priority.get(f["id"], 99))
 
     rows = []
     for item in list(history or []):
@@ -267,6 +383,7 @@ def build_dashboard(
         "show_reset": hard,
         "lane": str(lane or "03"),
         "capture": capture,
+        "alarm_image": alarm_image,
         "plate": plate,
         "probes": cards,
         "fields": fields,

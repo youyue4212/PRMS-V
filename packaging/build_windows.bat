@@ -29,7 +29,7 @@ call .venv_pack\Scripts\activate.bat
 
 python -m pip install -U pip wheel
 REM PyInstaller 6.15 起才支持 Python 3.14
-pip install "pyinstaller>=6.16" PyQt5 PyQtWebEngine pyqtgraph numpy pandas pyserial openpyxl psutil scipy
+pip install "pyinstaller>=6.16" PyQt5 PyQtWebEngine pyqtgraph numpy pandas pyserial openpyxl psutil scipy opencv-python
 
 echo.
 echo [1/4] 结束可能占用 dist 的进程 ...
@@ -125,6 +125,16 @@ set "PYDLL="
 for %%D in (python314.dll python313.dll python312.dll python311.dll python310.dll) do (
     if exist "%INTERNAL%\%%D" set "PYDLL=%%D"
 )
+python -c "import cv2; print('[ok] opencv', cv2.__version__)" 2>nul
+if errorlevel 1 (
+    echo [警告] 打包环境未 import cv2，车辆 RTSP 预览将不可用。请确认 pip 已安装 opencv-python 后重新打包。
+)
+set "CV2_FFMPEG="
+for %%F in ("%INTERNAL%\opencv_videoio_ffmpeg*.dll") do set "CV2_FFMPEG=1"
+if not defined CV2_FFMPEG (
+    echo [提示] _internal 中未找到 opencv_videoio_ffmpeg*.dll；若 RTSP 连不上，请重装 opencv-python 并重新打包。
+)
+
 if not defined PYDLL (
     echo [错误] 在下列目录的 _internal 中未找到 python3xx.dll：
     echo   %INTERNAL%

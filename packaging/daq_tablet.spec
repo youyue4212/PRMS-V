@@ -3,7 +3,7 @@
 import os
 import sys
 
-from PyInstaller.utils.hooks import collect_data_files, collect_submodules
+from PyInstaller.utils.hooks import collect_all, collect_data_files, collect_submodules
 
 block_cipher = None
 
@@ -63,11 +63,34 @@ hiddenimports = [
     "core.user_management_dialog",
     "core.user_manager",
     "core.utils",
+    "core.vehicle_dashboard_page",
+    "core.vehicle.rtsp_preview",
+    "core.vehicle.rtsp_url",
+    "core.vehicle.hik_isapi",
+    "core.vehicle.camera_service",
+    "core.vehicle.alarm_clip_recorder",
+    "core.vehicle.evidence_export",
+    "core.vehicle.evidence_assets",
+    "cv2",
 ]
 try:
     hiddenimports += collect_submodules("core")
 except Exception:
     pass
+
+binaries = []
+try:
+    cv2_datas, cv2_binaries, cv2_hidden = collect_all("cv2")
+    datas_pre = []
+    datas_pre += cv2_datas
+    binaries += cv2_binaries
+    hiddenimports += cv2_hidden
+except Exception as exc:
+    raise SystemExit(
+        "打包需要 opencv-python（车辆 RTSP 预览）。"
+        " 请在 .venv_pack 中执行: pip install opencv-python\n"
+        " 详情: %s" % exc
+    )
 
 datas = [
     (os.path.join(app_dir, "hmi_web"), "hmi_web"),
@@ -76,6 +99,10 @@ datas = [
 try:
     datas += collect_data_files("pyqtgraph")
 except Exception:
+    pass
+try:
+    datas += datas_pre
+except NameError:
     pass
 
 # UPX 压缩 python3xx.dll / VCRUNTIME 后，Windows LoadLibrary 常报
@@ -94,7 +121,7 @@ upx_exclude = [
 a = Analysis(
     [os.path.join(app_dir, "main.py")],
     pathex=[app_dir],
-    binaries=[],
+    binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],

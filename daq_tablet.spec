@@ -1,38 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
+# 请勿直接使用本文件打包（空模板/历史产物）。
+# 正式打包请运行: packaging\build_windows.bat 或 packaging/build_linux.sh
+# 配置见: packaging/daq_tablet.spec
 
-
-a = Analysis(
-    ['main.py'],
-    pathex=[],
-    binaries=[],
-    datas=[],
-    hiddenimports=[],
-    hookspath=[],
-    hooksconfig={},
-    runtime_hooks=[],
-    excludes=[],
-    noarchive=False,
-    optimize=0,
-)
-pyz = PYZ(a.pure)
-
-exe = EXE(
-    pyz,
-    a.scripts,
-    a.binaries,
-    a.datas,
-    [],
-    name='daq_tablet',
-    debug=False,
-    bootloader_ignore_signals=False,
-    strip=False,
-    upx=True,
-    upx_exclude=[],
-    runtime_tmpdir=None,
-    console=False,
-    disable_windowed_traceback=False,
-    argv_emulation=False,
-    target_arch=None,
-    codesign_identity=None,
-    entitlements_file=None,
-)
+raise SystemExit("请使用 packaging/build_windows.bat 或 packaging/build_linux.sh 打包。")

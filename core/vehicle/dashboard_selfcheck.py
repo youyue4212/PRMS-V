@@ -22,16 +22,19 @@ class _Pkt:
         self.hit_probe_mask = hit
 
 
-def _probes(cps, hit_flags=()):
+def _probes(cps, hit_flags=(), slots=()):
     out = []
     for i, value in enumerate(cps):
+        slot = slots[i] if i < len(slots) else i
         out.append({
-            "location": "左侧" if i == 0 else "右侧",
+            "slot": slot,
+            "label_num": slot + 1,
+            "location": "左侧" if slot == 0 else "右侧",
             "cps": value,
             "online": True,
             "comm_fault": False,
             "hv_fault": False,
-            "hit": i in hit_flags,
+            "hit": slot in hit_flags,
         })
     return out
 
@@ -48,7 +51,23 @@ def _check(name, cond):
         raise SystemExit("FAIL " + name)
 
 
+def _check_online_debounce():
+    from core.probe_online_hold import PROBE_OFFLINE_HOLD_SEC, debounce_probe_online
+
+    hold = {}
+    t0 = 1_000.0
+    _check("debounce online", debounce_probe_online(hold, 0, True, 50, t0) is True)
+    hold[0]["last"] = (50, True, False)
+    _check("debounce hold", debounce_probe_online(hold, 0, False, 0, t0 + 0.2) is True)
+    _check(
+        "debounce drop",
+        debounce_probe_online(hold, 0, False, 0, t0 + PROBE_OFFLINE_HOLD_SEC + 0.3) is False,
+    )
+    _check("debounce slot keys", 0 in hold and 1 not in hold)
+
+
 def main():
+    _check_online_debounce()
     idle = build_dashboard(_Pkt(0x00), _probes([342, 298]), None, [], True, "03", 8)
     _check("idle banner", idle["banner"] == "通道空闲" and idle["banner_tone"] == "ok")
     _check("idle chips", idle["chips"] == ["主控在线", "辐射正常"])
@@ -92,8 +111,19 @@ def main():
     _check("alarm chips", "禁行" in alarm["chips"] and "车辆经过" in alarm["chips"])
     _check("alarm reset", alarm["show_reset"] is True)
     _check("alarm speed", _field(alarm, "车速") == "等待出口")
-    _check("alarm total", _field(alarm, "γ总计") == "2829" and _field(alarm, "峰值CPS") == "1542")
-    _check("alarm hit", _field(alarm, "命中掩码") == "探头1+2")
+    _check("alarm peak", _field(alarm, "峰值CPS") == "1542")
+    _check("alarm no gamma row", all(n != "γ总计" for n, _ in alarm["fields"]))
+    _check("alarm no hit mask ui", all(n != "命中掩码" for n, _ in alarm["fields"]))
+    swapped = build_dashboard(
+        _Pkt(0x03, 0x2),
+        [
+            {"slot": 1, "label_num": 2, "location": "右侧", "cps": 1542, "online": True},
+            {"slot": 0, "label_num": 1, "location": "左侧", "cps": 100, "online": True},
+        ],
+        None, [], True, "03", 8,
+    )
+    _check("hit follows l2 slot", swapped["probes"][0]["title"] == "探头 1" and swapped["probes"][0]["status"] == "正常")
+    _check("hit follows l2 slot 2", swapped["probes"][1]["title"] == "探头 2" and swapped["probes"][1]["status"] == "报警")
     _check("alarm open not in history", all(r["plate"] != "SHOULD-SKIP" for r in alarm["history"]))
     invalid = history_row({"invalid_reason": "timeout", "speed_kmh": 21, "overspeed": True, "closed_at": 9})
     _check("timeout not pass", invalid["result"] == "无效" and invalid["overspeed"] == "—" and invalid["radiation"] == "—")
@@ -114,13 +144,13 @@ def main():
     _check("elevated no reset", soft["show_reset"] is False)
     _check("elevated speed", _field(soft, "车速") == "等待出口" and _field(soft, "辐射硬报") == "无")
     _check("elevated numbers", _field(soft, "峰值CPS") == "890" and _field(soft, "γ总计") == "1650")
-    _check("elevated hit", _field(soft, "命中掩码") == "探头1+2")
+    _check("elevated no hit mask ui", all(n != "命中掩码" for n, _ in soft["fields"]))
     _check("elevated plate", soft["plate"] == "京A·D12345")
     _check("live totals not copied into history", all(r["total"] != "1650" for r in soft["history"]))
 
     fault_probes = [
-        {"location": "左侧", "cps": 342, "online": False, "comm_fault": True, "hv_fault": False},
-        {"location": "右侧", "cps": 298, "online": True, "comm_fault": False, "hv_fault": True},
+        {"slot": 0, "label_num": 1, "location": "左侧", "cps": 342, "online": False, "comm_fault": True, "hv_fault": False},
+        {"slot": 1, "label_num": 2, "location": "右侧", "cps": 298, "online": True, "comm_fault": False, "hv_fault": True},
     ]
     fault = build_dashboard(_Pkt(0x00), fault_probes, None, [], True, "03", 8)
     _check("fault banner", fault["banner"] == "系统故障")
@@ -128,7 +158,7 @@ def main():
     _check("fault no reset", fault["show_reset"] is False and "禁行" not in fault["chips"])
     _check("fault hard none", _field(fault, "辐射硬报") == "无")
     _check("fault comm hides cps", fault["probes"][0]["status"] == "通信异常" and fault["probes"][0]["show_cps"] is False)
-    _check("fault hv", fault["probes"][1]["status"] == "高压偏离" and fault["probes"][1]["show_cps"] is True)
+    _check("fault hv", fault["probes"][1]["status"] == "高压偏离" and fault["probes"][1]["show_cps"] is False)
     _check("fault idle channel", _field(fault, "通道状态") == "空闲")
     _check("elevated guide", "停车复查" in soft["guide"] and soft["show_diagnose"] is False)
     _check("fault guide", "不是辐射报警" in fault["guide"] and fault["show_diagnose"] is True)
@@ -183,7 +213,7 @@ def main():
     _check("qt ban chip", any(isinstance(w, QLabel) and w.text() == "禁行" for i in range(page.chip_host.count()) for w in [page.chip_host.itemAt(i).widget()]))
     _check("qt threshold", page._field_keys["阈值说明"].isVisible() is True)
     _check("qt alarm keeps plate", page._field_rows["车牌"].isVisible() is True)
-    _check("qt alarm keeps total", page._field_rows["γ总计"].isVisible() is True)
+    _check("qt alarm hides gamma", page._field_rows["γ总计"].isVisible() is False)
     _check("qt reset gray", page.reset_btn.isEnabled() is False)
     headers = [page.history.horizontalHeaderItem(c).text() for c in range(page.history.columnCount())]
     _check(
@@ -193,17 +223,16 @@ def main():
     page.apply_model(fault)
     app.processEvents()
     _check("qt fault", page.banner_label.text() == "系统故障" and page.reset_btn.isVisible() is False)
-    _check("qt comm word", page._cards[0].status.text() == "通信异常" and page._cards[0].cps.text() == "")
-    _check("qt hv word", page._cards[1].cps.text() == "298" and page._cards[1].status.text() == "高压偏离" and page._cards[1].unit.isVisible())
+    comm_card, hv_card = page._cards[0], page._cards[1]
+    _check("qt comm word", comm_card.cps.text() == "通信异常" and comm_card.status.text() == "查链路" and comm_card.unit.isHidden())
+    _check("qt hv word", hv_card.cps.text() == "高压偏离" and hv_card.status.text() == "等高压恢复" and hv_card.unit.isHidden())
+    _check("qt fault same size", comm_card.cps.styleSheet() == hv_card.cps.styleSheet())
     _check("qt fault wrench", page.status_icon.isVisible() is True)
     _check("qt empty history", page.history.rowCount() == 1 and page.history.item(0, 0).text() == "暂无通行记录")
-    hv0 = build_dashboard(_Pkt(0x00), [
-        {"location": "左侧", "cps": 586, "online": True, "comm_fault": False, "hv_fault": False},
-        {"location": "右侧", "cps": 0, "online": True, "comm_fault": False, "hv_fault": True},
-    ], None, [], True, "03", 8)
-    page.apply_model(hv0)
-    app.processEvents()
-    _check("qt hv zero dash", page._cards[1].cps.text() == "—" and page._cards[1].unit.isHidden())
+    bare = build_dashboard(_Pkt(0), [{"cps": 1}, {"cps": 2}], None, [], True, "03", 8)
+    _check("loc two", [c["location"] for c in bare["probes"]] == ["左侧", "右侧"])
+    bare4 = build_dashboard(_Pkt(0), [{"cps": 1}] * 4, None, [], True, "03", 8)
+    _check("loc four", [c["location"] for c in bare4["probes"]] == ["左侧 · 1", "右侧 · 1", "左侧 · 2", "右侧 · 2"])
     page.apply_model(build_dashboard(_Pkt(0), _probes([342] * 8), None, [], True, "03", 8))
     app.processEvents()
     _check("qt eight compact", all(c._compact for c in page._cards[:8]) and page._cards[7].isVisible())
@@ -219,7 +248,7 @@ def main():
     _check("qt recheck", page.recheck_btn.isVisible() is True and page.reset_btn.isVisible() is False)
     page.apply_model(idle)
     app.processEvents()
-    _check("qt idle", page.banner_label.text() == "通道空闲" and page.capture.text() == "等待过车")
+    _check("qt idle", page.banner_label.text() == "通道空闲" and page.capture.center_text() == "等待过车")
     _check("qt login", page.banner.login_btn.text() == "登录")
     page.set_session(True, "admin")
     _check("qt session", page.banner.login_btn.text() == "退出" and page.banner.session_label.text() == "admin")

@@ -664,19 +664,16 @@ class BottomNavBar(QWidget):
         self.setMinimumHeight(self._bar_height)
         self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         icon_size = 22 if self._desktop_compact else 28
-        nav_font = 13
-        if self._desktop_compact:
-            from core.ui_tokens import CR_CHROME_FONT_PX
-            nav_font = CR_CHROME_FONT_PX
+        nav_font = self._nav_font_px()
+        nav_font_obj = QFont(FONTS["tip"][0])
+        nav_font_obj.setPixelSize(nav_font)
         for container in self.button_widgets:
             container.setFixedHeight(self._bar_height)
             container.setMinimumHeight(self._bar_height)
             if hasattr(container, "icon_widget"):
                 container.icon_widget.setFixedSize(icon_size, icon_size)
             if hasattr(container, "text_label"):
-                container.text_label.setStyleSheet(
-                    f"color: #cccccc; background: transparent; border: none; font-size: {nav_font}px;"
-                )
+                container.text_label.setFont(nav_font_obj)
             inner = getattr(container, "_inner_layout", None)
             if inner is not None and self._desktop_compact:
                 inner.setContentsMargins(0, 4, 0, 4)
@@ -729,7 +726,7 @@ class BottomNavBar(QWidget):
         # Create text label
         text_label = QLabel(text)
         text_label.setAlignment(Qt.AlignCenter)
-        text_font = QFont(FONTS["tip"][0], 11)
+        text_font = QFont(FONTS["tip"][0], self._nav_font_px())
         text_label.setFont(text_font)
         
         layout.addLayout(icon_layout)
@@ -786,10 +783,10 @@ class BottomNavBar(QWidget):
                 btn.raise_()
     
     def _nav_font_px(self):
+        from core.ui_tokens import NAV_BAR_FONT_PX, NAV_BAR_FONT_PX_CR
         if getattr(self, "_desktop_compact", False):
-            from core.ui_tokens import CR_CHROME_FONT_PX
-            return CR_CHROME_FONT_PX
-        return 11
+            return NAV_BAR_FONT_PX_CR
+        return NAV_BAR_FONT_PX
 
     def _apply_active_style(self, container, icon_tag, color):
         """Apply active style to button with custom color"""

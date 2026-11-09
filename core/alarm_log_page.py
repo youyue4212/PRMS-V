@@ -9,6 +9,7 @@ from datetime import datetime
 from typing import List
 
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal
+from PyQt5.QtGui import QFont, QFontMetrics
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame,
     QTableWidget, QTableWidgetItem, QHeaderView, QGroupBox,
@@ -272,29 +273,6 @@ class AlarmLogPage(QWidget):
 
         # Tabs: 辐射报警 vs 系统/通信（工业分层，不混字段）
         self.log_tabs = QTabWidget()
-        self.log_tabs.setStyleSheet("""
-            QTabWidget::pane {
-                border: 1px solid #333333;
-                border-radius: 8px;
-                background: #1a1a1a;
-                top: -1px;
-            }
-            QTabBar::tab {
-                background: #2a2a2a;
-                color: #bbbbbb;
-                padding: 10px 18px;
-                margin-right: 4px;
-                border-top-left-radius: 8px;
-                border-top-right-radius: 8px;
-                font-size: 13px;
-                font-weight: bold;
-            }
-            QTabBar::tab:selected {
-                background: #3a3a3a;
-                color: #ffffff;
-                border-bottom: 2px solid #26c6da;
-            }
-        """)
         self.log_tabs.currentChanged.connect(self._on_log_tab_changed)
 
         self.table_widget = self._make_log_table(system=False)
@@ -313,6 +291,7 @@ class AlarmLogPage(QWidget):
         sys_scroll = self._wrap_table_scroll(self.system_table_widget)
         sys_lay.addWidget(sys_scroll)
         self.log_tabs.addTab(sys_page, _t("log_tab_system"))
+        self._apply_log_tab_chrome()
 
         layout.addWidget(self.log_tabs, 1)
 
@@ -320,6 +299,64 @@ class AlarmLogPage(QWidget):
 
         # Initial refresh
         self.refresh_display()
+
+    def _apply_log_tab_chrome(self):
+        """Tab 宽度随当前语言文案计算，避免英文被 QTabBar 挤裁切。"""
+        from core.translation import _t
+
+        bar = self.log_tabs.tabBar()
+        bar.setExpanding(False)
+        bar.setUsesScrollButtons(True)
+        bar.setElideMode(Qt.ElideNone)
+        bar.setDocumentMode(False)
+
+        px = 13
+        mw = getattr(self, "main_window", None)
+        if mw is not None and getattr(mw, "control_room_mode", False):
+            from core.ui_tokens import CR_CHROME_FONT_PX
+            px = max(px, int(CR_CHROME_FONT_PX))
+
+        font = QFont("Microsoft YaHei")
+        font.setPixelSize(px)
+        font.setBold(True)
+        bar.setFont(font)
+        fm = QFontMetrics(font)
+        pad = 52
+        min_w = max(
+            fm.horizontalAdvance(_t("log_tab_radiation")),
+            fm.horizontalAdvance(_t("log_tab_system")),
+        ) + pad
+
+        self.log_tabs.setStyleSheet(
+            """
+            QTabWidget::pane {
+                border: 1px solid #333333;
+                border-radius: 8px;
+                background: #1a1a1a;
+                top: -1px;
+            }
+            QTabBar::tab {
+                background: #2a2a2a;
+                color: #bbbbbb;
+                min-width: %dpx;
+                padding: 10px 22px;
+                margin-right: 6px;
+                border-top-left-radius: 8px;
+                border-top-right-radius: 8px;
+                font-size: %dpx;
+                font-weight: bold;
+            }
+            QTabBar::tab:selected {
+                background: #3a3a3a;
+                color: #ffffff;
+                border-bottom: 2px solid #26c6da;
+            }
+            QTabBar::scroller {
+                width: 22px;
+            }
+            """
+            % (min_w, px)
+        )
 
     def _make_log_table(self, system: bool = False) -> QTableWidget:
         from core.translation import _t
@@ -990,6 +1027,7 @@ class AlarmLogPage(QWidget):
         if hasattr(self, "log_tabs"):
             self.log_tabs.setTabText(0, _t("log_tab_radiation"))
             self.log_tabs.setTabText(1, _t("log_tab_system"))
+            self._apply_log_tab_chrome()
 
         if hasattr(self, "table_widget"):
             self.table_widget.setHorizontalHeaderLabels([

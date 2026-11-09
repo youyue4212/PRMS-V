@@ -44,6 +44,9 @@ def cr_cps_px(n: int) -> int:
 CR_CHROME_H = cr_px(30)
 CR_CHROME_FONT_PX = cr_px(12)
 CR_STATUS_BAR_H = cr_px(36)
+# 底部导航文字（平板 / 主控室）
+NAV_BAR_FONT_PX = 14
+NAV_BAR_FONT_PX_CR = cr_px(14)
 
 
 def cps_digit_scale(text) -> float:

@@ -111,21 +111,28 @@ class MainWindow(QMainWindow, UIBase):
         self.control_room_mode = (
             str(getattr(self.config, "ui_mode", "tablet") or "tablet").lower() == "control_room"
         )
+
+        from core.translation import TranslationManager, _t
+        saved_lang = str(getattr(self.config, "language", "zh") or "zh")
+        if saved_lang in ("zh", "en"):
+            TranslationManager().set_language(saved_lang)
         
         # Set window title based on user role
-        from core.translation import _t
         if current_user and 'username' in current_user:
             username = current_user['username']
             role_name = self._window_role_name(current_user['role'])
             self.setWindowTitle(f"Gamma-ray Spectrometer - {username} ({role_name})")
         else:
-            if self.control_room_mode:
-                from core.app_version import software_version_short
-                self.setWindowTitle(
-                    "%s · %s" % (_t("control_room_title"), software_version_short())
-                )
+            from core.app_version import software_version_short
+            if getattr(self.config, "vehicle_channel", False):
+                title_key = "vehicle_window_title"
+            elif self.control_room_mode:
+                title_key = "control_room_title"
             else:
-                self.setWindowTitle(_t("home_title"))
+                title_key = "home_title"
+            self.setWindowTitle(
+                "%s · %s" % (_t(title_key), software_version_short())
+            )
         
         # 设置窗口初始大小，但不固定，允许外部控制全屏或调整大小
         if self.control_room_mode:
@@ -199,8 +206,10 @@ class MainWindow(QMainWindow, UIBase):
         self.vehicle_page.plate_edited.connect(self._on_vehicle_plate)
         self.vehicle_page.login_requested.connect(lambda: self.login(preferred_page=0))
         self.vehicle_page.logout_requested.connect(self.logout)
+        self.vehicle_page.probe_requested.connect(self._on_vehicle_probe_open)
         self.vehicle_page.hide()
         self.vehicle_page.setParent(self._shell_stash)
+        self._sync_vehicle_rtsp()
         self._apply_vehicle_shell()
 
         # 各页内容（尤其设置页）高度可能超过屏幕；禁止把底栏顶出去。
@@ -434,7 +443,12 @@ class MainWindow(QMainWindow, UIBase):
                 page.retranslate_ui()
         if hasattr(self.bottom_nav, "retranslate_ui"):
             self.bottom_nav.retranslate_ui()
-        self._apply_control_room_nav_labels()
+        self._apply_primary_nav_label()
+        vp0 = getattr(self, "vehicle_page", None)
+        if vp0 is not None and hasattr(vp0, "retranslate_ui"):
+            vp0.retranslate_ui()
+        if getattr(self.config, "vehicle_channel", False):
+            self._flush_vehicle_dashboard()
         if hasattr(self, "refresh_software_version_labels"):
             self.refresh_software_version_labels()
         # 冷启动：无主控时占用区显示「未接入主控」，避免默认「通道空闲/主控离线」
@@ -1060,6 +1074,42 @@ class MainWindow(QMainWindow, UIBase):
             })
         return entries, total
 
+    def _client_id_for_l2_slot(self, slot) -> Optional[str]:
+        """Resolve TCP client_id for a master L2 slot (0-based), independent of home tile order."""
+        try:
+            slot = int(slot)
+        except (TypeError, ValueError):
+            return None
+        page = getattr(self, "home_page", None)
+        if page is not None:
+            for e in getattr(page, "_probe_entries", []) or []:
+                try:
+                    ls = e.get("l2_slot")
+                    ls = int(ls) if ls is not None else None
+                except (TypeError, ValueError):
+                    ls = None
+                if ls == slot:
+                    cid = str(e.get("client_id") or "").strip()
+                    if cid:
+                        return cid
+        if hasattr(self, "_client_l2_slot_index"):
+            for cid in list(getattr(self, "client_data", {}) or {}):
+                try:
+                    if self._client_l2_slot_index(str(cid)) == slot:
+                        return str(cid).strip() or None
+                except Exception:
+                    continue
+        return None
+
+    def _on_vehicle_probe_open(self, slot_index, client_id):
+        """车辆页点探头卡：与 home_page._on_js_probe 相同，优先 client_id，不用列表下标。"""
+        if hasattr(self, "is_logged_in") and not self.is_logged_in():
+            return
+        cid = str(client_id or "").strip() or None
+        if not cid:
+            cid = self._client_id_for_l2_slot(slot_index)
+        self.open_probe_overview(cid, slot_index=None)
+
     def open_probe_overview(self, client_id=None, slot_index=None):
         """主页点探头卡：选中该探头并跳到实时概览。"""
         if not client_id:
@@ -1361,14 +1411,19 @@ class MainWindow(QMainWindow, UIBase):
             return
         self.open_probe_overview(client_id)
 
-    def _apply_control_room_nav_labels(self):
-        if not getattr(self, "control_room_mode", False):
-            return
+    def _apply_primary_nav_label(self):
+        """首页底栏第 1 项：车辆通道=车辆监测，主控室=总览，否则=主显示/Home。"""
         if not hasattr(self, "bottom_nav") or not self.bottom_nav.button_widgets:
             return
         from core.translation import _t
+        if getattr(self.config, "vehicle_channel", False):
+            text = _t("nav_vehicle")
+        elif getattr(self, "control_room_mode", False):
+            text = _t("nav_control_room")
+        else:
+            text = _t("nav_home")
         widget = self.bottom_nav.button_widgets[0]
-        widget.text_label.setText(_t("nav_control_room"))
+        widget.text_label.setText(text)
         if getattr(self.bottom_nav, "_active_index", -1) == 0:
             self.bottom_nav._apply_active_style(widget, widget.icon_tag, widget.theme_color)
         else:
@@ -2238,6 +2293,20 @@ class MainWindow(QMainWindow, UIBase):
             self._refresh_control_room_snapshot()
         self._refresh_vehicle_dashboard()
 
+    def _sync_vehicle_rtsp(self):
+        page = getattr(self, "vehicle_page", None)
+        if page is None or not hasattr(page, "apply_rtsp_config"):
+            return
+        url = str(getattr(self.config, "vehicle_rtsp_url", "") or "")
+        page.apply_rtsp_config(url)
+        if hasattr(self, "_sync_vehicle_camera_config"):
+            self._sync_vehicle_camera_config()
+        if getattr(self.config, "vehicle_channel", False) and hasattr(self, "_ensure_vehicle_camera"):
+            try:
+                self._ensure_vehicle_camera().sync_rtsp_buffer(url)
+            except Exception:
+                pass
+
     def _apply_vehicle_shell(self):
         """车辆通道打开时，主显示换成图1至图4；关掉后回到人员通道主页。"""
         page = getattr(self, "vehicle_page", None)
@@ -2247,6 +2316,7 @@ class MainWindow(QMainWindow, UIBase):
             return
         want = bool(getattr(self.config, "vehicle_channel", False))
         target = page if want else home
+        self._sync_vehicle_rtsp()
         if stack.widget(0) is target:
             return
         current = stack.currentWidget()
@@ -2266,7 +2336,22 @@ class MainWindow(QMainWindow, UIBase):
         lane = str(getattr(self.config, "archive_machine_id", "") or "").strip()
         return lane or "03"
 
+    def _vehicle_custom_location(self, index: int) -> str:
+        """Operator-typed slot label; stock portal labels (左侧 · 上…) yield '' so the vehicle default applies."""
+        try:
+            locs = list(getattr(self.config, "probe_slot_locations", None) or [])
+            raw = str(locs[index] or "").strip() if index < len(locs) else ""
+            from core.translation import stock_probe_location_index
+            if not raw or stock_probe_location_index(raw) >= 0:
+                return ""
+            return raw
+        except Exception:
+            return ""
+
     def _vehicle_dashboard_probes(self) -> list:
+        """One row per L2 slot (站号 1 → slot 0), not TCP/display list order."""
+        from core.vehicle.dashboard_model import vehicle_probe_location
+
         entries = list(getattr(getattr(self, "home_page", None), "_probe_entries", []) or [])
         hv = set()
         comm = set()
@@ -2283,7 +2368,6 @@ class MainWindow(QMainWindow, UIBase):
                         comm.add(cid)
             except Exception:
                 pass
-        cards = []
         try:
             expect = int(getattr(self.config, "expected_probe_count", 2) or 0)
         except (TypeError, ValueError):
@@ -2291,32 +2375,89 @@ class MainWindow(QMainWindow, UIBase):
         if expect <= 0:
             expect = 2
         expect = max(1, min(expect, 16))
-        if not entries:
-            return [{
-                "absent": True,
-                "location": "",
-                "cps": 0,
-                "online": False,
-                "comm_fault": False,
-                "hv_fault": False,
-                "hit": False,
-            } for _ in range(expect)]
-        for e in entries[:16]:
+
+        by_slot = {}
+        for i, e in enumerate(entries[:16]):
+            slot = e.get("l2_slot")
+            try:
+                slot = int(slot) if slot is not None else None
+            except (TypeError, ValueError):
+                slot = None
             cid = str(e.get("client_id") or "").strip()
-            online = bool(e.get("online"))
-            absent = (not cid) and (not online)
+            if slot is None and cid and hasattr(self, "_client_l2_slot_index"):
+                slot = self._client_l2_slot_index(cid)
+            if slot is None:
+                try:
+                    slot = int(e.get("slot_id")) if e.get("slot_id") is not None else i
+                except (TypeError, ValueError):
+                    slot = i
+            if 0 <= slot < 16 and slot not in by_slot:
+                by_slot[slot] = e
+
+        from core.probe_online_hold import debounce_probe_online
+
+        packet = getattr(self, "latest_master_summary", None)
+        probe_cps = list(getattr(packet, "probe_cps", None) or []) if packet is not None else []
+        online_mask = int(getattr(packet, "online_mask", 0) or 0) if packet is not None else 0
+        hp = getattr(self, "home_page", None)
+        tile_hold = getattr(hp, "_tile_hold", None) if hp is not None else None
+        now = time.time()
+
+        cards = []
+        for slot in range(expect):
+            e = by_slot.get(slot) or {}
+            cid = str(e.get("client_id") or "").strip()
+            absent = (not cid) and not bool(e.get("online"))
+            if packet is not None and slot < len(probe_cps):
+                cps = int(probe_cps[slot] or 0)
+                raw_online = bool(online_mask & (1 << slot))
+                if tile_hold is not None:
+                    online = debounce_probe_online(tile_hold, slot, raw_online, cps, now)
+                    st = tile_hold.get(slot) or {}
+                    if not raw_online and online and st.get("last"):
+                        cps = int(st["last"][0])
+                else:
+                    online = raw_online
+                if tile_hold is not None:
+                    st = tile_hold.setdefault(slot, {"offline_since": None, "last": None})
+                    st["last"] = (cps, online, bool(e.get("hit")))
+                if cid or online or cps > 0 or raw_online:
+                    absent = False
+            else:
+                cps = int(e.get("cps") or 0)
+                online = bool(e.get("online")) if e else False
+            loc = self._vehicle_custom_location(slot)
+            if not loc:
+                loc = vehicle_probe_location(slot, expect)
+            # 通信异常：跟防抖后的离线一致，避免 L2 online_mask 闪 bit 误报
+            comm_fault = (not absent) and not online
             cards.append({
                 "absent": absent,
-                "location": e.get("location") or "",
-                "cps": int(e.get("cps") or 0),
+                "slot": slot,
+                "label_num": slot + 1,
+                "location": loc,
+                "cps": cps,
                 "online": online,
-                "comm_fault": (not absent) and (cid in comm or not online),
+                "comm_fault": comm_fault,
                 "hv_fault": (not absent) and cid in hv and online,
-                "hit": bool(e.get("hit")),
+                "hit": bool(e.get("hit")) if e else False,
+                "client_id": cid or None,
             })
         return cards
 
     def _refresh_vehicle_dashboard(self):
+        if not getattr(self.config, "vehicle_channel", False):
+            return
+        timer = getattr(self, "_vehicle_dash_coalesce_timer", None)
+        if timer is None:
+            timer = QTimer(self)
+            timer.setSingleShot(True)
+            timer.timeout.connect(self._flush_vehicle_dashboard)
+            self._vehicle_dash_coalesce_timer = timer
+        if not timer.isActive():
+            timer.start(100)
+
+    def _flush_vehicle_dashboard(self):
         if not getattr(self.config, "vehicle_channel", False):
             return
         page = getattr(self, "vehicle_page", None)
@@ -2354,9 +2495,20 @@ class MainWindow(QMainWindow, UIBase):
         page.set_session(bool(self.is_logged_in()), name)
 
     def _on_vehicle_plate(self, text: str):
+        plate = str(text or "").strip()
         fsm = getattr(self, "_vehicle_fsm", None)
-        if fsm is not None and getattr(fsm, "open", None) is not None:
-            fsm.open.plate = text
+        open_row = getattr(fsm, "open", None) if fsm is not None else None
+        if open_row is None:
+            self.log("手补车牌：当前没有进行中的通行（需入口红外触发后），未写入。", "WARNING")
+            return
+        open_row.plate = plate
+        open_row.plate_manual = bool(plate)
+        self.log(
+            "手补车牌已记在本趟通行：%s（出口完成后写入通行历史 / SQLite）"
+            % (plate or "—"),
+            "INFO",
+        )
+        self._flush_vehicle_dashboard()
 
     def _sync_master_relay_ui_from_l2(self, packet):
         """设置页主控继电器勾选/状态跟 L2 bit4/5/6（有 pending 命令时跳过，避免打架）。"""
@@ -4650,7 +4802,7 @@ class MainWindow(QMainWindow, UIBase):
         """)
         self._apply_page_index(0)
         if getattr(self, "control_room_mode", False):
-            self._apply_control_room_nav_labels()
+            self._apply_primary_nav_label()
         if hasattr(self, "_update_home_health_and_faults"):
             try:
                 self._update_home_health_and_faults()
@@ -5821,13 +5973,7 @@ class MainWindow(QMainWindow, UIBase):
             role_name = self._window_role_name(self.current_user['role'])
             self.setWindowTitle(f"Gamma-ray Spectrometer - {username} ({role_name})")
         else:
-            if getattr(self, "control_room_mode", False):
-                from core.app_version import software_version_short
-                self.setWindowTitle(
-                    "%s · %s" % (_t("control_room_title"), software_version_short())
-                )
-            else:
-                self.setWindowTitle(_t("home_title"))
+            self._refresh_window_title_language()
         if hasattr(self, "refresh_software_version_labels"):
             self.refresh_software_version_labels()
             
@@ -6112,7 +6258,15 @@ class MainWindow(QMainWindow, UIBase):
         ]:
             if hasattr(page, 'retranslate_ui'):
                 page.retranslate_ui()
-        self._apply_control_room_nav_labels()
+        vp = getattr(self, "vehicle_page", None)
+        if vp is not None and hasattr(vp, "retranslate_ui"):
+            vp.retranslate_ui()
+        self._apply_primary_nav_label()
+        if getattr(self.config, "vehicle_channel", False):
+            if vp is not None:
+                vp._history_sig = None
+                vp._probe_sig = None
+            self._flush_vehicle_dashboard()
 
         # Plot axis titles follow language
         if hasattr(self, 'retranslate_plot_labels'):
@@ -6139,6 +6293,8 @@ class MainWindow(QMainWindow, UIBase):
         # 且延迟一拍（与「进日志再返回」同效果），避免同栈里被旧中文盖掉。
         if getattr(self, "control_room_mode", False):
             self._schedule_control_room_language_refresh()
+        elif getattr(self.config, "vehicle_channel", False):
+            self._flush_vehicle_dashboard()
         else:
             home = getattr(self, "home_page", None)
             if home is not None:
@@ -6178,13 +6334,16 @@ class MainWindow(QMainWindow, UIBase):
                 role_name = self._window_role_name(self.current_user.get("role"))
                 self.setWindowTitle(f"Gamma-ray Spectrometer - {username} ({role_name})")
             else:
-                if getattr(self, "control_room_mode", False):
-                    from core.app_version import software_version_short
-                    self.setWindowTitle(
-                        "%s · %s" % (_t("control_room_title"), software_version_short())
-                    )
+                from core.app_version import software_version_short
+                if getattr(self.config, "vehicle_channel", False):
+                    title_key = "vehicle_window_title"
+                elif getattr(self, "control_room_mode", False):
+                    title_key = "control_room_title"
                 else:
-                    self.setWindowTitle(_t("home_title"))
+                    title_key = "home_title"
+                self.setWindowTitle(
+                    "%s · %s" % (_t(title_key), software_version_short())
+                )
         except Exception:
             pass
 
@@ -6235,3 +6394,4 @@ class MainWindow(QMainWindow, UIBase):
                 pass
         self._refresh_status_bar_user_language()
         self._refresh_window_title_language()
+        self._apply_primary_nav_label()

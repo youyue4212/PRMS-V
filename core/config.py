@@ -150,6 +150,37 @@ class ConfigManager:
             self.vehicle_length_m = 6.0
         if self.vehicle_v_limit_kmh <= 0:
             self.vehicle_v_limit_kmh = 8.0
+        self.vehicle_rtsp_url = str(self.settings.value("VEHICLE_RTSP_URL", "", str) or "").strip()
+        self.vehicle_camera_host = str(self.settings.value("VEHICLE_CAMERA_HOST", "", str) or "").strip()
+        self.vehicle_camera_user = str(self.settings.value("VEHICLE_CAMERA_USER", "", str) or "").strip()
+        self.vehicle_camera_password = str(self.settings.value("VEHICLE_CAMERA_PASSWORD", "", str) or "")
+        try:
+            self.vehicle_camera_isapi_channel = int(
+                self.settings.value("VEHICLE_CAMERA_ISAPI_CHANNEL", 101)
+            )
+        except (TypeError, ValueError):
+            self.vehicle_camera_isapi_channel = 101
+        if self.vehicle_camera_isapi_channel <= 0:
+            self.vehicle_camera_isapi_channel = 101
+        self.vehicle_capture_dir = str(
+            self.settings.value("VEHICLE_CAPTURE_DIR", "", str) or ""
+        ).strip()
+        self.vehicle_plate_http_enabled = self._to_bool(
+            self.settings.value("VEHICLE_PLATE_HTTP_ENABLED", True), default=True
+        )
+        self.vehicle_plate_http_host = str(
+            self.settings.value("VEHICLE_PLATE_HTTP_HOST", "0.0.0.0", str) or "0.0.0.0"
+        ).strip()
+        try:
+            self.vehicle_plate_http_port = int(
+                self.settings.value("VEHICLE_PLATE_HTTP_PORT", 8236)
+            )
+        except (TypeError, ValueError):
+            self.vehicle_plate_http_port = 8236
+        self.vehicle_plate_http_port = max(1, min(65535, int(self.vehicle_plate_http_port)))
+        self.vehicle_plate_http_path = str(
+            self.settings.value("VEHICLE_PLATE_HTTP_PATH", "/hik/anpr", str) or "/hik/anpr"
+        ).strip()
 
     @staticmethod
     def _to_bool(value, default=False):
@@ -303,7 +334,15 @@ class ConfigManager:
                        archive_enabled=None, archive_path=None,
                        archive_site_id=None, archive_machine_id=None,
                        vehicle_channel=None, vehicle_length_m=None,
-                       vehicle_v_limit_kmh=None):
+                       vehicle_v_limit_kmh=None, vehicle_rtsp_url=None,
+                       vehicle_camera_host=None, vehicle_camera_user=None,
+                       vehicle_camera_password=None,
+                       vehicle_camera_isapi_channel=None,
+                       vehicle_capture_dir=None,
+                       vehicle_plate_http_enabled=None,
+                       vehicle_plate_http_host=None,
+                       vehicle_plate_http_port=None,
+                       vehicle_plate_http_path=None):
         if language is not None:
             self.language = language
             self.settings.setValue("LANGUAGE", language)
@@ -428,6 +467,44 @@ class ConfigManager:
             if self.vehicle_v_limit_kmh <= 0:
                 self.vehicle_v_limit_kmh = 8.0
             self.settings.setValue("VEHICLE_V_LIMIT_KMH", self.vehicle_v_limit_kmh)
+        if vehicle_rtsp_url is not None:
+            self.vehicle_rtsp_url = str(vehicle_rtsp_url or "").strip()
+            self.settings.setValue("VEHICLE_RTSP_URL", self.vehicle_rtsp_url)
+        if vehicle_camera_host is not None:
+            self.vehicle_camera_host = str(vehicle_camera_host or "").strip()
+            self.settings.setValue("VEHICLE_CAMERA_HOST", self.vehicle_camera_host)
+        if vehicle_camera_user is not None:
+            self.vehicle_camera_user = str(vehicle_camera_user or "").strip()
+            self.settings.setValue("VEHICLE_CAMERA_USER", self.vehicle_camera_user)
+        if vehicle_camera_password is not None:
+            self.vehicle_camera_password = str(vehicle_camera_password or "")
+            self.settings.setValue("VEHICLE_CAMERA_PASSWORD", self.vehicle_camera_password)
+        if vehicle_camera_isapi_channel is not None:
+            try:
+                self.vehicle_camera_isapi_channel = max(1, int(vehicle_camera_isapi_channel))
+            except (TypeError, ValueError):
+                self.vehicle_camera_isapi_channel = 101
+            self.settings.setValue(
+                "VEHICLE_CAMERA_ISAPI_CHANNEL", self.vehicle_camera_isapi_channel
+            )
+        if vehicle_capture_dir is not None:
+            self.vehicle_capture_dir = str(vehicle_capture_dir or "").strip()
+            self.settings.setValue("VEHICLE_CAPTURE_DIR", self.vehicle_capture_dir)
+        if vehicle_plate_http_enabled is not None:
+            self.vehicle_plate_http_enabled = bool(vehicle_plate_http_enabled)
+            self.settings.setValue("VEHICLE_PLATE_HTTP_ENABLED", self.vehicle_plate_http_enabled)
+        if vehicle_plate_http_host is not None:
+            self.vehicle_plate_http_host = str(vehicle_plate_http_host or "0.0.0.0").strip()
+            self.settings.setValue("VEHICLE_PLATE_HTTP_HOST", self.vehicle_plate_http_host)
+        if vehicle_plate_http_port is not None:
+            try:
+                self.vehicle_plate_http_port = max(1, min(65535, int(vehicle_plate_http_port)))
+            except (TypeError, ValueError):
+                self.vehicle_plate_http_port = 8236
+            self.settings.setValue("VEHICLE_PLATE_HTTP_PORT", self.vehicle_plate_http_port)
+        if vehicle_plate_http_path is not None:
+            self.vehicle_plate_http_path = str(vehicle_plate_http_path or "/hik/anpr").strip()
+            self.settings.setValue("VEHICLE_PLATE_HTTP_PATH", self.vehicle_plate_http_path)
 
     def save_settings(self):
         self.settings.sync()
